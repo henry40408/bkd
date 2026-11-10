@@ -87,7 +87,7 @@ label.inline { display: flex; align-items: center; gap: var(--s2); font-weight: 
 }
 /* Hover styles live here so a tap on a touch screen does not leave them stuck on. */
 @media (hover: hover) {
-  .side li a:hover { background: color-mix(in srgb, var(--rule) 50%, transparent); }
+  .side li a:not([aria-current]):hover { background: color-mix(in srgb, var(--rule) 50%, transparent); }
   .title:hover { text-decoration: underline; }
   .tag:hover { border-color: var(--ink-soft); }
 }
