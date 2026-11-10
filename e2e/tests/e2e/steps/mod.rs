@@ -1,6 +1,8 @@
 //! Step definitions, grouped by the part of the app they drive.
 
 mod bookmarks;
+mod keyboard;
+mod layout;
 mod session;
 mod users;
 

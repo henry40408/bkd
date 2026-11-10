@@ -46,13 +46,18 @@ async fn disable_user(world: &mut BkdWorld, username: String) -> Result<()> {
         .await
 }
 
-#[when(expr = "I reset the password of {string} to {string}")]
-async fn reset_password(world: &mut BkdWorld, username: String, password: String) -> Result<()> {
+#[when(expr = "I start resetting the password of {string}")]
+async fn start_resetting_password(world: &mut BkdWorld, username: String) -> Result<()> {
     world
         .click(&format!(
             "button[aria-label='Reset password of {username}']"
         ))
-        .await?;
+        .await
+}
+
+#[when(expr = "I reset the password of {string} to {string}")]
+async fn reset_password(world: &mut BkdWorld, username: String, password: String) -> Result<()> {
+    start_resetting_password(world, username.clone()).await?;
     world
         .fill(
             &format!("input[aria-label='New password for {username}']"),

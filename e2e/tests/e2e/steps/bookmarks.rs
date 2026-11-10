@@ -116,9 +116,14 @@ async fn submit_add_form_twice(world: &mut BkdWorld, url: String, title: String)
     super::press_enter_twice(world, "#add-form input[name=title]").await
 }
 
+#[when(expr = "I start editing {string}")]
+async fn start_editing(world: &mut BkdWorld, title: String) -> Result<()> {
+    click_row_action(world, &title, "Edit").await
+}
+
 #[when(expr = "I edit {string} to the title {string}")]
 async fn edit_bookmark(world: &mut BkdWorld, old_title: String, new_title: String) -> Result<()> {
-    click_row_action(world, &old_title, "Edit").await?;
+    start_editing(world, old_title).await?;
     world
         .fill("#list form input[name=title]", &new_title)
         .await?;
