@@ -1,3 +1,6 @@
+// The web layer that calls into auth comes next, so nothing uses it yet.
+#[allow(dead_code)]
+mod auth;
 mod db;
 
 use std::path::PathBuf;

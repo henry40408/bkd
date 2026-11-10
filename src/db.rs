@@ -34,22 +34,8 @@ async fn connect(options: SqliteConnectOptions) -> Result<SqlitePool> {
 
 #[cfg(test)]
 mod tests {
+    use super::test_support::{insert_user, tempdir, test_pool};
     use super::*;
-
-    async fn test_pool() -> (tempdir::TempDir, SqlitePool) {
-        let dir = tempdir::TempDir::new();
-        let pool = open(&dir.path().join("test.sqlite3")).await.unwrap();
-        (dir, pool)
-    }
-
-    async fn insert_user(pool: &SqlitePool, username: &str) -> Result<i64, sqlx::Error> {
-        sqlx::query_scalar(
-            "INSERT INTO users (username, password_hash, created_at) VALUES (?1, 'x', 0) RETURNING id",
-        )
-        .bind(username)
-        .fetch_one(pool)
-        .await
-    }
 
     #[tokio::test]
     async fn migrations_create_every_table() {
@@ -208,9 +194,30 @@ mod tests {
         .await;
         assert!(result.is_err());
     }
+}
+
+/// Helpers shared by the tests of every module that touches the database.
+#[cfg(test)]
+pub mod test_support {
+    use super::*;
+
+    pub async fn test_pool() -> (tempdir::TempDir, SqlitePool) {
+        let dir = tempdir::TempDir::new();
+        let pool = open(&dir.path().join("test.sqlite3")).await.unwrap();
+        (dir, pool)
+    }
+
+    pub async fn insert_user(pool: &SqlitePool, username: &str) -> Result<i64, sqlx::Error> {
+        sqlx::query_scalar(
+            "INSERT INTO users (username, password_hash, created_at) VALUES (?1, 'x', 0) RETURNING id",
+        )
+        .bind(username)
+        .fetch_one(pool)
+        .await
+    }
 
     /// A throwaway directory removed on drop, so the tests need no extra dependency.
-    mod tempdir {
+    pub mod tempdir {
         use std::path::{Path, PathBuf};
         use std::sync::atomic::{AtomicU32, Ordering};
 

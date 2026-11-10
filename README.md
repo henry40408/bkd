@@ -1,6 +1,6 @@
 # bkd
 
-A single-binary, multi-user bookmark manager. Work in progress: only the database layer exists so far.
+A single-binary, multi-user bookmark manager. Work in progress: the database layer and the authentication building blocks exist; there is no web server yet.
 
 ## Run
 
