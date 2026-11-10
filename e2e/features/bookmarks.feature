@@ -27,6 +27,12 @@ Feature: Bookmarks
     Then the list shows "New title"
     And the list does not show "Old title"
 
+  Scenario: The age of a bookmark shows its exact date on hover
+    Given I have the bookmark "https://dated.test" titled "Dated"
+    When I open the site
+    Then the age of "Dated" says "just now"
+    And hovering the age of "Dated" shows the date as the browser formats it
+
   Scenario: Deleting a bookmark asks first
     Given I have the bookmark "https://gone.test" titled "Gone soon"
     When I open the site

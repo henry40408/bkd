@@ -251,6 +251,56 @@ async fn list_does_not_show(world: &mut BkdWorld, text: String) -> Result<()> {
     super::text_lacks(world, "#list", &text).await
 }
 
+/// The `<time>` element in the row of the bookmark with this title.
+fn age_of(title: &str) -> By {
+    By::XPath(format!(
+        "//ul[@id='list']//li[.//a[@class='title' and text()='{title}']]//time"
+    ))
+}
+
+#[then(expr = "the age of {string} says {string}")]
+async fn age_says(world: &mut BkdWorld, title: String, expected: String) -> Result<()> {
+    let age = world.element_by(age_of(&title)).await?;
+    let actual = age.text().await?;
+    ensure!(actual == expected, "the age says {actual:?}");
+    Ok(())
+}
+
+/// The hover text must match what the browser itself makes of the machine-readable
+/// time, so its language, date order and time zone are respected.
+const BROWSER_FORMAT: &str = "const format = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }); return format.format(new Date(arguments[0].dateTime));";
+
+#[then(expr = "hovering the age of {string} shows the date as the browser formats it")]
+async fn age_hover_is_browser_formatted(world: &mut BkdWorld, title: String) -> Result<()> {
+    let age = world.element_by(age_of(&title)).await?;
+    let hover_text = age.attr("title").await?.unwrap_or_default();
+    ensure!(!hover_text.is_empty(), "the age has no hover text");
+    let expected = world
+        .driver()?
+        .execute(BROWSER_FORMAT, vec![age.to_json()?])
+        .await?;
+    let expected = expected.json().as_str().unwrap_or_default().to_owned();
+    // A bookmark made a moment ago: a wrong conversion (a missing `* 1000`, say) would
+    // still agree with itself above, so the instant is checked against the clock too.
+    let seconds_off = world
+        .driver()?
+        .execute(
+            "return Math.abs(Date.now() - Date.parse(arguments[0].dateTime)) / 1000;",
+            vec![age.to_json()?],
+        )
+        .await?;
+    let seconds_off = seconds_off.json().as_f64().unwrap_or(f64::MAX);
+    ensure!(
+        seconds_off < 120.0,
+        "datetime is {seconds_off} seconds from now"
+    );
+    ensure!(
+        hover_text == expected,
+        "hover text {hover_text:?}, the browser formats {expected:?}"
+    );
+    Ok(())
+}
+
 #[then(expr = "the link {string} points to {string}")]
 async fn link_points_to(world: &mut BkdWorld, title: String, href: String) -> Result<()> {
     let link = By::XPath(format!(

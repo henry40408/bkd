@@ -82,6 +82,15 @@ function timeAgo(unixSeconds) {
   return plural(Math.floor(days / 30), 'month');
 }
 
+// Language, date order and time zone are the browser's: `undefined` means "use the settings".
+const exactTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+// The age as text, with the exact moment in the hover text.
+function savedTime(unixSeconds) {
+  const moment = new Date(unixSeconds * 1000);
+  return el('time', { datetime: moment.toISOString(), title: exactTime.format(moment) }, timeAgo(unixSeconds));
+}
+
 function parseTags(text) {
   return [...new Set(text.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean))];
 }
@@ -265,7 +274,7 @@ function itemView(b) {
       b.note ? el('p', { class: 'note' }, highlight(b.note, terms)) : null,
       b.tags.length ? el('div', { class: 'tags' }, b.tags.map((t) => el('button', { class: 'tag', onclick: () => setFilter(t) }, highlight(t, terms)))) : null,
     ),
-    el('div', { class: 'when' }, state.confirming === b.id ? null : timeAgo(b.created_at), actionsFor(b)),
+    el('div', { class: 'when' }, state.confirming === b.id ? null : savedTime(b.created_at), actionsFor(b)),
   );
 }
 

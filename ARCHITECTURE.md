@@ -40,6 +40,7 @@ Only SQLite is supported. SQL stays plain so a PostgreSQL port would mostly chan
 - Search and tag filters run on the server (`q`, `tag`); the page highlights the matched terms. The list loads 50 at a time with a "Show more" button. A search answer that arrives after a newer one is dropped.
 - The user screen hides the actions the server would refuse (changing yourself, changing the last active admin). The server enforces the same rules, so a stale screen only gets a 409 and reloads.
 - A 401 from any call returns the user to the login screen.
+- A bookmark's age ("3 days ago") is a `<time>` element: `datetime` holds the ISO time and the hover text holds the exact date, formatted by `Intl.DateTimeFormat` with the browser's own language and time zone.
 
 ## Web API (`src/web/`)
 
