@@ -59,6 +59,13 @@ pub async fn revoke(pool: &SqlitePool, token: &str) -> Result<()> {
 
 /// Logs a user out everywhere. Use it when the account is disabled, deleted or its
 /// password is reset.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "user management, which is not built yet, calls it"
+    )
+)]
 pub async fn revoke_all_for_user(pool: &SqlitePool, user_id: i64) -> Result<()> {
     sqlx::query("DELETE FROM sessions WHERE user_id = ?1")
         .bind(user_id)

@@ -1,0 +1,92 @@
+//! One error type for every handler, so each failure maps to one status code and a
+//! JSON body of the form `{"error": "..."}`.
+
+use std::time::Duration;
+
+use axum::Json;
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use serde::Serialize;
+
+use crate::auth::password::PasswordError;
+use crate::auth::username::UsernameError;
+use crate::bookmarks::ValidationError;
+
+#[derive(Debug)]
+pub enum ApiError {
+    BadRequest(String),
+    /// Wrong username or password. One message for every cause, so a caller cannot
+    /// tell a missing user from a wrong password or a disabled account.
+    InvalidCredentials,
+    /// No valid session.
+    Unauthorized,
+    Forbidden(&'static str),
+    NotFound,
+    Conflict(&'static str),
+    TooManyRequests(Duration),
+    Internal(anyhow::Error),
+}
+
+#[derive(Serialize)]
+struct ErrorBody<'a> {
+    error: &'a str,
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let (status, message) = match &self {
+            Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message.as_str()),
+            Self::InvalidCredentials => (StatusCode::UNAUTHORIZED, "invalid username or password"),
+            Self::Unauthorized => (StatusCode::UNAUTHORIZED, "not signed in"),
+            Self::Forbidden(message) => (StatusCode::FORBIDDEN, *message),
+            Self::NotFound => (StatusCode::NOT_FOUND, "not found"),
+            Self::Conflict(message) => (StatusCode::CONFLICT, *message),
+            Self::TooManyRequests(_) => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "too many attempts, try again later",
+            ),
+            Self::Internal(error) => {
+                tracing::error!("internal error: {error:#}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            }
+        };
+        let mut response = (status, Json(ErrorBody { error: message })).into_response();
+        if let Self::TooManyRequests(wait) = self {
+            let seconds = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from(seconds));
+        }
+        response
+    }
+}
+
+impl From<anyhow::Error> for ApiError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Internal(error)
+    }
+}
+
+impl From<sqlx::Error> for ApiError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Internal(error.into())
+    }
+}
+
+impl From<ValidationError> for ApiError {
+    fn from(error: ValidationError) -> Self {
+        Self::BadRequest(error.to_string())
+    }
+}
+
+impl From<UsernameError> for ApiError {
+    fn from(error: UsernameError) -> Self {
+        Self::BadRequest(error.to_string())
+    }
+}
+
+impl From<PasswordError> for ApiError {
+    fn from(error: PasswordError) -> Self {
+        Self::BadRequest(error.to_string())
+    }
+}

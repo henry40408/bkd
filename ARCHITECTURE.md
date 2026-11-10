@@ -2,7 +2,7 @@
 
 ## Stack
 
-Rust, sqlx (SQLite) and clap today; axum and rust-embed are planned for the web layer. The front end is plain HTML and JavaScript embedded in the binary: no htmx, no Node build.
+Rust, axum, sqlx (SQLite) and clap; rust-embed will embed the front end. The front end is plain HTML and JavaScript embedded in the binary: no htmx, no Node build.
 
 ## Database
 
@@ -25,12 +25,37 @@ Only SQLite is supported. SQL stays plain so a PostgreSQL port would mostly chan
 
 ## Authentication (`src/auth/`)
 
-Nothing in the web layer calls these modules yet.
-
 - `password`: Argon2id with the crate defaults. New passwords need 8 to 256 bytes; login accepts any password up to 256 bytes, so an older, weaker password still works. Hashing runs on the blocking thread pool. For an unknown or disabled user, login must call `verify_against_dummy_async` so response time does not reveal which usernames exist. `warm_up` builds the dummy hash at startup.
 - `session`: the cookie holds 256 random bits; the database holds only their SHA-256. Sessions last 30 days. Every lookup joins `users`, so a disabled account loses access at once and `is_admin` is never cached. Disabling, deleting or resetting the password of a user must call `revoke_all_for_user`.
 - `setup_token`: 50 random bits shown as `XXXXX-XXXXX` (Crockford base32). It lives only in memory and is compared as HMACs in constant time. Case, dashes and spaces are ignored, and `O`, `I`, `L` read as `0`, `1`, `1`.
 - `first_admin`: one `INSERT ... WHERE NOT EXISTS` inside `BEGIN IMMEDIATE`, so concurrent submissions create exactly one admin.
 - `rate_limit`: per-IP, in memory. A caller charges an attempt before checking the secret and refunds it only on success, so parallel requests cannot all pass the check and a success cannot erase earlier failures. Clients are grouped by IPv4 address or IPv6 /64; IPv4-mapped IPv6 addresses count as IPv4. When 10,000 addresses are tracked, new ones are refused until some windows end.
 - `username`: the same rules as the `CHECK` in the schema, with ASCII lowercasing first.
+
+## Web API (`src/web/`)
+
+JSON under `/api`. Handlers are thin: they call `auth`, `bookmarks` and `users`.
+
+| Route | Auth | Purpose |
+| --- | --- | --- |
+| `GET /api/state` | none | `{setup_required, user}`; the front end reads it to pick the first screen |
+| `POST /api/setup` | setup token | create the first admin and sign in |
+| `POST /api/login`, `POST /api/logout` | none | start and end a session |
+| `GET /api/bookmarks?q=&tag=&limit=&offset=` | session | newest first; `limit` defaults to 50, at most 200 |
+| `POST /api/bookmarks`, `PUT`/`DELETE /api/bookmarks/{id}` | session | create, replace, delete |
+| `GET /api/tags` | session | the user's tags with counts |
+
+- **Ownership.** Every bookmark query carries the session's `user_id`. A bookmark that belongs to someone else answers 404, the same as a missing one.
+- **Validation** (`bookmarks.rs`). URLs must be `http://` or `https://` because the front end renders them as links, and a `javascript:` URL would run script. Tags are trimmed, lowercased and deduplicated. Only a `ValidBookmark` can be stored.
+- **Search** (`search.rs`). `LIKE` with `ESCAPE`, so `%`, `_` and `\` in the query are literal. Every term must match one of title, URL, note or a tag. `LIKE` ignores case for ASCII only. Dynamic SQL contains only placeholders; user text is always bound.
+- **CSRF.** Three layers: `SameSite=Strict` on the cookie, JSON-only bodies (a form post gets 415), and a check that a state-changing request's `Origin`, if present, equals `Host`. Requests without `Origin` (command-line clients) pass.
+- **Rate limits.** Login: 10 attempts per minute per IP. Setup: 5. Successful attempts are refunded; failures are not.
+- **Client address.** The peer address of the TCP connection. `X-Forwarded-For` is ignored, so behind a reverse proxy every client shares the proxy's address and one budget. Do not put bkd behind a proxy until trusted-proxy support exists.
+- **Host header.** Writes (POST, PUT, DELETE) are refused with 403 when the `Origin` header does not equal `Host`. A proxy that rewrites `Host` breaks every write, so it must pass `Host` through unchanged.
+- **Session cookie.** `bkd_session`, or `__Host-bkd_session` when `--secure-cookies` is on, so a sibling subdomain cannot plant a cookie.
+- **Shutdown.** SIGTERM and Ctrl-C both stop the server. In-flight requests get 10 seconds to finish.
+- **Password work.** Argon2 runs at most as many times at once as there are CPU cores, so a burst of logins cannot exhaust memory.
+- **Malformed input.** A body or query that axum cannot parse gets axum's plain-text 4xx response, not the JSON error format.
+- **Responses** carry `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. Bodies over 64 KiB are refused.
+- **Setup token flow.** At startup, if no user exists, a token is generated and logged at WARN. It lives in memory and is cleared when the first admin is created, or when a request finds that someone else won the race.
 

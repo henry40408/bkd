@@ -2,11 +2,13 @@
 //! async functions run it on the blocking thread pool instead of a runtime worker.
 
 use std::fmt;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+use std::thread::available_parallelism;
 
 use anyhow::{Result, anyhow};
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
+use tokio::sync::Semaphore;
 
 const MIN_LENGTH: usize = 8;
 // Argon2 cost grows with input size, so an unbounded password is a cheap way to burn CPU.
@@ -77,16 +79,36 @@ pub fn verify_against_dummy(password: &str) {
     let _ = verify(password, dummy_hash());
 }
 
+/// Each Argon2 run allocates about 19 MiB. Without a cap, a burst of login requests
+/// from many addresses could use gigabytes at once, so only as many runs as there are
+/// CPU cores go at the same time and the rest wait their turn.
+async fn run_limited<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Result<T> {
+    static PERMITS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    let permits = PERMITS.get_or_init(|| {
+        Arc::new(Semaphore::new(
+            available_parallelism().map_or(2, usize::from),
+        ))
+    });
+    let permit = permits.clone().acquire_owned().await?;
+    // The permit moves into the blocking task: if the request is cancelled, the
+    // Argon2 run still goes on, so the permit must stay held until it ends.
+    Ok(tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    })
+    .await?)
+}
+
 pub async fn hash_async(password: String) -> Result<String> {
-    tokio::task::spawn_blocking(move || hash(&password)).await?
+    run_limited(move || hash(&password)).await?
 }
 
 pub async fn verify_against_dummy_async(password: String) -> Result<()> {
-    Ok(tokio::task::spawn_blocking(move || verify_against_dummy(&password)).await?)
+    run_limited(move || verify_against_dummy(&password)).await
 }
 
 pub async fn verify_async(password: String, stored_hash: String) -> Result<bool> {
-    Ok(tokio::task::spawn_blocking(move || verify(&password, &stored_hash)).await?)
+    run_limited(move || verify(&password, &stored_hash)).await
 }
 
 #[cfg(test)]

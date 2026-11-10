@@ -1,16 +1,20 @@
 # bkd
 
-A single-binary, multi-user bookmark manager. Work in progress: the database layer and the authentication building blocks exist; there is no web server yet.
+A single-binary, multi-user bookmark manager. Work in progress: the JSON API works; the web front end does not exist yet.
 
 ## Run
 
 ```sh
-cargo run -- --db bkd.sqlite3
+cargo run -- --db bkd.sqlite3 --addr 127.0.0.1:8080
 ```
+
+On the first start, with an empty database, bkd logs a one-time setup token like `WDP4S-V8PGD`. Send it with the first admin's username and password to `POST /api/setup`. The browser form comes with the front end.
 
 | Flag | Environment | Default | Meaning |
 | --- | --- | --- | --- |
 | `--db` | `BKD_DB` | `bkd.sqlite3` | Path of the SQLite database file. Created if missing. |
+| `--addr` | `BKD_ADDR` | `127.0.0.1:8080` | Address to listen on. |
+| `--secure-cookies` | `BKD_SECURE_COOKIES` | off | Mark the session cookie `Secure`. Turn on when serving over HTTPS. |
 
 SQLite runs in WAL mode, so `bkd.sqlite3-wal` and `bkd.sqlite3-shm` appear next to the database while it is open. Back up with SQLite's backup API (`sqlite3 bkd.sqlite3 ".backup copy.sqlite3"`), or copy all three files together while bkd is stopped.
 
