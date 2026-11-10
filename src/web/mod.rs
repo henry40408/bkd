@@ -7,6 +7,7 @@ mod error;
 mod guard;
 #[cfg(test)]
 mod tests;
+mod user_routes;
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -14,7 +15,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use axum::{Router, middleware};
 use sqlx::SqlitePool;
 use tokio::net::TcpListener;
@@ -90,6 +91,11 @@ pub fn router(state: SharedState) -> Router {
             put(bookmark_routes::update).delete(bookmark_routes::delete),
         )
         .route("/tags", get(bookmark_routes::tags))
+        .route("/users", get(user_routes::list).post(user_routes::create))
+        .route("/users/{id}", delete(user_routes::delete))
+        .route("/users/{id}/role", put(user_routes::set_role))
+        .route("/users/{id}/disabled", put(user_routes::set_disabled))
+        .route("/users/{id}/password", put(user_routes::reset_password))
         .layer(middleware::from_fn(guard::same_origin_only))
         .layer(middleware::from_fn(guard::api_headers))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES));

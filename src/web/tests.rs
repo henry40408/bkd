@@ -699,3 +699,238 @@ async fn oversized_bodies_are_refused() {
         .await;
     assert_eq!(reply.status, StatusCode::PAYLOAD_TOO_LARGE);
 }
+
+// ------------------------------------------------------- user management
+
+impl TestApp {
+    async fn sign_in_as_admin(&self, username: &str) -> (i64, String) {
+        let id = self.add_user(username, true).await;
+        let reply = self.login(username, PASSWORD).await;
+        assert_eq!(reply.status, StatusCode::OK);
+        (id, session_token(&reply))
+    }
+}
+
+fn user_id(reply: &Reply, username: &str) -> i64 {
+    reply.body["users"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|user| user["username"] == username)
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn user_routes_refuse_anonymous_callers_and_plain_users() {
+    let app = TestApp::running().await;
+    let plain = app.sign_in_as("mei").await;
+    let new_user = json!({"username": "bob", "password": PASSWORD});
+
+    assert_eq!(
+        app.send(Send::get("/api/users")).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    let listed = app.send(Send::get("/api/users").cookie(&plain)).await;
+    assert_eq!(listed.status, StatusCode::FORBIDDEN);
+    let created = Send::post("/api/users", new_user).cookie(&plain);
+    assert_eq!(app.send(created).await.status, StatusCode::FORBIDDEN);
+    let role = Send::put("/api/users/1/role", json!({"is_admin": true})).cookie(&plain);
+    assert_eq!(app.send(role).await.status, StatusCode::FORBIDDEN);
+    let delete = Send::delete("/api/users/1").cookie(&plain);
+    assert_eq!(app.send(delete).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(listed.headers[header::CACHE_CONTROL], "no-store");
+}
+
+#[tokio::test]
+async fn an_admin_creates_a_user_who_can_sign_in() {
+    let app = TestApp::running().await;
+    let (_, admin) = app.sign_in_as_admin("henry").await;
+    let body = json!({"username": "Mei", "password": PASSWORD});
+    let created = app
+        .send(Send::post("/api/users", body).cookie(&admin))
+        .await;
+    assert_eq!(created.status, StatusCode::CREATED);
+    assert_eq!(created.body["username"], "mei");
+    assert_eq!(created.body["is_admin"], false);
+    assert!(created.body.get("password_hash").is_none());
+
+    assert_eq!(app.login("mei", PASSWORD).await.status, StatusCode::OK);
+    let listed = app.send(Send::get("/api/users").cookie(&admin)).await;
+    assert_eq!(listed.body["users"].as_array().unwrap().len(), 2);
+    assert!(!listed.body.to_string().contains("argon2"));
+}
+
+#[tokio::test]
+async fn creating_a_user_validates_and_rejects_duplicates() {
+    let app = TestApp::running().await;
+    let (_, admin) = app.sign_in_as_admin("henry").await;
+    let post = |body: Value| Send::post("/api/users", body).cookie(&admin);
+
+    let bad_name = json!({"username": "x", "password": PASSWORD});
+    assert_eq!(
+        app.send(post(bad_name)).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    let short = json!({"username": "mei", "password": "short"});
+    assert_eq!(app.send(post(short)).await.status, StatusCode::BAD_REQUEST);
+    let duplicate = json!({"username": "HENRY", "password": PASSWORD});
+    assert_eq!(app.send(post(duplicate)).await.status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn a_demoted_admin_loses_access_on_the_next_request() {
+    let app = TestApp::running().await;
+    let (_, first) = app.sign_in_as_admin("henry").await;
+    let (second_id, second) = app.sign_in_as_admin("mei").await;
+
+    let uri = format!("/api/users/{second_id}/role");
+    let demote = Send::put(&uri, json!({"is_admin": false})).cookie(&first);
+    assert_eq!(app.send(demote).await.status, StatusCode::NO_CONTENT);
+
+    let still_admin = app.send(Send::get("/api/users").cookie(&second)).await;
+    assert_eq!(still_admin.status, StatusCode::FORBIDDEN);
+    let state = app.send(Send::get("/api/state").cookie(&second)).await;
+    assert_eq!(state.body["user"]["is_admin"], false);
+}
+
+#[tokio::test]
+async fn the_last_admin_cannot_lock_everyone_out() {
+    let app = TestApp::running().await;
+    let (admin_id, admin) = app.sign_in_as_admin("henry").await;
+    let base = format!("/api/users/{admin_id}");
+
+    let demote = Send::put(&format!("{base}/role"), json!({"is_admin": false})).cookie(&admin);
+    assert_eq!(app.send(demote).await.status, StatusCode::CONFLICT);
+    let disable =
+        Send::put(&format!("{base}/disabled"), json!({"is_disabled": true})).cookie(&admin);
+    assert_eq!(app.send(disable).await.status, StatusCode::CONFLICT);
+    let delete = Send::delete(&base).cookie(&admin);
+    assert_eq!(app.send(delete).await.status, StatusCode::CONFLICT);
+
+    // Still an admin, still signed in.
+    let listed = app.send(Send::get("/api/users").cookie(&admin)).await;
+    assert_eq!(listed.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn an_admin_may_remove_themselves_when_another_admin_remains() {
+    let app = TestApp::running().await;
+    let (first_id, first) = app.sign_in_as_admin("henry").await;
+    let (_, second) = app.sign_in_as_admin("mei").await;
+
+    let delete = Send::delete(&format!("/api/users/{first_id}")).cookie(&first);
+    assert_eq!(app.send(delete).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        app.send(Send::get("/api/state").cookie(&first)).await.body["user"],
+        Value::Null
+    );
+    // The remaining admin is now the last one.
+    let listed = app.send(Send::get("/api/users").cookie(&second)).await;
+    let second_id = user_id(&listed, "mei");
+    let delete = Send::delete(&format!("/api/users/{second_id}")).cookie(&second);
+    assert_eq!(app.send(delete).await.status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn disabling_a_user_ends_their_sessions_and_blocks_login() {
+    let app = TestApp::running().await;
+    let (_, admin) = app.sign_in_as_admin("henry").await;
+    let user = app.sign_in_as("mei").await;
+    let listed = app.send(Send::get("/api/users").cookie(&admin)).await;
+    let id = user_id(&listed, "mei");
+
+    let uri = format!("/api/users/{id}/disabled");
+    let disable = Send::put(&uri, json!({"is_disabled": true})).cookie(&admin);
+    assert_eq!(app.send(disable).await.status, StatusCode::NO_CONTENT);
+    let bookmarks = app.send(Send::get("/api/bookmarks").cookie(&user)).await;
+    assert_eq!(bookmarks.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        app.login("mei", PASSWORD).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+
+    let enable = Send::put(&uri, json!({"is_disabled": false})).cookie(&admin);
+    assert_eq!(app.send(enable).await.status, StatusCode::NO_CONTENT);
+    // The old session stays dead; a fresh login works.
+    let old = app.send(Send::get("/api/bookmarks").cookie(&user)).await;
+    assert_eq!(old.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(app.login("mei", PASSWORD).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn resetting_a_password_ends_sessions_and_changes_the_login() {
+    let app = TestApp::running().await;
+    let (_, admin) = app.sign_in_as_admin("henry").await;
+    let user = app.sign_in_as("mei").await;
+    let listed = app.send(Send::get("/api/users").cookie(&admin)).await;
+    let id = user_id(&listed, "mei");
+
+    let uri = format!("/api/users/{id}/password");
+    let weak = Send::put(&uri, json!({"password": "short"})).cookie(&admin);
+    assert_eq!(app.send(weak).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        app.send(Send::get("/api/bookmarks").cookie(&user))
+            .await
+            .status,
+        StatusCode::OK
+    );
+
+    let reset = Send::put(&uri, json!({"password": "a brand new password"})).cookie(&admin);
+    assert_eq!(app.send(reset).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        app.send(Send::get("/api/bookmarks").cookie(&user))
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        app.login("mei", PASSWORD).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        app.login("mei", "a brand new password").await.status,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn deleting_a_user_removes_their_data_and_unknown_ids_are_404() {
+    let app = TestApp::running().await;
+    let (_, admin) = app.sign_in_as_admin("henry").await;
+    let user = app.sign_in_as("mei").await;
+    create_bookmark(&app, &user, "private", &[]).await;
+    let listed = app.send(Send::get("/api/users").cookie(&admin)).await;
+    let id = user_id(&listed, "mei");
+
+    let uri = format!("/api/users/{id}");
+    let delete = Send::delete(&uri).cookie(&admin);
+    assert_eq!(app.send(delete).await.status, StatusCode::NO_CONTENT);
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM bookmarks")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    assert_eq!(
+        app.send(Send::get("/api/bookmarks").cookie(&user))
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+    let again = Send::delete(&uri).cookie(&admin);
+    assert_eq!(app.send(again).await.status, StatusCode::NOT_FOUND);
+    let role = Send::put("/api/users/9999/role", json!({"is_admin": true})).cookie(&admin);
+    assert_eq!(app.send(role).await.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_cross_site_user_change_is_refused() {
+    let app = TestApp::running().await;
+    let (_, admin) = app.sign_in_as_admin("henry").await;
+    let body = json!({"username": "mei", "password": PASSWORD});
+    let forged = Send::post("/api/users", body)
+        .cookie(&admin)
+        .origin("https://evil.test");
+    assert_eq!(app.send(forged).await.status, StatusCode::FORBIDDEN);
+}

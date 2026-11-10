@@ -44,6 +44,19 @@ JSON under `/api`. Handlers are thin: they call `auth`, `bookmarks` and `users`.
 | `GET /api/bookmarks?q=&tag=&limit=&offset=` | session | newest first; `limit` defaults to 50, at most 200 |
 | `POST /api/bookmarks`, `PUT`/`DELETE /api/bookmarks/{id}` | session | create, replace, delete |
 | `GET /api/tags` | session | the user's tags with counts |
+| `GET /api/users`, `POST /api/users` | admin | list accounts; create one (`username`, `password`, optional `is_admin`) |
+| `PUT /api/users/{id}/role` | admin | `{is_admin}` promote or demote |
+| `PUT /api/users/{id}/disabled` | admin | `{is_disabled}` disable or enable |
+| `PUT /api/users/{id}/password` | admin | `{password}` reset; ends all sessions of that user |
+| `DELETE /api/users/{id}` | admin | delete the account with its bookmarks and sessions |
+
+### User management
+
+- There is no public registration and no command-line recovery, so the system must never lose its last active admin. Demoting, disabling or deleting an admin runs in a `BEGIN IMMEDIATE` transaction that first checks another active admin remains; otherwise the API answers 409. Two admins removing each other at the same moment are serialized, so exactly one succeeds. A disabled admin does not count.
+- An admin may demote, disable or delete themselves while another active admin remains.
+- Disabling and password reset delete every session of the user in the same transaction. Enabling again does not bring old sessions back.
+- Hashing a password takes tens of milliseconds, and an admin may be demoted in that gap. Each `users::*` change therefore re-checks inside its transaction that the caller is still an active admin. Login does the same: `session::create_if_unchanged` inserts the session only if the account is still active and still has the verified hash, so a reset or disable that lands during verification cannot be followed by a session.
+- `AdminUser` reads the role from the database on every request, so a demoted admin is refused at once (403; 401 when not signed in).
 
 - **Ownership.** Every bookmark query carries the session's `user_id`. A bookmark that belongs to someone else answers 404, the same as a missing one.
 - **Validation** (`bookmarks.rs`). URLs must be `http://` or `https://` because the front end renders them as links, and a `javascript:` URL would run script. Tags are trimmed, lowercased and deduplicated. Only a `ValidBookmark` can be stored.

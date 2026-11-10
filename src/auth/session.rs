@@ -30,6 +30,32 @@ pub async fn create(pool: &SqlitePool, user_id: i64, now: i64) -> Result<String>
     Ok(token)
 }
 
+/// Starts a session only if the account is still active and still has the password
+/// hash the caller just verified. Login spends tens of milliseconds in Argon2; a
+/// password reset or a disable that lands in that gap must not be followed by a
+/// session. Returns `None` when the account changed.
+pub async fn create_if_unchanged(
+    pool: &SqlitePool,
+    user_id: i64,
+    verified_hash: &str,
+    now: i64,
+) -> Result<Option<String>> {
+    let token = to_hex(&random_bytes::<32>());
+    let result = sqlx::query(
+        "INSERT INTO sessions (token_hash, user_id, created_at, expires_at)
+         SELECT ?1, id, ?3, ?4 FROM users
+         WHERE id = ?2 AND password_hash = ?5 AND disabled_at IS NULL",
+    )
+    .bind(sha256_hex(&token))
+    .bind(user_id)
+    .bind(now)
+    .bind(now + SESSION_LIFETIME_SECONDS)
+    .bind(verified_hash)
+    .execute(pool)
+    .await?;
+    Ok((result.rows_affected() == 1).then_some(token))
+}
+
 /// Returns the user for a live session, or `None` when the token is unknown,
 /// expired, or belongs to a disabled account.
 pub async fn lookup(pool: &SqlitePool, token: &str, now: i64) -> Result<Option<SessionUser>> {
@@ -59,17 +85,13 @@ pub async fn revoke(pool: &SqlitePool, token: &str) -> Result<()> {
 
 /// Logs a user out everywhere. Use it when the account is disabled, deleted or its
 /// password is reset.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "user management, which is not built yet, calls it"
-    )
-)]
-pub async fn revoke_all_for_user(pool: &SqlitePool, user_id: i64) -> Result<()> {
+pub async fn revoke_all_for_user<'e, E>(executor: E, user_id: i64) -> Result<()>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     sqlx::query("DELETE FROM sessions WHERE user_id = ?1")
         .bind(user_id)
-        .execute(pool)
+        .execute(executor)
         .await?;
     Ok(())
 }
@@ -104,6 +126,44 @@ mod tests {
                 is_admin: false
             }
         );
+    }
+
+    #[tokio::test]
+    async fn a_login_is_refused_when_the_account_changed_meanwhile() {
+        let (_dir, pool) = test_pool().await;
+        let user_id = insert_user(&pool, "henry").await.unwrap();
+        let hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let token = create_if_unchanged(&pool, user_id, &hash, NOW)
+            .await
+            .unwrap();
+        assert!(lookup(&pool, &token.unwrap(), NOW).await.unwrap().is_some());
+
+        // The password was reset after the old one was verified.
+        let stale = create_if_unchanged(&pool, user_id, "old-hash", NOW)
+            .await
+            .unwrap();
+        assert!(stale.is_none());
+
+        // The account was disabled in the same gap.
+        sqlx::query("UPDATE users SET disabled_at = 1 WHERE id = ?1")
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let disabled = create_if_unchanged(&pool, user_id, &hash, NOW)
+            .await
+            .unwrap();
+        assert!(disabled.is_none());
+        let sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(sessions, 1);
     }
 
     #[tokio::test]

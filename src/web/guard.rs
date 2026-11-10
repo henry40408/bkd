@@ -27,6 +27,21 @@ impl FromRequestParts<SharedState> for CurrentUser {
     }
 }
 
+/// A signed-in admin. Anyone else is refused: 401 when anonymous, 403 when not an admin.
+pub struct AdminUser(pub SessionUser);
+
+impl FromRequestParts<SharedState> for AdminUser {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &SharedState) -> Result<Self, ApiError> {
+        let CurrentUser(user) = CurrentUser::from_request_parts(parts, state).await?;
+        if !user.is_admin {
+            return Err(ApiError::Forbidden("admin access required"));
+        }
+        Ok(Self(user))
+    }
+}
+
 /// `None` when the request carries no cookie or the session is not valid.
 pub async fn user_from_headers(
     state: &SharedState,

@@ -114,17 +114,31 @@ pub async fn login(
         .try_acquire(ip, Instant::now())
         .map_err(ApiError::TooManyRequests)?;
 
-    let Some(user_id) = authenticate(&state, request).await? else {
+    let Some(verified) = authenticate(&state, request).await? else {
         tracing::warn!(%ip, "login failed");
         return Err(ApiError::InvalidCredentials);
     };
+    let token = session::create_if_unchanged(
+        &state.pool,
+        verified.id,
+        &verified.password_hash,
+        unix_now(),
+    )
+    .await?;
+    let Some(token) = token else {
+        tracing::warn!(%ip, "login refused: the account changed while the password was checked");
+        return Err(ApiError::InvalidCredentials);
+    };
     state.login_limiter.refund(ip);
-    start_session(&state, user_id, StatusCode::OK).await
+    Ok(session_response(&state, &token, StatusCode::OK))
 }
 
-/// Returns the user id when the credentials are right and the account is active.
+/// Returns the account when the credentials are right and the account is active.
 /// Every failure costs about the same time, so timing does not reveal which usernames exist.
-async fn authenticate(state: &SharedState, request: LoginRequest) -> Result<Option<i64>, ApiError> {
+async fn authenticate(
+    state: &SharedState,
+    request: LoginRequest,
+) -> Result<Option<users::LoginRecord>, ApiError> {
     let record = match username::normalize(&request.username) {
         Ok(name) => users::find_for_login(&state.pool, &name).await?,
         Err(_) => None,
@@ -133,8 +147,8 @@ async fn authenticate(state: &SharedState, request: LoginRequest) -> Result<Opti
         password::verify_against_dummy_async(request.password).await?;
         return Ok(None);
     };
-    let correct = password::verify_async(request.password, record.password_hash).await?;
-    Ok(correct.then_some(record.id))
+    let correct = password::verify_async(request.password, record.password_hash.clone()).await?;
+    Ok(correct.then_some(record))
 }
 
 async fn start_session(
@@ -143,8 +157,12 @@ async fn start_session(
     status: StatusCode,
 ) -> Result<Response, ApiError> {
     let token = session::create(&state.pool, user_id, unix_now()).await?;
-    let cookie = cookie::set(&token, state.secure_cookies);
-    Ok((status, [(header::SET_COOKIE, cookie)]).into_response())
+    Ok(session_response(state, &token, status))
+}
+
+fn session_response(state: &SharedState, token: &str, status: StatusCode) -> Response {
+    let cookie = cookie::set(token, state.secure_cookies);
+    (status, [(header::SET_COOKIE, cookie)]).into_response()
 }
 
 pub async fn logout(

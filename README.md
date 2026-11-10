@@ -8,7 +8,7 @@ A single-binary, multi-user bookmark manager. Work in progress: the JSON API wor
 cargo run -- --db bkd.sqlite3 --addr 127.0.0.1:8080
 ```
 
-On the first start, with an empty database, bkd logs a one-time setup token like `WDP4S-V8PGD`. Send it with the first admin's username and password to `POST /api/setup`. The browser form comes with the front end.
+On the first start, with an empty database, bkd logs a one-time setup token like `WDP4S-V8PGD`. Send it with the first admin's username and password to `POST /api/setup`. The browser form comes with the front end. Afterwards, admins manage accounts through `/api/users` (create, promote, demote, disable, reset password, delete); bkd never lets the last active admin be removed.
 
 | Flag | Environment | Default | Meaning |
 | --- | --- | --- | --- |
