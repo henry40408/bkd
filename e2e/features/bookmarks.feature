@@ -66,6 +66,29 @@ Feature: Bookmarks
     When I choose Show more
     Then the list has 51 bookmarks
 
+  Scenario: Show more goes back to one page after a reload
+    Given I have 51 bookmarks
+    When I open the site
+    And I choose Show more
+    Then the list has 51 bookmarks
+    When I open the site
+    Then the list has 50 bookmarks
+    And there is a Show more button
+
+  Scenario: A slow answer to an older search never replaces a newer one
+    Given I have the bookmark "https://a.test" titled "Alpha"
+    And I have the bookmark "https://b.test" titled "Alamo"
+    When I open the site
+    And the server answers the search for "al" slowly
+    And I search for "al"
+    Then the search for "al" has been sent
+    When I search for "alp"
+    Then the list does not show "Alamo"
+    And no slow answer has arrived yet
+    When the slow answer to the search for "al" has arrived
+    Then the list does not show "Alamo"
+    And the list shows "Alpha"
+
   Scenario: Text from a bookmark is shown as text, never run
     Given I have the bookmark "https://x.test" titled "<img src=x onerror=document.title='pwned'>"
     When I open the site

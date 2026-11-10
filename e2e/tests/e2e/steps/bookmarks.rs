@@ -6,6 +6,7 @@ use anyhow::{Result, ensure};
 use bkd_e2e::api::NewBookmark;
 use bkd_e2e::world::BkdWorld;
 use cucumber::{given, then, when};
+use serde_json::json;
 use thirtyfour::prelude::*;
 
 // ---------------------------------------------------------------- setup
@@ -160,6 +161,68 @@ async fn confirm_deletion(world: &mut BkdWorld) -> Result<()> {
 #[when(expr = "I search for {string}")]
 async fn search_for(world: &mut BkdWorld, query: String) -> Result<()> {
     world.fill("#search", &query).await
+}
+
+/// Holds back the answer to one search for 1.5 s in the browser, and records when it was
+/// sent and when it arrived, so a scenario can make an old answer land after a newer one.
+const SLOW_SEARCH: &str = "const term = arguments[0]; const slowMs = 1500; \
+    window.searchSent = []; window.searchAnswered = []; \
+    const fetchNow = window.fetch; \
+    window.fetch = async (url, ...rest) => { \
+      const slow = new URL(url, location.href).searchParams.get('q') === term; \
+      if (slow) window.searchSent.push(term); \
+      const response = await fetchNow(url, ...rest); \
+      if (!slow) return response; \
+      await new Promise((resolve) => setTimeout(resolve, slowMs)); \
+      window.searchAnswered.push(term); \
+      return response; \
+    };";
+
+#[when(expr = "the server answers the search for {string} slowly")]
+async fn slow_search(world: &mut BkdWorld, term: String) -> Result<()> {
+    world
+        .driver()?
+        .execute(SLOW_SEARCH, vec![json!(term)])
+        .await?;
+    Ok(())
+}
+
+#[then(expr = "the search for {string} has been sent")]
+async fn search_sent(world: &mut BkdWorld, term: String) -> Result<()> {
+    search_recorded(world, "searchSent", &term).await
+}
+
+#[then("no slow answer has arrived yet")]
+async fn no_slow_answer_yet(world: &mut BkdWorld) -> Result<()> {
+    let value = world
+        .driver()?
+        .execute("return window.searchAnswered.length", vec![])
+        .await?;
+    ensure!(
+        value.json().as_u64() == Some(0),
+        "a slow answer has already arrived, so the order is not what the scenario needs"
+    );
+    Ok(())
+}
+
+#[when(expr = "the slow answer to the search for {string} has arrived")]
+async fn search_answered(world: &mut BkdWorld, term: String) -> Result<()> {
+    search_recorded(world, "searchAnswered", &term).await?;
+    // Let the page process the answer before the scenario looks at the list.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    Ok(())
+}
+
+async fn search_recorded(world: &BkdWorld, list: &str, term: &str) -> Result<()> {
+    let driver = world.driver()?;
+    let script = format!("return window.{list}.includes(arguments[0])");
+    world
+        .browser()?
+        .eventually(&format!("{list} has {term}"), || async {
+            let value = driver.execute(&script, vec![json!(term)]).await?;
+            Ok(value.json().as_bool() == Some(true))
+        })
+        .await
 }
 
 #[when(expr = "I choose the tag {string}")]

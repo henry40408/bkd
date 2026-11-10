@@ -1,7 +1,7 @@
 //! First-run setup, sign-in and sign-out.
 
 use anyhow::{Context, Result, ensure};
-use bkd_e2e::api::PASSWORD;
+use bkd_e2e::api::{PASSWORD, SESSION_COOKIE};
 use bkd_e2e::world::BkdWorld;
 use cucumber::{given, then, when};
 use thirtyfour::prelude::*;
@@ -116,6 +116,13 @@ async fn submit_sign_in_twice(world: &mut BkdWorld, username: String) -> Result<
     Ok(())
 }
 
+/// What expiry or a server-side sign-out looks like to the page: its next call gets a 401.
+#[when("my session cookie disappears")]
+async fn session_cookie_disappears(world: &mut BkdWorld) -> Result<()> {
+    world.driver()?.delete_cookie(SESSION_COOKIE).await?;
+    Ok(())
+}
+
 #[when("I sign out")]
 async fn sign_out(world: &mut BkdWorld) -> Result<()> {
     world.click("#me button").await
@@ -152,6 +159,24 @@ async fn sees_error(world: &mut BkdWorld, expected: String) -> Result<()> {
             Ok(false)
         })
         .await
+}
+
+#[then("no toast is shown")]
+async fn no_toast(world: &mut BkdWorld) -> Result<()> {
+    // A toast is written after the next paint, so look for a while, not once.
+    for _ in 0..5 {
+        let text = world.driver()?.find(By::Id("toast")).await?.text().await?;
+        ensure!(text.is_empty(), "a toast says {text:?}");
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    Ok(())
+}
+
+#[then(expr = "the sign-in error says exactly {string}")]
+async fn sign_in_error_says_exactly(world: &mut BkdWorld, expected: String) -> Result<()> {
+    let text = world.element("#login-error").await?.text().await?;
+    ensure!(text.trim() == expected, "the sign-in error says {text:?}");
+    Ok(())
 }
 
 #[then("the address has no query string")]
