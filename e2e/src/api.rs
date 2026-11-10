@@ -106,6 +106,34 @@ impl Api {
             .clone())
     }
 
+    /// The account's bookmarks as the HTML file the export route returns.
+    pub async fn export_html(&self, who: &Session) -> Result<String> {
+        let request = self.client.get(self.url("/export?format=html"));
+        let response = self.send(who, request).await?;
+        ensure!(
+            response.status().is_success(),
+            "exporting failed with {}",
+            response.status()
+        );
+        Ok(response.text().await?)
+    }
+
+    /// Uploads an HTML bookmarks file and returns the import report.
+    pub async fn import_html(&self, who: &Session, html: &str) -> Result<Value> {
+        let request = self
+            .client
+            .post(self.url("/import"))
+            .header(header::CONTENT_TYPE, "text/html")
+            .body(html.to_owned());
+        let response = self.send(who, request).await?;
+        ensure!(
+            response.status().is_success(),
+            "importing failed with {}",
+            response.status()
+        );
+        Ok(response.json().await?)
+    }
+
     /// The username the server still sees behind this session, or `None` once
     /// the session no longer works.
     pub async fn signed_in_user(&self, who: &Session) -> Result<Option<String>> {

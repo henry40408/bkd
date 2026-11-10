@@ -120,11 +120,14 @@ class ApiError extends Error {
   }
 }
 
+// A File is sent as it is, as HTML; anything else is JSON.
 async function api(method, path, body) {
+  const isFile = body instanceof Blob;
+  const contentType = isFile ? 'text/html' : 'application/json';
   const response = await fetch(`/api${path}`, {
     method,
-    headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: body === undefined ? {} : { 'Content-Type': contentType },
+    body: body === undefined || isFile ? body : JSON.stringify(body),
     credentials: 'same-origin',
   });
   let data = null;
@@ -132,7 +135,9 @@ async function api(method, path, body) {
     try { data = await response.json(); } catch { /* a proxy error page is not JSON */ }
   }
   if (response.ok) return data;
-  const fallback = response.status >= 500 ? 'The server had a problem. Try again.' : 'The request was refused.';
+  let fallback = 'The request was refused.';
+  if (response.status >= 500) fallback = 'The server had a problem. Try again.';
+  if (response.status === 413) fallback = 'That file is too large. The limit is 20 MB.';
   throw new ApiError(response.status, data?.error ?? fallback, response.headers.get('Retry-After'));
 }
 
@@ -225,8 +230,10 @@ function renderSide() {
   $('tag-list').replaceChildren(...state.tags.map(({ tag, count }) => filterLink(tag, count, tag)));
 
   const manageUsersLink = el('a', { href: '#', onclick: (e) => { e.preventDefault(); showUsers(); } }, 'Manage users');
+  const transferLink = el('a', { href: '#', onclick: (e) => { e.preventDefault(); showTransfer(); } }, 'Import and export');
   $('me').replaceChildren(...[
     el('span', {}, 'Signed in as ', el('strong', {}, state.user.username)),
+    transferLink,
     state.user.is_admin ? manageUsersLink : null,
     el('button', { class: 'link', onclick: signOut }, 'Sign out'),
   ].filter(Boolean));
@@ -455,9 +462,18 @@ function showUsers() {
   loadUsers();
 }
 
+function showTransfer() {
+  setMenu(false);
+  state.view = 'transfer';
+  showError($('import-error'), '');
+  $('import-result').hidden = true;
+  showView();
+}
+
 function showView() {
   $('bookmarks-view').hidden = state.view !== 'list';
   $('users-view').hidden = state.view !== 'users';
+  $('transfer-view').hidden = state.view !== 'transfer';
   renderSide();
 }
 
@@ -477,10 +493,10 @@ async function removeBookmark(b) {
 }
 
 function resetForms() {
-  for (const id of ['add-form', 'user-form', 'login-form', 'setup-form']) $(id).reset();
+  for (const id of ['add-form', 'user-form', 'login-form', 'setup-form', 'import-form']) $(id).reset();
   $('search').value = '';
   $('add').open = false;
-  for (const id of ['add-error', 'user-error', 'login-error', 'setup-error']) showError($(id), '');
+  for (const id of ['add-error', 'user-error', 'login-error', 'setup-error', 'import-error']) showError($(id), '');
 }
 
 function endSession(message) {
@@ -587,6 +603,33 @@ $('user-form').addEventListener('submit', once(async (e) => {
   showError(error, '');
   toast(`Created user ${name}`);
   await loadUsers();
+}));
+
+function showImportResult({ added, duplicates, invalid, invalid_examples: examples }) {
+  const box = $('import-result');
+  const lines = [el('p', {}, el('strong', {}, `Added ${added} bookmark${added === 1 ? '' : 's'}.`))];
+  if (duplicates) lines.push(el('p', {}, `Skipped ${duplicates} you already had.`));
+  if (invalid) {
+    lines.push(el('p', {}, `Skipped ${invalid} that are not web links:`));
+    lines.push(el('ul', {}, examples.map((item) => el('li', {}, item.url || '(no address)', ` — ${item.reason}`))));
+    if (invalid > examples.length) lines.push(el('p', { class: 'summary' }, `and ${invalid - examples.length} more.`));
+  }
+  box.replaceChildren(...lines);
+  box.hidden = false;
+}
+
+$('import-form').addEventListener('submit', once(async (e) => {
+  e.preventDefault();
+  const error = $('import-error');
+  const file = $('import-file').files[0];
+  $('import-result').hidden = true;
+  if (!file) return showError(error, 'Choose a bookmarks file first.');
+  showError(error, '');
+  const result = await attempt(() => api('POST', '/import', file), (message) => showError(error, message));
+  if (!result) return;
+  e.target.reset();
+  showImportResult(result.value);
+  await refreshAll();
 }));
 
 $('login-form').addEventListener('submit', once(async (e) => {

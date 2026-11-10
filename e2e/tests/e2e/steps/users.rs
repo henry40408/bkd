@@ -25,7 +25,11 @@ async fn member_signed_in_elsewhere(world: &mut BkdWorld, username: String) -> R
 
 #[when("I open Manage users")]
 async fn open_manage_users(world: &mut BkdWorld) -> Result<()> {
-    world.click("#me a").await?;
+    world
+        .element_by(By::XPath(super::MANAGE_USERS_LINK))
+        .await?
+        .click()
+        .await?;
     world.element("#users-view").await?;
     Ok(())
 }
@@ -127,7 +131,10 @@ async fn session_no_longer_works(world: &mut BkdWorld, username: String) -> Resu
 async fn cannot_open_manage_users(world: &mut BkdWorld) -> Result<()> {
     // The sidebar is built once the page knows who is signed in.
     world.element("#me strong").await?;
-    let links = world.driver()?.find_all(By::Css("#me a")).await?;
+    let links = world
+        .driver()?
+        .find_all(By::XPath(super::MANAGE_USERS_LINK))
+        .await?;
     ensure!(links.is_empty(), "a Manage users link is offered");
     Ok(())
 }

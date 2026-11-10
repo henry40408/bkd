@@ -135,7 +135,9 @@ async fn signed_in_as(world: &mut BkdWorld, username: String) -> Result<()> {
 
 #[then("I can open Manage users")]
 async fn can_open_manage_users(world: &mut BkdWorld) -> Result<()> {
-    world.element("#me a").await?;
+    world
+        .element_by(By::XPath(super::MANAGE_USERS_LINK))
+        .await?;
     Ok(())
 }
 

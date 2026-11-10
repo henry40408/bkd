@@ -23,6 +23,7 @@ pub enum ApiError {
     Forbidden(&'static str),
     NotFound,
     Conflict(&'static str),
+    UnsupportedMediaType(&'static str),
     TooManyRequests(Duration),
     Internal(anyhow::Error),
 }
@@ -41,6 +42,7 @@ impl IntoResponse for ApiError {
             Self::Forbidden(message) => (StatusCode::FORBIDDEN, *message),
             Self::NotFound => (StatusCode::NOT_FOUND, "not found"),
             Self::Conflict(message) => (StatusCode::CONFLICT, *message),
+            Self::UnsupportedMediaType(message) => (StatusCode::UNSUPPORTED_MEDIA_TYPE, *message),
             Self::TooManyRequests(_) => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "too many attempts, try again later",

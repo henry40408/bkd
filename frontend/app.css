@@ -170,3 +170,12 @@ form.stack.new-user { background: var(--sheet); border: 1px solid var(--rule); b
 .user-reset input { flex: 1; min-width: 12rem; width: auto; }
 .login form .ok-hint { color: var(--ink-soft); font-size: .85rem; margin: 0; }
 
+
+#transfer-view h2 { font: 700 1.05rem/1.3 var(--serif); margin: var(--s5) 0 var(--s2); }
+form.stack.import-form { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding-top: var(--s4); }
+.import-result { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; margin-top: var(--s3); padding: var(--s3) var(--s4); overflow-wrap: anywhere; }
+.import-result p { margin: 0 0 var(--s2); }
+.import-result ul { margin: 0 0 var(--s2); padding-left: var(--s5); }
+.downloads { display: flex; flex-wrap: wrap; gap: var(--s3); margin: 0; }
+a.button { font-weight: 600; background: var(--ink); color: var(--paper); border-radius: 4px; padding: var(--s2) var(--s4); text-decoration: none; }
+@media (max-width: 760px) { a.button { min-height: 44px; display: inline-flex; align-items: center; } }

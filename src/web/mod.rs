@@ -8,6 +8,7 @@ mod error;
 mod guard;
 #[cfg(test)]
 mod tests;
+mod transfer_routes;
 mod user_routes;
 
 use std::net::SocketAddr;
@@ -27,6 +28,9 @@ use crate::auth::setup_token::SetupToken;
 
 // A bookmark is a few kilobytes at most.
 const MAX_BODY_BYTES: usize = 64 * 1024;
+
+// A bookmark file from a browser: tens of thousands of links.
+const MAX_IMPORT_BYTES: usize = 20 * 1024 * 1024;
 
 const LOGIN_ATTEMPTS_PER_WINDOW: u32 = 10;
 const SETUP_ATTEMPTS_PER_WINDOW: u32 = 5;
@@ -92,6 +96,11 @@ pub fn router(state: SharedState) -> Router {
             put(bookmark_routes::update).delete(bookmark_routes::delete),
         )
         .route("/tags", get(bookmark_routes::tags))
+        .route(
+            "/import",
+            post(transfer_routes::import).layer(DefaultBodyLimit::max(MAX_IMPORT_BYTES)),
+        )
+        .route("/export", get(transfer_routes::export))
         .route("/users", get(user_routes::list).post(user_routes::create))
         .route("/users/{id}", delete(user_routes::delete))
         .route("/users/{id}/role", put(user_routes::set_role))

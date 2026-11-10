@@ -36,7 +36,7 @@ Only SQLite is supported. SQL stays plain so a PostgreSQL port would mostly chan
 
 - Three files, `index.html`, `app.css` and `app.js`, served at `/`, `/app.css` and `/app.js` with `Cache-Control: no-cache` (they carry no version in their names).
 - A strict Content-Security-Policy (`default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; ...`) applies. The page has no inline script, no inline style and no inline event handler, and a test checks this. Keep it that way: an inline one would be blocked. All dynamic text is set with `textContent` or DOM nodes, never `innerHTML`.
-- One page has four screens: setup (when `/api/state` says `setup_required`), login, the bookmark list, and "Manage users" (admins only). `/api/state` picks the first screen.
+- One page has five screens: setup (when `/api/state` says `setup_required`), login, the bookmark list, "Import and export", and "Manage users" (admins only). `/api/state` picks the first screen.
 - Search and tag filters run on the server (`q`, `tag`); the page highlights the matched terms. The list loads 50 at a time with a "Show more" button. A search answer that arrives after a newer one is dropped.
 - The user screen hides the actions the server would refuse (changing yourself, changing the last active admin). The server enforces the same rules, so a stale screen only gets a 409 and reloads.
 - A 401 from any call returns the user to the login screen.
@@ -53,11 +53,24 @@ JSON under `/api`. Handlers are thin: they call `auth`, `bookmarks` and `users`.
 | `GET /api/bookmarks?q=&tag=&limit=&offset=` | session | newest first; `limit` defaults to 50, at most 200 |
 | `POST /api/bookmarks`, `PUT`/`DELETE /api/bookmarks/{id}` | session | create, replace, delete |
 | `GET /api/tags` | session | the user's tags with counts |
+| `POST /api/import` | session | body is a Netscape bookmark file sent as `text/html`; returns `{added, duplicates, invalid, invalid_examples}` |
+| `GET /api/export?format=html\|json` | session | the user's own bookmarks as a download (`Content-Disposition: attachment`) |
 | `GET /api/users`, `POST /api/users` | admin | list accounts; create one (`username`, `password`, optional `is_admin`) |
 | `PUT /api/users/{id}/role` | admin | `{is_admin}` promote or demote |
 | `PUT /api/users/{id}/disabled` | admin | `{is_disabled}` disable or enable |
 | `PUT /api/users/{id}/password` | admin | `{password}` reset; ends all sessions of that user |
 | `DELETE /api/users/{id}` | admin | delete the account with its bookmarks and sessions |
+
+### Import and export (`netscape.rs`, `import.rs`, `web/transfer_routes.rs`)
+
+- **Format.** Import reads the Netscape bookmark HTML that Chrome, Firefox, Safari, Pocket and Raindrop export. `netscape.rs` is a small tolerant tokenizer, not an HTML parser: it knows `A`, `H3`, `DL`, `DD` and `BR`, decodes entities, and survives unclosed tags and truncated input. This avoids a large HTML dependency for a fixed, tiny grammar.
+- **Mapping.** Each folder level above a link becomes one tag, and the `TAGS` attribute adds more. `ADD_DATE` (or Pocket's `time_added`) becomes `created_at` (milliseconds and microseconds are scaled down; a missing, zero, negative or future date becomes now). A `<DD>` right after a link is its note.
+- **Rules.** Every link goes through the same validation as `POST /api/bookmarks`, with one difference (`BookmarkInput::fitted`): an over-long title, note or tag set is shortened and an unusable tag is dropped, instead of refusing the whole link. A missing title falls back to the URL. A link that is not `http(s)` (`javascript:`, `place:`, `about:`) is skipped and counted, and the report names the first five.
+- **Duplicates.** A URL the user already has, or that appears twice in the file, is skipped, so importing the same file twice adds nothing. The match is on the exact URL string, per user.
+- **Transaction.** The whole file is inserted in one `BEGIN IMMEDIATE` transaction: a failure leaves nothing behind, and a concurrent write cannot make the upgrade to a writer fail. The write lock is held for the whole insert, so a very large file briefly delays other users' writes.
+- **Limits.** The import route accepts up to 20 MiB; every other route keeps 64 KiB.
+- **CSRF.** The import body is not JSON, so the route requires `Content-Type: text/html` (else 415). A cross-site form cannot send that type, and a script that sets it needs a CORS preflight, which the server never answers. The `Origin` check still applies.
+- **Export.** HTML is a flat file with each bookmark's tags in `TAGS`, in the order created; a comma inside a tag becomes a space so it cannot split. JSON has `url`, `title`, `note`, `tags` and `created_at`. Both contain only the caller's bookmarks. JSON is a backup; only HTML is imported.
 
 ### User management
 
@@ -78,7 +91,7 @@ JSON under `/api`. Handlers are thin: they call `auth`, `bookmarks` and `users`.
 - **Shutdown.** SIGTERM and Ctrl-C both stop the server. In-flight requests get 10 seconds to finish.
 - **Password work.** Argon2 runs at most as many times at once as there are CPU cores, so a burst of logins cannot exhaust memory.
 - **Malformed input.** A body or query that axum cannot parse gets axum's plain-text 4xx response, not the JSON error format.
-- **Responses** carry `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. Bodies over 64 KiB are refused.
+- **Responses** carry `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. Bodies over 64 KiB are refused (20 MiB for the import route).
 - **Setup token flow.** At startup, if no user exists, a token is generated and logged at WARN. It lives in memory and is cleared when the first admin is created, or when a request finds that someone else won the race.
 
 

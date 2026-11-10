@@ -58,6 +58,24 @@
         <div><button type="submit">Create user</button></div>
       </form>
     </section>
+
+    <section id="transfer-view" hidden>
+      <h1>Import and export</h1>
+      <h2>Import</h2>
+      <p class="summary">Choose a bookmarks file exported from Chrome, Firefox, Safari, Pocket or Raindrop (an .html file). Folders become tags. A link you already saved is skipped.</p>
+      <form class="stack import-form" id="import-form" novalidate>
+        <label>Bookmarks file <input type="file" id="import-file" name="file" accept=".html,.htm,text/html"></label>
+        <p class="err" id="import-error" role="alert" hidden></p>
+        <div><button type="submit">Import bookmarks</button></div>
+      </form>
+      <div class="import-result" id="import-result" role="status" hidden></div>
+      <h2>Export</h2>
+      <p class="summary">Download all of your bookmarks. Use HTML to move them to a browser or another service, and JSON as a plain backup.</p>
+      <p class="downloads">
+        <a class="button" href="/api/export?format=html" download>Download HTML</a>
+        <a class="button" href="/api/export?format=json" download>Download JSON</a>
+      </p>
+    </section>
   </main>
 </div>
 

@@ -98,6 +98,32 @@ impl BookmarkInput {
     }
 }
 
+impl BookmarkInput {
+    /// For an imported file, where one long title must not cost the whole bookmark:
+    /// shortens what is too long, falls back to the URL for a missing title and drops
+    /// tags that cannot be kept. The URL is left alone, because a changed URL would
+    /// point somewhere else.
+    pub fn fitted(url: &str, title: &str, note: &str, tags: &[String]) -> Self {
+        let title = title.trim();
+        let title = if title.is_empty() { url.trim() } else { title };
+        let mut kept = Vec::new();
+        for tag in tags {
+            if let Ok(Some(tag)) = normalize_tag(tag)
+                && !kept.contains(&tag)
+            {
+                kept.push(tag);
+            }
+        }
+        kept.truncate(MAX_TAGS_PER_BOOKMARK);
+        Self {
+            url: url.to_owned(),
+            title: title.chars().take(MAX_TITLE_CHARS).collect(),
+            note: note.chars().take(MAX_NOTE_CHARS).collect(),
+            tags: kept,
+        }
+    }
+}
+
 fn validate_url(raw: &str) -> Result<String, ValidationError> {
     let url = raw.trim();
     if url.chars().count() > MAX_URL_CHARS {
@@ -332,6 +358,56 @@ pub async fn tag_counts(pool: &SqlitePool, user_id: i64) -> Result<Vec<TagCount>
     .fetch_all(pool)
     .await?;
     Ok(counts)
+}
+
+/// A bookmark from an import file, with the time it was first saved.
+pub struct ImportEntry {
+    pub bookmark: ValidBookmark,
+    pub created_at: i64,
+}
+
+/// Adds the entries in one transaction, so a failure leaves nothing behind. A URL the
+/// user already has, or that appears twice in the file, is skipped. Returns how many
+/// were added.
+pub async fn import(pool: &SqlitePool, user_id: i64, entries: &[ImportEntry]) -> Result<usize> {
+    // Immediate, so the read below cannot go stale and fail to upgrade to a writer.
+    let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let existing: Vec<String> = sqlx::query_scalar("SELECT url FROM bookmarks WHERE user_id = ?1")
+        .bind(user_id)
+        .fetch_all(&mut *transaction)
+        .await?;
+    let mut seen: HashSet<String> = existing.into_iter().collect();
+    let mut added = 0;
+    for entry in entries {
+        if !seen.insert(entry.bookmark.url.clone()) {
+            continue;
+        }
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO bookmarks (user_id, url, title, note, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5) RETURNING id",
+        )
+        .bind(user_id)
+        .bind(&entry.bookmark.url)
+        .bind(&entry.bookmark.title)
+        .bind(&entry.bookmark.note)
+        .bind(entry.created_at)
+        .fetch_one(&mut *transaction)
+        .await?;
+        insert_tags(&mut transaction, id, &entry.bookmark.tags).await?;
+        added += 1;
+    }
+    transaction.commit().await?;
+    Ok(added)
+}
+
+/// Every bookmark the user has, oldest first, so a file read back in keeps the order.
+pub async fn all(pool: &SqlitePool, user_id: i64) -> Result<Vec<Bookmark>> {
+    let mut query = QueryBuilder::<Sqlite>::new(SELECT_BOOKMARK);
+    query.push(" WHERE bookmarks.user_id = ");
+    query.push_bind(user_id);
+    query.push(" ORDER BY bookmarks.created_at, bookmarks.id");
+    let rows: Vec<BookmarkRow> = query.build_query_as().fetch_all(pool).await?;
+    Ok(rows.into_iter().map(Bookmark::from).collect())
 }
 
 #[cfg(test)]

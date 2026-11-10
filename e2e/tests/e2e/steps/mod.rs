@@ -4,11 +4,15 @@ mod bookmarks;
 mod keyboard;
 mod layout;
 mod session;
+mod transfer;
 mod users;
 
 use anyhow::Result;
 use bkd_e2e::world::BkdWorld;
 use thirtyfour::prelude::*;
+
+/// The sidebar link only an admin sees. Found by its text: other links share the sidebar.
+const MANAGE_USERS_LINK: &str = "//*[@id='me']//a[text()='Manage users']";
 
 /// Slows every request down and records each Content Security Policy violation.
 const SLOW_FETCH_AND_WATCH_CSP: &str = "window.cspViolations = []; document.addEventListener('securitypolicyviolation', (e) => window.cspViolations.push(e.violatedDirective)); const fetchNow = window.fetch; window.fetch = (...args) => new Promise((resolve) => setTimeout(resolve, 500)).then(() => fetchNow(...args));";

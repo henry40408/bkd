@@ -29,6 +29,7 @@ struct Reply {
     status: StatusCode,
     headers: HeaderMap,
     body: Value,
+    text: String,
 }
 
 /// A request to send. Defaults to a JSON body from 192.0.2.1 with no cookie.
@@ -39,6 +40,7 @@ struct Send {
     cookie: Option<String>,
     ip: &'static str,
     origin: Option<&'static str>,
+    raw: Option<(&'static str, Vec<u8>)>,
 }
 
 impl Send {
@@ -50,6 +52,7 @@ impl Send {
             cookie: None,
             ip: "192.0.2.1",
             origin: None,
+            raw: None,
         }
     }
     fn get(uri: &str) -> Self {
@@ -66,6 +69,11 @@ impl Send {
     }
     fn body(mut self, body: Value) -> Self {
         self.body = Some(body);
+        self
+    }
+    /// A body that is not JSON, sent with the given content type.
+    fn raw(mut self, content_type: &'static str, bytes: impl Into<Vec<u8>>) -> Self {
+        self.raw = Some((content_type, bytes.into()));
         self
     }
     fn cookie(mut self, token: &str) -> Self {
@@ -123,12 +131,16 @@ impl TestApp {
         if let Some(origin) = request.origin {
             builder = builder.header(header::ORIGIN, origin);
         }
-        let body = match request.body {
-            Some(value) => {
+        let body = match (request.body, request.raw) {
+            (Some(value), _) => {
                 builder = builder.header(header::CONTENT_TYPE, "application/json");
                 Body::from(value.to_string())
             }
-            None => Body::empty(),
+            (None, Some((content_type, bytes))) => {
+                builder = builder.header(header::CONTENT_TYPE, content_type);
+                Body::from(bytes)
+            }
+            (None, None) => Body::empty(),
         };
         let mut http_request = builder.body(body).unwrap();
         let client: SocketAddr = format!("{}:50000", request.ip).parse().unwrap();
@@ -141,6 +153,7 @@ impl TestApp {
             status: parts.status,
             headers: parts.headers,
             body: serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+            text: String::from_utf8_lossy(&bytes).into_owned(),
         }
     }
 
@@ -933,6 +946,202 @@ async fn a_cross_site_user_change_is_refused() {
         .cookie(&admin)
         .origin("https://evil.test");
     assert_eq!(app.send(forged).await.status, StatusCode::FORBIDDEN);
+}
+
+// ------------------------------------------------------ import and export
+
+const FIREFOX_FILE: &str = r#"<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
+<TITLE>Bookmarks</TITLE>
+<H1>Bookmarks Menu</H1>
+<DL><p>
+    <DT><H3 ADD_DATE="1600000000" LAST_MODIFIED="1600000001">Recipes</H3>
+    <DL><p>
+        <DT><A HREF="https://soup.test/" ADD_DATE="1600000002" TAGS="Winter">Soup &amp; bread</A>
+        <DD>use less salt
+        <DT><A HREF="place:parent=1&amp;type=7">Smart bookmark</A>
+    </DL><p>
+    <DT><A HREF="https://news.test/" ADD_DATE="1600000003">News</A>
+    <DT><A HREF="https://news.test/">News again</A>
+</DL><p>
+"#;
+
+async fn import_file(app: &TestApp, token: &str, html: &str) -> Reply {
+    app.send(
+        Send::new(Method::POST, "/api/import")
+            .raw("text/html; charset=utf-8", html)
+            .cookie(token),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn importing_a_browser_file_adds_skips_and_reports() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+
+    let reply = import_file(&app, &token, FIREFOX_FILE).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(reply.body["added"], 2);
+    assert_eq!(reply.body["duplicates"], 1);
+    assert_eq!(reply.body["invalid"], 1);
+    assert_eq!(
+        reply.body["invalid_examples"][0]["url"],
+        "place:parent=1&type=7"
+    );
+
+    let listed = app.send(Send::get("/api/bookmarks").cookie(&token)).await;
+    let soup = listed.body["bookmarks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|bookmark| bookmark["title"] == "Soup & bread")
+        .unwrap();
+    assert_eq!(soup["tags"], json!(["recipes", "winter"]));
+    assert_eq!(soup["note"], "use less salt");
+    assert_eq!(soup["created_at"], 1_600_000_002);
+
+    let again = import_file(&app, &token, FIREFOX_FILE).await;
+    assert_eq!(
+        (
+            again.body["added"].as_i64(),
+            again.body["duplicates"].as_i64()
+        ),
+        (Some(0), Some(3))
+    );
+}
+
+#[tokio::test]
+async fn importing_needs_a_session_and_the_html_content_type() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+
+    let anonymous = app
+        .send(Send::new(Method::POST, "/api/import").raw("text/html", FIREFOX_FILE))
+        .await;
+    assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
+
+    for content_type in [
+        "application/x-www-form-urlencoded",
+        "text/plain",
+        "application/json",
+    ] {
+        let reply = app
+            .send(
+                Send::new(Method::POST, "/api/import")
+                    .raw(content_type, FIREFOX_FILE)
+                    .cookie(&token),
+            )
+            .await;
+        assert_eq!(
+            reply.status,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "{content_type}"
+        );
+    }
+    let cross_site = Send::new(Method::POST, "/api/import")
+        .raw("text/html", FIREFOX_FILE)
+        .cookie(&token)
+        .origin("https://evil.test");
+    assert_eq!(app.send(cross_site).await.status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn an_import_lands_only_in_the_callers_account() {
+    let app = TestApp::running().await;
+    let henry = app.sign_in_as("henry").await;
+    let mei = app.sign_in_as("mei").await;
+
+    import_file(&app, &henry, FIREFOX_FILE).await;
+    let theirs = app.send(Send::get("/api/bookmarks").cookie(&mei)).await;
+    assert!(titles(&theirs).is_empty());
+
+    // The same URLs are not duplicates for another user.
+    let reply = import_file(&app, &mei, FIREFOX_FILE).await;
+    assert_eq!(reply.body["added"], 2);
+}
+
+#[tokio::test]
+async fn a_file_over_the_import_limit_is_refused_but_a_large_one_is_not() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+
+    // Far over the 64 KiB JSON limit.
+    let mut large = String::from("<DL>");
+    for number in 0..3000 {
+        large.push_str(&format!(
+            "<DT><A HREF=\"https://a.test/{number}\">link {number}</A>\n"
+        ));
+    }
+    large.push_str("</DL>");
+    assert!(large.len() > 64 * 1024);
+    let reply = import_file(&app, &token, &large).await;
+    assert_eq!(reply.body["added"], 3000);
+
+    let too_big = "x".repeat(super::MAX_IMPORT_BYTES + 1);
+    let refused = import_file(&app, &token, &too_big).await;
+    assert_eq!(refused.status, StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn export_gives_only_the_callers_bookmarks_as_html_or_json() {
+    let app = TestApp::running().await;
+    let henry = app.sign_in_as("henry").await;
+    let mei = app.sign_in_as("mei").await;
+    create_bookmark(&app, &henry, "henry page", &["a", "b"]).await;
+    create_bookmark(&app, &mei, "mei page", &[]).await;
+
+    let html = app
+        .send(Send::get("/api/export?format=html").cookie(&henry))
+        .await;
+    assert_eq!(html.status, StatusCode::OK);
+    assert!(html.text.contains("henry page") && !html.text.contains("mei page"));
+    assert!(html.text.contains("TAGS=\"a,b\""));
+    let disposition = html.headers[header::CONTENT_DISPOSITION].to_str().unwrap();
+    assert!(disposition.starts_with("attachment;"), "{disposition}");
+
+    let json_file = app
+        .send(Send::get("/api/export?format=json").cookie(&henry))
+        .await;
+    assert_eq!(json_file.body["bookmarks"][0]["title"], "henry page");
+    assert_eq!(json_file.body["bookmarks"][0]["tags"], json!(["a", "b"]));
+    assert_eq!(json_file.body["bookmarks"].as_array().unwrap().len(), 1);
+
+    let bad = app
+        .send(Send::get("/api/export?format=xml").cookie(&henry))
+        .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    let anonymous = app.send(Send::get("/api/export?format=html")).await;
+    assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn an_exported_file_imports_back_into_another_account() {
+    let app = TestApp::running().await;
+    let henry = app.sign_in_as("henry").await;
+    let mei = app.sign_in_as("mei").await;
+    import_file(&app, &henry, FIREFOX_FILE).await;
+
+    let exported = app
+        .send(Send::get("/api/export?format=html").cookie(&henry))
+        .await;
+    let reply = import_file(&app, &mei, &exported.text).await;
+    assert_eq!(
+        (reply.body["added"].as_i64(), reply.body["invalid"].as_i64()),
+        (Some(2), Some(0))
+    );
+
+    let original = app.send(Send::get("/api/bookmarks").cookie(&henry)).await;
+    let copy = app.send(Send::get("/api/bookmarks").cookie(&mei)).await;
+    let essentials = |reply: &Reply| -> Vec<Value> {
+        reply.body["bookmarks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| json!([b["url"], b["title"], b["note"], b["tags"], b["created_at"]]))
+            .collect()
+    };
+    assert_eq!(essentials(&original), essentials(&copy));
 }
 
 // -------------------------------------------------------------- front end
