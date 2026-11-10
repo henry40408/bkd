@@ -1,0 +1,172 @@
+/* Design notes: cool grey paper, deep ink blue, one highlighter-yellow accent.
+   The accent is used only for search hits and the active filter, so it always means "this matched". */
+:root {
+  --paper: #eceff1;
+  --sheet: #f7f8f9;
+  --ink: #17243a;
+  --ink-soft: #55627a;
+  --rule: #cfd5dc;
+  --marker: #f5d547;
+  --link: #1f4f9c;
+  --danger: #a3302a;
+  --serif: "Iowan Old Style", "Charter", "Georgia", serif;
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* One spacing scale for the whole page. */
+  --s1: .25rem; --s2: .5rem; --s3: .75rem; --s4: 1rem; --s5: 1.5rem; --s6: 2rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #11171f; --sheet: #182029; --ink: #e6eaf0; --ink-soft: #94a0b4;
+    --rule: #2a3542; --link: #8db4f2; --danger: #f08a82;
+  }
+}
+* { box-sizing: border-box; }
+/* Locking scroll hides the scrollbar; without a reserved gutter the page reflows while the drawer closes. */
+html { scrollbar-gutter: stable; }
+/* Touch emulation can wait for a possible double-tap before firing click; this turns that wait off. */
+html, body, button, a, summary, label, input, textarea { touch-action: manipulation; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 var(--sans); }
+a { color: inherit; text-decoration: none; }
+:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+mark { background: var(--marker); color: #17243a; padding: 0 .15em; border-radius: 2px; }
+
+.app { display: grid; grid-template-columns: 15rem minmax(0, 1fr); min-height: 100vh; min-height: 100dvh; }
+
+.side { padding: var(--s5) var(--s4) var(--s4); border-right: 1px solid var(--rule); position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; display: flex; flex-direction: column; }
+.brand { font: 700 1.5rem/1 var(--serif); letter-spacing: -.02em; margin: 0 0 var(--s5) var(--s2); }
+.side h2 { font: 600 .8rem/1 var(--sans); color: var(--ink-soft); margin: var(--s5) var(--s2) var(--s2); }
+.side ul { list-style: none; margin: 0; padding: 0; }
+#tag-list { margin-bottom: var(--s1); }
+.side li a { display: flex; justify-content: space-between; padding: var(--s1) var(--s2); border-radius: 4px; }
+.side li a[aria-current] { background: var(--marker); color: #17243a; font-weight: 600; }
+.count { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+[aria-current] .count { color: inherit; }
+.me { margin-top: auto; padding: var(--s4) var(--s2) 0; border-top: 1px solid var(--rule); color: var(--ink-soft); font-size: .85rem; display: grid; gap: var(--s1); }
+.me a, .me button { color: var(--link); text-decoration: underline; }
+/* Usernames are limited to 32 characters, but old or imported data may not be. */
+.me > span { overflow-wrap: anywhere; }
+
+main:focus { outline: none; }
+main { padding: var(--s5) clamp(var(--s4), 4vw, var(--s6)); max-width: 56rem; }
+main h1 { font: 700 1.5rem/1.2 var(--serif); margin: 0 0 var(--s4); }
+.bar { display: flex; gap: var(--s3); margin-bottom: var(--s5); }
+input, textarea { font: inherit; color: inherit; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: var(--s2) var(--s3); width: 100%; }
+input[type=checkbox] { width: auto; }
+.bar input { flex: 1; }
+button { font: inherit; font-weight: 600; background: var(--ink); color: var(--paper); border: 0; border-radius: 4px; padding: var(--s2) var(--s4); cursor: pointer; }
+button.quiet { background: none; color: var(--link); padding: var(--s1) var(--s2); font-weight: 500; }
+button.link { background: none; color: var(--link); padding: 0; font-weight: 500; text-decoration: underline; }
+button.danger { color: var(--danger); }
+button.tag { background: none; font-weight: 400; color: var(--ink-soft); }
+
+details.add { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; margin-bottom: var(--s5); }
+details.add summary { padding: var(--s3) var(--s4); cursor: pointer; font-weight: 600; }
+form.stack { display: grid; gap: var(--s3); padding: 0 var(--s4) var(--s4); }
+label { display: grid; gap: var(--s1); font-size: .9rem; font-weight: 600; }
+label.inline { display: flex; align-items: center; gap: var(--s2); font-weight: 400; }
+.err { color: var(--danger); font-size: .9rem; margin: 0; }
+
+.summary { color: var(--ink-soft); font-size: .85rem; margin: 0 0 var(--s2); }
+.list { list-style: none; margin: 0; padding: 0; }
+.item { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr) auto; align-items: baseline; gap: 0 var(--s4); padding: var(--s4) 0; border-top: 1px solid var(--rule); }
+.item:last-child { border-bottom: 1px solid var(--rule); }
+.item.editing { display: block; background: var(--sheet); padding: var(--s4); border-radius: 6px; border: 1px solid var(--rule); margin: var(--s2) 0; }
+.item.editing form { padding: 0; }
+.domain { color: var(--ink-soft); font-size: .85rem; overflow-wrap: anywhere; }
+.title { font: 600 1.1rem/1.3 var(--serif); color: var(--link); overflow-wrap: anywhere; }
+.note { margin: var(--s2) 0 0; color: var(--ink-soft); max-width: 60ch; overflow-wrap: anywhere; }
+.tags { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s2); }
+.tag { font-size: .8rem; color: var(--ink-soft); border: 1px solid var(--rule); border-radius: 999px; padding: 0 var(--s2); }
+.when { color: var(--ink-soft); font-size: .8rem; text-align: right; white-space: nowrap; }
+/* The buttons carry horizontal padding; the negative margin lines their text up with the column edge. */
+.actions { transition: opacity .12s; margin-right: calc(var(--s2) * -1); }
+@media (hover: hover) and (pointer: fine) {
+  .actions { opacity: 0; }
+  .item:hover .actions, .item:focus-within .actions { opacity: 1; }
+}
+/* Hover styles live here so a tap on a touch screen does not leave them stuck on. */
+@media (hover: hover) {
+  .side li a:hover { background: color-mix(in srgb, var(--rule) 50%, transparent); }
+  .title:hover { text-decoration: underline; }
+  .tag:hover { border-color: var(--ink-soft); }
+}
+/* The question sits on its own line; the buttons wrap below it and line up with the column edge. */
+.confirm { color: var(--danger); white-space: normal; width: 11rem; margin: 0 calc(var(--s2) * -1) 0 0;
+  display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+.confirm-text { flex-basis: 100%; padding: 0 var(--s2); text-align: right; }
+@media (max-width: 760px) {
+  .item { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
+  .when { text-align: left; } /* --tap-slack is the blank space a 44px button adds above and below one line of its text. */
+  .when { --tap-slack: calc((44px - 1.5em) / 2); --actions-gap: calc(var(--s1) * 1.5 - var(--tap-slack)); }
+  .actions { opacity: 1; margin: var(--actions-gap) 0 calc(var(--tap-slack) * -1) calc(var(--s2) * -1); }
+  .confirm { width: auto; margin: 0 0 calc(var(--tap-slack) * -1) calc(var(--s2) * -1); justify-content: flex-start; }
+  .confirm button { margin-top: var(--actions-gap); }
+  .confirm-text { text-align: left; }
+  .user-row { row-gap: var(--s2); }
+  .user-actions, .user-confirm { --tap-slack: calc((44px - 1.5em) / 2); flex-basis: 100%; margin: calc(var(--tap-slack) * -1) 0 calc(var(--tap-slack) * -1) calc(var(--s2) * -1); }
+  .user-actions { min-height: 44px; }
+  .user-actions:empty { display: none; }
+}
+
+.empty { border: 1px dashed var(--rule); border-radius: 6px; padding: var(--s6); text-align: center; color: var(--ink-soft); }
+
+.user-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s4); padding: var(--s3) 0; border-top: 1px solid var(--rule); }
+.user-row:last-of-type { border-bottom: 1px solid var(--rule); }
+.user-row .name { font-weight: 600; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.user-row .meta { color: var(--ink-soft); font-size: .85rem; }
+.user-row.off .name { text-decoration: line-through; color: var(--ink-soft); }
+.user-actions, .user-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1); margin-right: calc(var(--s2) * -1); }
+/* A row with no buttons (your own) must be as tall as one with buttons: one line plus the button's vertical padding. */
+.user-actions { min-height: calc(1.5em + var(--s2)); }
+.user-confirm { color: var(--danger); overflow-wrap: anywhere; }
+#user-list + .summary { margin-top: var(--s2); }
+form.stack.new-user { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; margin-top: var(--s5); padding-top: var(--s4); }
+
+.login { display: flex; overflow-y: auto; position: fixed; inset: 0; background: var(--paper); z-index: 5; }
+.login form { margin: auto; background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: var(--s6) var(--s6) var(--s5); width: min(22rem, 92vw); display: grid; gap: var(--s3); }
+.login h1 { font: 700 1.6rem/1 var(--serif); margin: 0 0 var(--s2); }
+.login .hint { color: var(--ink-soft); font-size: .85rem; margin: 0; }
+
+.toast:empty { display: none; }
+.toast { position: fixed; bottom: var(--s5); left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: var(--s3) var(--s4); border-radius: 6px; z-index: 10; max-width: 90vw; width: max-content; overflow-wrap: anywhere; }
+
+/* Mobile overrides stay last so they win over the base rules above. */
+.topbar, .backdrop { display: none; }
+.menu { background: none; color: var(--ink); border: 1px solid var(--rule); font-size: 1.25rem; line-height: 1; touch-action: manipulation; padding: var(--s2) var(--s3); }
+@media (max-width: 760px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .topbar { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--rule); position: sticky; top: 0; background: var(--paper); z-index: 3; }
+  .topbar .brand { margin: 0; }
+  .backdrop { display: block; position: fixed; inset: 0; background: rgb(0 0 0 / .45); z-index: 4; opacity: 0; visibility: hidden; }
+  .backdrop.open { opacity: 1; visibility: visible; }
+  body.menu-open { overflow: hidden; }
+  .side { position: fixed; top: 0; left: 0; bottom: 0; width: min(18rem, 85vw); background: var(--paper); z-index: 5; transform: translateX(-100%); visibility: hidden; overscroll-behavior: contain; }
+  .side.open { transform: none; visibility: visible; }
+  /* Touch targets: about 44px for controls, 32px for the small tag pills. */
+  .menu { min-width: 44px; min-height: 44px; }
+  button.quiet, .side li a, .me a, .me button { display: inline-flex; align-items: center; min-height: 44px; }
+  .side li a { display: flex; }
+  .me a, .me button { justify-self: start; }
+  .side { padding-bottom: var(--s1); }
+  .me { padding-top: var(--s1); }
+  .me > span { padding-block: calc((44px - 1.5em) / 2); }
+  button.tag { display: inline-flex; align-items: center; min-height: 32px; }
+  details.add summary { min-height: 44px; display: flex; align-items: center; }
+  /* iOS Safari zooms the page when a field under 16px gets focus. */
+  input, textarea { font-size: 16px; }
+}
+@media (max-width: 760px) and (prefers-reduced-motion: no-preference) {
+  /* Visibility flips after the slide when closing and before it when opening, so the drawer is never cut off. */
+  .side { transition: transform .15s ease-out, visibility 0s linear .15s; }
+  .side.open { transition: transform .15s ease-out, visibility 0s; }
+  .backdrop { transition: opacity .15s, visibility 0s linear .15s; }
+  .backdrop.open { transition: opacity .15s, visibility 0s; }
+}
+
+/* Added for the real app. */
+.more { margin-top: var(--s4); }
+.user-reset { display: flex; flex-wrap: wrap; gap: var(--s2); flex-basis: 100%; align-items: center; }
+.user-reset input { flex: 1; min-width: 12rem; width: auto; }
+.login form .ok-hint { color: var(--ink-soft); font-size: .85rem; margin: 0; }
+

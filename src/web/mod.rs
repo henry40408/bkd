@@ -1,6 +1,7 @@
-//! The HTTP layer: a JSON API under `/api`. The front-end files join it in a later step.
+//! The HTTP layer: a JSON API under `/api` and the front-end files at the root.
 
 mod account;
+mod assets;
 mod bookmark_routes;
 mod cookie;
 mod error;
@@ -99,7 +100,12 @@ pub fn router(state: SharedState) -> Router {
         .layer(middleware::from_fn(guard::same_origin_only))
         .layer(middleware::from_fn(guard::api_headers))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES));
-    Router::new().nest("/api", api).with_state(state)
+    Router::new()
+        .route("/", get(assets::index))
+        .route("/app.css", get(assets::stylesheet))
+        .route("/app.js", get(assets::script))
+        .nest("/api", api)
+        .with_state(state)
 }
 
 /// Serves until Ctrl-C, then lets in-flight requests finish.

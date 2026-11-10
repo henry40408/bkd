@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bkd</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<div class="app" id="app" hidden>
+  <header class="topbar">
+    <button type="button" class="menu" id="menu-button" aria-expanded="false" aria-controls="sidebar" aria-label="Open menu">&#9776;</button>
+    <p class="brand">bkd</p>
+  </header>
+  <div class="backdrop" id="backdrop"></div>
+  <nav class="side" id="sidebar" aria-label="Filters">
+    <p class="brand">bkd</p>
+    <ul id="filters"></ul>
+    <h2>Tags</h2>
+    <ul id="tag-list"></ul>
+    <div class="me" id="me"></div>
+  </nav>
+
+  <main id="main" tabindex="-1">
+    <section id="bookmarks-view">
+      <form class="bar" role="search" id="search-form">
+        <input type="search" id="search" aria-label="Search bookmarks" placeholder="Search title, note, URL, or tag">
+      </form>
+
+      <details class="add" id="add">
+        <summary>Add bookmark</summary>
+        <form class="stack" id="add-form" novalidate>
+          <label>URL <input type="url" name="url" placeholder="https://" required></label>
+          <label>Title <input type="text" name="title" placeholder="Leave blank to use the domain"></label>
+          <label>Note <textarea name="note" rows="2"></textarea></label>
+          <label>Tags, separated by commas <input type="text" name="tags" placeholder="rust, reading"></label>
+          <p class="err" id="add-error" role="alert" hidden></p>
+          <div><button type="submit">Save bookmark</button></div>
+        </form>
+      </details>
+
+      <p class="summary" id="summary"></p>
+      <ul class="list" id="list"></ul>
+      <div class="empty" id="empty" hidden></div>
+      <button type="button" class="quiet more" id="more" hidden>Show more</button>
+    </section>
+
+    <section id="users-view" hidden>
+      <h1>Users</h1>
+      <div id="user-list"></div>
+      <p class="summary">Deleting a user also deletes all of their bookmarks.</p>
+      <form class="stack new-user" id="user-form" novalidate>
+        <label>Username <input type="text" name="name" autocomplete="off"></label>
+        <label>Temporary password <input type="password" name="password" autocomplete="new-password"></label>
+        <label class="inline"><input type="checkbox" name="admin"> Admin (can manage users)</label>
+        <p class="err" id="user-error" role="alert" hidden></p>
+        <div><button type="submit">Create user</button></div>
+      </form>
+    </section>
+  </main>
+</div>
+
+<section class="login" id="login" hidden>
+  <form id="login-form">
+    <h1>bkd</h1>
+    <p class="err" id="login-error" role="alert" hidden></p>
+    <label>Username <input type="text" name="name" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+    <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
+    <button type="submit">Sign in</button>
+  </form>
+</section>
+
+<section class="login" id="setup" hidden>
+  <form id="setup-form">
+    <h1>Set up bkd</h1>
+    <p class="ok-hint">Create the first admin. The setup token is in the server log from when bkd started.</p>
+    <p class="err" id="setup-error" role="alert" hidden></p>
+    <label>Setup token <input type="text" name="token" autocomplete="off" autocapitalize="characters" spellcheck="false" required></label>
+    <label>Username <input type="text" name="name" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+    <label>Password <input type="password" name="password" autocomplete="new-password" minlength="8" required></label>
+    <button type="submit">Create admin</button>
+  </form>
+</section>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

@@ -934,3 +934,58 @@ async fn a_cross_site_user_change_is_refused() {
         .origin("https://evil.test");
     assert_eq!(app.send(forged).await.status, StatusCode::FORBIDDEN);
 }
+
+// -------------------------------------------------------------- front end
+
+async fn fetch_page(app: &TestApp, uri: &str) -> (StatusCode, HeaderMap, String) {
+    let mut request = Request::builder()
+        .uri(uri)
+        .header(header::HOST, "bkd.test")
+        .body(Body::empty())
+        .unwrap();
+    let client: SocketAddr = "192.0.2.1:50000".parse().unwrap();
+    request.extensions_mut().insert(ConnectInfo(client));
+    let response = app.router.clone().oneshot(request).await.unwrap();
+    let (parts, body) = response.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    (parts.status, parts.headers, text)
+}
+
+#[tokio::test]
+async fn the_front_end_is_served_with_a_strict_content_security_policy() {
+    let app = TestApp::running().await;
+    for (uri, content_type) in [
+        ("/", "text/html"),
+        ("/app.css", "text/css"),
+        ("/app.js", "text/javascript"),
+    ] {
+        let (status, headers, body) = fetch_page(&app, uri).await;
+        assert_eq!(status, StatusCode::OK, "{uri}");
+        let actual = headers[header::CONTENT_TYPE].to_str().unwrap();
+        assert!(actual.starts_with(content_type), "{uri}: {actual}");
+        assert!(!body.is_empty());
+        let policy = headers[header::CONTENT_SECURITY_POLICY].to_str().unwrap();
+        assert!(policy.contains("default-src 'none'"));
+        assert!(!policy.contains("unsafe-inline"));
+        assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    }
+}
+
+#[tokio::test]
+async fn the_page_has_no_inline_script_or_style_that_the_policy_would_block() {
+    let app = TestApp::running().await;
+    let (_, _, html) = fetch_page(&app, "/").await;
+    assert!(html.contains(r#"<script src="/app.js"></script>"#));
+    assert!(!html.contains("<style"));
+    assert!(!html.contains(" style="));
+    assert!(!html.contains("onclick="));
+    assert_eq!(html.matches("<script").count(), 1);
+}
+
+#[tokio::test]
+async fn unknown_paths_are_not_found() {
+    let app = TestApp::running().await;
+    let (status, _, _) = fetch_page(&app, "/nope").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

@@ -2,7 +2,7 @@
 
 ## Stack
 
-Rust, axum, sqlx (SQLite) and clap; rust-embed will embed the front end. The front end is plain HTML and JavaScript embedded in the binary: no htmx, no Node build.
+Rust, axum, sqlx (SQLite) and clap. The front end is plain HTML, CSS and JavaScript in `frontend/`, compiled into the binary with `include_str!`: no htmx, no Node build, no embedding crate.
 
 ## Database
 
@@ -31,6 +31,15 @@ Only SQLite is supported. SQL stays plain so a PostgreSQL port would mostly chan
 - `first_admin`: one `INSERT ... WHERE NOT EXISTS` inside `BEGIN IMMEDIATE`, so concurrent submissions create exactly one admin.
 - `rate_limit`: per-IP, in memory. A caller charges an attempt before checking the secret and refunds it only on success, so parallel requests cannot all pass the check and a success cannot erase earlier failures. Clients are grouped by IPv4 address or IPv6 /64; IPv4-mapped IPv6 addresses count as IPv4. When 10,000 addresses are tracked, new ones are refused until some windows end.
 - `username`: the same rules as the `CHECK` in the schema, with ASCII lowercasing first.
+
+## Front end (`frontend/`, served by `src/web/assets.rs`)
+
+- Three files, `index.html`, `app.css` and `app.js`, served at `/`, `/app.css` and `/app.js` with `Cache-Control: no-cache` (they carry no version in their names).
+- A strict Content-Security-Policy (`default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; ...`) applies. The page has no inline script, no inline style and no inline event handler, and a test checks this. Keep it that way: an inline one would be blocked. All dynamic text is set with `textContent` or DOM nodes, never `innerHTML`.
+- One page has four screens: setup (when `/api/state` says `setup_required`), login, the bookmark list, and "Manage users" (admins only). `/api/state` picks the first screen.
+- Search and tag filters run on the server (`q`, `tag`); the page highlights the matched terms. The list loads 50 at a time with a "Show more" button. A search answer that arrives after a newer one is dropped.
+- The user screen hides the actions the server would refuse (changing yourself, changing the last active admin). The server enforces the same rules, so a stale screen only gets a 409 and reloads.
+- A 401 from any call returns the user to the login screen.
 
 ## Web API (`src/web/`)
 
