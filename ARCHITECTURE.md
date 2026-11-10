@@ -81,3 +81,11 @@ JSON under `/api`. Handlers are thin: they call `auth`, `bookmarks` and `users`.
 - **Responses** carry `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. Bodies over 64 KiB are refused.
 - **Setup token flow.** At startup, if no user exists, a token is generated and logged at WARN. It lives in memory and is cleared when the first admin is created, or when a request finds that someone else won the race.
 
+
+## Browser tests (`e2e/`)
+
+- A separate Cargo workspace (cucumber + thirtyfour), not part of the root package's build, so the normal build and `cargo nextest run` stay free of a WebDriver client. It is run by hand with `cd e2e && cargo test --test e2e`; there is no CI for it.
+- `cargo build` of the root crate runs first, and each scenario starts that binary with a temporary database and a free port. The setup token is read from the log line the server prints at startup.
+- A scenario sets up what it needs through the JSON API (`e2e/src/api.rs`) and exercises the behavior it is about through the browser. Features: `features/*.feature`; step code: `tests/e2e/steps/`.
+- Edit and Delete show only under a hovering pointer, so the browser is started with a fine-pointer setting and steps hover the row before clicking.
+- The double-Enter scenarios slow `fetch` down and watch for `securitypolicyviolation`: the CSP's `form-action 'none'` keeps a native submission out of the address bar, so a missing `preventDefault` shows only as a violation.

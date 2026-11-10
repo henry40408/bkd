@@ -25,3 +25,14 @@ cargo fmt
 cargo clippy --all-targets -- -D warnings
 cargo nextest run
 ```
+
+### Browser tests
+
+The `e2e/` directory holds end-to-end tests that drive the real page in headless Chrome or Chromium. It is a separate Cargo workspace, so `cargo nextest run` never compiles it or opens a browser.
+
+```sh
+cd e2e
+cargo test --test e2e
+```
+
+Chrome or Chromium must be installed; the first run downloads a matching chromedriver. Each scenario starts its own bkd on a free port with a temporary database. Set `BKD_E2E_FEATURES=features/bookmarks.feature` to run one feature.
