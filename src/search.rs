@@ -46,6 +46,7 @@ struct Term {
 pub struct Filter {
     terms: Vec<Term>,
     tag: Option<String>,
+    status: Option<String>,
 }
 
 impl Filter {
@@ -54,7 +55,20 @@ impl Filter {
     pub fn new(query: Option<&str>, tag: Option<&str>) -> Self {
         let terms = parse_query(query.unwrap_or_default());
         let tag = tag.and_then(exact_tag);
-        Self { terms, tag }
+        Self {
+            terms,
+            tag,
+            status: None,
+        }
+    }
+
+    /// Keeps only bookmarks with this link check result (`unchecked` for none). An
+    /// unknown name matches nothing.
+    pub fn with_status(mut self, status: Option<&str>) -> Self {
+        self.status = status
+            .map(|status| status.trim().to_lowercase())
+            .filter(|status| !status.is_empty());
+        self
     }
 }
 
@@ -204,6 +218,10 @@ pub fn push_conditions(query: &mut QueryBuilder<Sqlite>, filter: &Filter) {
     if let Some(tag) = &filter.tag {
         query.push(" AND ");
         push_tag_equals(query, tag.clone());
+    }
+    if let Some(status) = &filter.status {
+        query.push(" AND ");
+        push_status_equals(query, status.clone());
     }
 }
 
@@ -492,6 +510,28 @@ mod tests {
                 .await
                 .is_empty()
         );
+
+        let only =
+            |status: &str, query: &str| Filter::new(Some(query), None).with_status(Some(status));
+        let list = |filter: Filter| {
+            let pool = pool.clone();
+            async move {
+                let page = Page::new(None, None);
+                let mut titles: Vec<_> = bookmarks::list(&pool, user, &filter, page)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|bookmark| bookmark.title)
+                    .collect();
+                titles.sort();
+                titles
+            }
+        };
+        assert_eq!(list(only("broken", "")).await, ["dead"]);
+        assert_eq!(list(only(" Unchecked ", "")).await, ["fresh"]);
+        assert_eq!(list(only("ok", "dead")).await, Vec::<String>::new());
+        assert_eq!(list(only("", "")).await, ["dead", "fine", "fresh"]);
+        assert!(list(only("nonsense", "")).await.is_empty());
     }
 
     #[tokio::test]

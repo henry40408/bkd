@@ -51,6 +51,12 @@ pub struct TagCount {
     pub count: i64,
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize, sqlx::FromRow)]
+pub struct LinkCount {
+    pub status: String,
+    pub count: i64,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Page {
     pub limit: u32,
@@ -397,6 +403,20 @@ pub async fn tag_counts(pool: &SqlitePool, user_id: i64) -> Result<Vec<TagCount>
     Ok(counts)
 }
 
+/// How many of the user's bookmarks have each link check result. A result with no
+/// bookmarks is left out; `unchecked` counts the bookmarks never checked.
+pub async fn link_counts(pool: &SqlitePool, user_id: i64) -> Result<Vec<LinkCount>> {
+    let counts = sqlx::query_as(
+        "SELECT COALESCE(link_status, 'unchecked') AS status, count(*) AS count
+         FROM bookmarks WHERE user_id = ?1
+         GROUP BY status ORDER BY status",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(counts)
+}
+
 /// A bookmark from an import file, with the time it was first saved.
 pub struct ImportEntry {
     pub bookmark: ValidBookmark,
@@ -728,5 +748,33 @@ mod tests {
         let counts = tag_counts(&pool, henry).await.unwrap();
         let pairs: Vec<_> = counts.iter().map(|c| (c.tag.as_str(), c.count)).collect();
         assert_eq!(pairs, [("rust", 2), ("web", 1)]);
+    }
+
+    #[tokio::test]
+    async fn link_counts_cover_only_the_owner_and_name_unchecked() {
+        let (_dir, pool) = test_pool().await;
+        let henry = insert_user(&pool, "henry").await.unwrap();
+        let mei = insert_user(&pool, "mei").await.unwrap();
+        for (owner, url, status) in [
+            (henry, "one", Some("broken")),
+            (henry, "two", Some("broken")),
+            (henry, "three", None),
+            (mei, "four", Some("ok")),
+        ] {
+            let id = create(&pool, owner, &valid(url, &[]), 1).await.unwrap().id;
+            sqlx::query("UPDATE bookmarks SET link_status = ?1 WHERE id = ?2")
+                .bind(status)
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let counts = link_counts(&pool, henry).await.unwrap();
+        let pairs: Vec<_> = counts
+            .iter()
+            .map(|c| (c.status.as_str(), c.count))
+            .collect();
+        assert_eq!(pairs, [("broken", 2), ("unchecked", 1)]);
     }
 }

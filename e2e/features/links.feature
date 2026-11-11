@@ -32,6 +32,20 @@ Feature: Link check
     Then the list shows "Private"
     And the list shows "Other"
 
+  Scenario: The sidebar lists the results and filters by one
+    When I open the site
+    And I enter select mode
+    And I tick "Private"
+    And I check the links of the selection
+    Then the sidebar lists the link filter "Not confirmed"
+    And the sidebar lists the link filter "Not checked"
+    When I choose the link filter "Not confirmed"
+    Then the list shows "Private"
+    And the list does not show "Other"
+    When I choose the link filter "Not checked"
+    Then the list shows "Other"
+    And the list does not show "Private"
+
   Scenario: Check links needs a selection
     When I open the site
     And I enter select mode

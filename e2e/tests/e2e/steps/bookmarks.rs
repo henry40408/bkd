@@ -234,6 +234,20 @@ async fn choose_tag(world: &mut BkdWorld, tag: String) -> Result<()> {
     Ok(())
 }
 
+#[when(expr = "I choose the link filter {string}")]
+async fn choose_link_filter(world: &mut BkdWorld, label: String) -> Result<()> {
+    let link = By::XPath(format!(
+        "//ul[@id='link-list']//a[starts-with(normalize-space(.), '{label}')]"
+    ));
+    world.element_by(link).await?.click().await?;
+    Ok(())
+}
+
+#[then(expr = "the sidebar lists the link filter {string}")]
+async fn sidebar_lists_link_filter(world: &mut BkdWorld, label: String) -> Result<()> {
+    super::text_contains(world, "#link-list", &label).await
+}
+
 #[when("I choose Random")]
 async fn choose_random(world: &mut BkdWorld) -> Result<()> {
     world.click("#random").await

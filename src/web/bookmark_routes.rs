@@ -16,7 +16,7 @@ use super::SharedState;
 use super::error::ApiError;
 use super::guard::CurrentUser;
 use crate::auth::unix_now;
-use crate::bookmarks::{self, Bookmark, BookmarkInput, LinkCheck, Page, TagCount};
+use crate::bookmarks::{self, Bookmark, BookmarkInput, LinkCheck, LinkCount, Page, TagCount};
 use crate::bulk::{self, BulkInput, BulkOutcome};
 use crate::linkcheck::{self, ActiveCheck, CheckInput, RunningCheck};
 use crate::search::Filter;
@@ -25,6 +25,7 @@ use crate::search::Filter;
 pub struct ListParams {
     q: Option<String>,
     tag: Option<String>,
+    status: Option<String>,
     limit: Option<u32>,
     offset: Option<u32>,
 }
@@ -39,7 +40,8 @@ pub async fn list(
     CurrentUser(user): CurrentUser,
     Query(params): Query<ListParams>,
 ) -> Result<Json<BookmarkList>, ApiError> {
-    let filter = Filter::new(params.q.as_deref(), params.tag.as_deref());
+    let filter = Filter::new(params.q.as_deref(), params.tag.as_deref())
+        .with_status(params.status.as_deref());
     let page = Page::new(params.limit, params.offset);
     let bookmarks = bookmarks::list(&state.pool, user.user_id, &filter, page).await?;
     Ok(Json(BookmarkList { bookmarks }))
@@ -49,6 +51,7 @@ pub async fn list(
 pub struct RandomParams {
     q: Option<String>,
     tag: Option<String>,
+    status: Option<String>,
 }
 
 pub async fn random(
@@ -56,7 +59,8 @@ pub async fn random(
     CurrentUser(user): CurrentUser,
     Query(params): Query<RandomParams>,
 ) -> Result<Json<Bookmark>, ApiError> {
-    let filter = Filter::new(params.q.as_deref(), params.tag.as_deref());
+    let filter = Filter::new(params.q.as_deref(), params.tag.as_deref())
+        .with_status(params.status.as_deref());
     bookmarks::random(&state.pool, user.user_id, &filter)
         .await?
         .map(Json)
@@ -101,6 +105,7 @@ pub async fn delete(
 #[derive(Serialize)]
 pub struct TagList {
     tags: Vec<TagCount>,
+    links: Vec<LinkCount>,
 }
 
 pub async fn tags(
@@ -108,7 +113,8 @@ pub async fn tags(
     CurrentUser(user): CurrentUser,
 ) -> Result<Json<TagList>, ApiError> {
     let tags = bookmarks::tag_counts(&state.pool, user.user_id).await?;
-    Ok(Json(TagList { tags }))
+    let links = bookmarks::link_counts(&state.pool, user.user_id).await?;
+    Ok(Json(TagList { tags, links }))
 }
 
 #[derive(Serialize)]

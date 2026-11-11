@@ -49,7 +49,7 @@ In select mode, tick bookmarks and press "Check links". The server asks each add
 - **Link moved** (amber arrow, amber background, "now at <address>"): the page answers, but at another address. bkd only tells you; it does not change the saved URL.
 - **Link not confirmed** (grey question mark): the site refused robots (401, 403, 429), it did not answer within 10 seconds, or the address was not contacted because it is not public.
 
-A result is cleared when you change the bookmark's URL. Search them with `status:broken`.
+A result is cleared when you change the bookmark's URL. The sidebar lists each result under "Status" with a count (Broken, Moved, Not confirmed, OK, Not checked; a result with no bookmarks is left out); choose one to show only those bookmarks, or search with `status:broken`.
 
 The server only contacts public addresses, since it makes the requests on behalf of every user. Addresses for private networks, this machine and link-local ranges (such as cloud metadata) are never contacted, including through a redirect or a host name that resolves to one. This means bkd cannot check links to services on your own network. Each request has a 10 second limit and follows at most 5 redirects. One user can run one check at a time (429 otherwise). Over the API: `POST /api/bookmarks/check` with `{"ids": [...]}` (1 to 200 ids; 404 if any id is missing or not yours). It answers with a server-sent event stream: an event `result` with `{"id", "link": {"status", "checked_at", "detail"}}` for each link as soon as it is checked, then `done`. Closing the connection stops the check.
 

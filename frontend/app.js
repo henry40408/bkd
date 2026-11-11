@@ -9,10 +9,12 @@ const state = {
   user: null,
   view: 'list',
   tag: 'all',
+  link: 'all',
   query: '',
   bookmarks: [],
   hasMore: false,
   tags: [],
+  links: [],
   users: [],
   editing: null,
   confirming: null,
@@ -313,6 +315,7 @@ async function loadBookmarks({ mode = 'first' } = {}) {
   const params = new URLSearchParams({ limit: wanted + 1, offset: append ? state.bookmarks.length : 0 });
   if (state.query.trim()) params.set('q', state.query.trim());
   if (state.tag !== 'all') params.set('tag', state.tag);
+  if (state.link !== 'all') params.set('status', state.link);
   const result = await attempt(() => api('GET', `/bookmarks?${params}`));
   // A newer request owns the list now; showing this answer would put old results on screen.
   if (!result || ticket !== listTicket || !state.user) return;
@@ -330,8 +333,13 @@ async function loadTags() {
   const result = await attempt(() => api('GET', '/tags'));
   if (!result || !state.user) return;
   state.tags = result.value.tags;
-  if (state.tag !== 'all' && !state.tags.some((t) => t.tag === state.tag)) {
-    state.tag = 'all';
+  state.links = result.value.links;
+  // The filter's last bookmark is gone (deleted, retagged, or re-checked), so there is nothing left to show.
+  const tagGone = state.tag !== 'all' && !state.tags.some((t) => t.tag === state.tag);
+  const linkGone = state.link !== 'all' && !state.links.some((l) => l.status === state.link);
+  if (tagGone || linkGone) {
+    if (tagGone) state.tag = 'all';
+    if (linkGone) state.link = 'all';
     await loadBookmarks();
   }
   renderSide();
@@ -352,18 +360,35 @@ async function refreshAll() {
 
 /* ---------- sidebar ---------- */
 
-function filterLink(label, count, key) {
-  const current = state.view === 'list' && state.tag === key;
+function filterLink({ label, count, current, choose }) {
   return el('li', {}, el('a', {
     href: '#',
-    'aria-current': current ? 'page' : null,
-    onclick: (e) => { e.preventDefault(); setFilter(key); },
+    'aria-current': state.view === 'list' && current ? 'page' : null,
+    onclick: (e) => { e.preventDefault(); choose(); },
   }, label, count == null ? null : el('span', { class: 'count' }, String(count))));
 }
 
+// Worst first: what needs a look comes before what is fine.
+const LINK_FILTERS = [
+  ['broken', 'Broken'], ['redirected', 'Moved'], ['unknown', 'Not confirmed'], ['ok', 'OK'], ['unchecked', 'Not checked'],
+];
+
+function linkFilterLinks() {
+  const counts = new Map(state.links.map(({ status, count }) => [status, count]));
+  return LINK_FILTERS.filter(([status]) => counts.has(status)).map(([status, label]) => filterLink({
+    label, count: counts.get(status), current: state.link === status, choose: () => setLinkFilter(status),
+  }));
+}
+
 function renderSide() {
-  $('filters').replaceChildren(filterLink('All bookmarks', null, 'all'));
-  $('tag-list').replaceChildren(...state.tags.map(({ tag, count }) => filterLink(tag, count, tag)));
+  $('filters').replaceChildren(filterLink({
+    label: 'All bookmarks', current: state.tag === 'all' && state.link === 'all', choose: () => setFilter('all'),
+  }));
+  $('link-list').replaceChildren(...linkFilterLinks());
+  $('link-heading').hidden = !$('link-list').children.length;
+  $('tag-list').replaceChildren(...state.tags.map(({ tag, count }) => filterLink({
+    label: tag, count, current: state.link === 'all' && state.tag === tag, choose: () => setFilter(tag),
+  })));
 
   const manageUsersLink = el('a', { href: '#', onclick: (e) => { e.preventDefault(); showUsers(); } }, 'Manage users');
   const transferLink = el('a', { href: '#', onclick: (e) => { e.preventDefault(); showTransfer(); } }, 'Import and export');
@@ -473,8 +498,11 @@ function editView(b) {
 
 function emptyMessage() {
   const query = state.query.trim();
+  const linkLabel = LINK_FILTERS.find(([status]) => status === state.link)?.[1];
+  if (query && linkLabel) return [`No “${linkLabel}” bookmarks match “${query}”. `, el('button', { class: 'link', onclick: clearSearch }, 'Clear the search'), '.'];
   if (query && state.tag !== 'all') return [`No bookmarks tagged “${state.tag}” match “${query}”. `, el('button', { class: 'link', onclick: clearSearch }, 'Clear the search'), '.'];
   if (query) return [`No bookmarks match “${query}”. `, el('button', { class: 'link', onclick: clearSearch }, 'Clear the search'), ' or add a new bookmark.'];
+  if (linkLabel) return [`No “${linkLabel}” bookmarks.`];
   if (state.tag !== 'all') return [`No bookmarks tagged “${state.tag}”.`];
   return ['No bookmarks here yet. Add one with the form above.'];
 }
@@ -532,13 +560,14 @@ async function pickRandom() {
   const params = new URLSearchParams();
   if (state.query.trim()) params.set('q', state.query.trim());
   if (state.tag !== 'all') params.set('tag', state.tag);
+  if (state.link !== 'all') params.set('status', state.link);
   // A 404 only means nothing matches; it is not a failure worth a server-error message.
   const result = await attempt(() => api('GET', `/bookmarks/random?${params}`)
     .catch((error) => { if (error instanceof ApiError && error.status === 404) return null; throw error; }));
   if (!result || ticket !== pickTicket || !state.user) return;
   if (!result.value) {
     closePick();
-    return toast('No bookmarks to pick from. Clear the search or the tag first.');
+    return toast('No bookmarks to pick from. Clear the search or the filter first.');
   }
   renderPick(result.value);
   // The old button is gone after a rebuild. Focusing the title also makes a screen reader read what was picked.
@@ -846,6 +875,7 @@ async function runLinkCheck() {
   }
   // The user left select mode during the check; their new state must not be reset or have focus taken.
   if (progress.left) {
+    loadTags();
     renderList();
     return toast(checkSummary(tally, progress));
   }
@@ -980,11 +1010,21 @@ function setMenu(open) {
   if (open && !wasOpen) sidebar.querySelector('a')?.focus();
 }
 
+// A tag and a link result are separate lists in the sidebar, so choosing one clears the other.
 function setFilter(key) {
+  showFilter({ tag: key, link: 'all' });
+}
+
+function setLinkFilter(status) {
+  showFilter({ tag: 'all', link: status });
+}
+
+function showFilter({ tag, link }) {
   closePick();
   setMenu(false);
   state.view = 'list';
-  state.tag = key;
+  state.tag = tag;
+  state.link = link;
   state.editing = null;
   state.confirming = null;
   // A different list is coming; what was ticked will not be on screen.
@@ -1050,7 +1090,7 @@ function endSession(message) {
   closePick();
   setMenu(false);
   Object.assign(state, {
-    user: null, view: 'list', tag: 'all', query: '', bookmarks: [], hasMore: false, tags: [], users: [],
+    user: null, view: 'list', tag: 'all', link: 'all', query: '', bookmarks: [], hasMore: false, tags: [], links: [], users: [],
     editing: null, confirming: null, confirmingUser: null, resettingUser: null,
   });
   leaveSelectMode();
