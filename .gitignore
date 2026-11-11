@@ -1,4 +1,5 @@
 /target
+/.claude/
 /bkd.sqlite3
 /bkd.sqlite3-wal
 /bkd.sqlite3-shm

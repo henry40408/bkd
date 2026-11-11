@@ -2,6 +2,8 @@
 name = "bkd"
 version = "0.1.0"
 edition = "2024"
+description = "A single-binary, multi-user bookmark manager"
+license = "MIT"
 
 [dependencies]
 anyhow = "1.0.104"

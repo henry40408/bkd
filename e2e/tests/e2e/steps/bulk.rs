@@ -98,7 +98,7 @@ async fn button_disabled_is(world: &BkdWorld, label: &str, disabled: bool) -> Re
         .eventually(&format!("{label} disabled: {disabled}"), || async {
             for button in driver.find_all(By::Css("#bulk button")).await? {
                 if button.text().await? == label {
-                    return Ok(!button.is_enabled().await? == disabled);
+                    return Ok(button.is_enabled().await? != disabled);
                 }
             }
             Ok(false)

@@ -1,6 +1,6 @@
 # bkd
 
-A single-binary, multi-user bookmark manager. Work in progress: the web front end and the JSON API work.
+A single-binary, multi-user bookmark manager with a web front end and a JSON API. Bookmarks have tags and notes, search has its own syntax, and bkd can check links, import and export browser bookmarks, and sign people in through a reverse proxy such as Authelia.
 
 ## Run
 
@@ -8,7 +8,7 @@ A single-binary, multi-user bookmark manager. Work in progress: the web front en
 cargo run -- --db bkd.sqlite3 --addr 127.0.0.1:8080
 ```
 
-On the first start, with an empty database, bkd logs a one-time setup token like `WDP4S-V8PGD`. Open the site and enter it, with the first admin's username and password, on the setup page (or send them to `POST /api/setup`). Afterwards, admins manage accounts under "Manage users" (create, promote, demote, disable, reset password, delete); bkd never lets the last active admin be removed. Everyone can change their own password under "Change password": new passwords need at least 12 characters and must not contain the username, and a change signs the account out everywhere else. A session also ends after 7 days without use. "Account" also lists the browsers signed in to your account, where you can end any of them. Admin changes to accounts (create, promote, demote, disable, reset password, delete) ask for your password again if you have not typed it in the last 5 minutes.
+On the first start, with an empty database, bkd logs a one-time setup token like `WDP4S-V8PGD`. Whoever can read the log can create the first admin, so keep the log private. Open the site and enter it, with the first admin's username and password, on the setup page (or send them to `POST /api/setup`). Afterwards, admins manage accounts under "Manage users" (create, promote, demote, disable, reset password, delete); bkd never lets the last active admin be removed. Everyone can change their own password under "Change password": new passwords need at least 12 characters and must not contain the username, and a change signs the account out everywhere else. A session also ends after 7 days without use. "Account" also lists the browsers signed in to your account, where you can end any of them. Admin changes to accounts (create, promote, demote, disable, reset password, delete) ask for your password again if you have not typed it in the last 5 minutes.
 
 | Flag | Environment | Default | Meaning |
 | --- | --- | --- | --- |
@@ -109,3 +109,7 @@ cargo test --test e2e
 ```
 
 Chrome or Chromium must be installed; the first run downloads a matching chromedriver. Each scenario starts its own bkd on a free port with a temporary database. Set `BKD_E2E_FEATURES=features/bookmarks.feature` to run one feature.
+
+## License
+
+[MIT](LICENSE.txt)
