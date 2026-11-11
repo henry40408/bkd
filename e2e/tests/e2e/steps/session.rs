@@ -253,6 +253,11 @@ async fn open_account(world: &mut BkdWorld) -> Result<()> {
     Ok(())
 }
 
+#[when("I click the bkd brand")]
+async fn click_brand(world: &mut BkdWorld) -> Result<()> {
+    world.click("#sidebar .brand a").await
+}
+
 #[when(expr = "I change my password from {string} to {string}")]
 async fn change_password(world: &mut BkdWorld, current: String, new: String) -> Result<()> {
     submit_password_form(world, &current, &new, &new).await
