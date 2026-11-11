@@ -1,0 +1,14 @@
+# The binary entrypoint only runs in a live process (socket bind, signal
+# handling), so leave it out of the coverage denominator.
+ignore:
+  - "src/main.rs"
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 2%
+    patch:
+      default:
+        target: 70%
