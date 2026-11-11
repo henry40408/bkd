@@ -53,9 +53,8 @@ jobs:
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
         with:
           tool: nextest
+      # bkd is a binary-only crate, so there are no doctests to run.
       - run: cargo nextest run
-      # nextest does not run doctests.
-      - run: cargo test --doc
 
   deny:
     name: deny
