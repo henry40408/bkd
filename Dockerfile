@@ -1,11 +1,20 @@
 # syntax=docker/dockerfile:1
 
 # ---- build -------------------------------------------------------------------
-# The tag is unversioned on purpose: Cargo.toml uses edition 2024, and the
-# bookworm base keeps the build glibc version equal to the runtime image's.
-FROM rust:1-bookworm AS build
+# No Rust version here: rust-toolchain.toml is the single source of truth and rustup
+# installs it below. Do not "simplify" this to `rust:1.99`: the un-suffixed tag
+# resolves to trixie, which would be a silent Debian major bump. The bookworm base
+# keeps the build glibc version equal to the runtime image's.
+FROM rust:bookworm AS build
 
 WORKDIR /app
+
+# Install the pinned toolchain in a layer keyed on rust-toolchain.toml alone, so
+# editing source does not re-download the compiler. Any rustup proxy invocation
+# triggers the install.
+COPY rust-toolchain.toml .
+RUN cargo --version
+
 COPY . .
 
 # SQLite is bundled and TLS is rustls, so no system libraries are needed.
