@@ -25,6 +25,26 @@ On the first start, with an empty database, bkd logs a one-time setup token like
 | `--addr` | `BKD_ADDR` | `127.0.0.1:8080` | Address to listen on. |
 | `--secure-cookies` | `BKD_SECURE_COOKIES` | off | Mark the session cookie `Secure`. Turn on when serving over HTTPS. |
 
+## Docker
+
+Images for `linux/amd64` and `linux/arm64` are published to GitHub Container Registry. A release publishes the version tags (`1.2.3`, `1.2`) and `latest`; every merge to `main` publishes `main`, the newest unreleased build. The image runs as a non-root user (uid 65532) and keeps the database in the `/data` volume.
+
+```sh
+docker run -d \
+  --name bkd \
+  -p 8080:8080 \
+  -v bkd_data:/data \
+  ghcr.io/henry40408/bkd:latest
+```
+
+The image sets `BKD_DB=/data/bkd.sqlite3` and `BKD_ADDR=0.0.0.0:8080`. Override them, or set `BKD_SECURE_COOKIES=true` when a proxy serves the site over HTTPS, with `-e`. A bind mount must be writable by uid 65532.
+
+On the first start, with an empty database, bkd logs the one-time setup token. Read it with `docker logs bkd`.
+
+To sign in through a reverse proxy such as Authelia, set `BKD_FORWARD_AUTH_TRUSTED_PROXIES` to the proxy's address or CIDR range. `BKD_FORWARD_AUTH_USER_HEADER`, `BKD_FORWARD_AUTH_GROUPS_HEADER` and `BKD_FORWARD_AUTH_ADMIN_GROUP` tune it. See "Sign in through a reverse proxy" below.
+
+To build the image yourself, run `docker build -t bkd .`.
+
 ## Sign in through a reverse proxy (Authelia)
 
 bkd can let a reverse proxy that already signs people in (Authelia, Authentik, oauth2-proxy) tell it who is calling. Set `--forward-auth-trusted-proxies` to the proxy's address and bkd believes the `Remote-User` header, but only on requests that come from that address. Any other client's header is ignored.
@@ -99,26 +119,6 @@ The server only contacts public addresses, since it makes the requests on behalf
 Under "Import and export" in the sidebar, choose the bookmarks file your browser exported (Chrome, Firefox, Safari, Pocket and Raindrop all write the same `.html` format). Folders become tags, the date saved is kept when the file has one (Safari's does not), and a link you already have is skipped, so importing the same file twice is safe. Links that are not web links (`javascript:`, `place:`) are skipped and listed in the result. The same screen downloads your bookmarks as HTML (for a browser or another service) or JSON (a backup).
 
 Over the API: send the file to `POST /api/import` with `Content-Type: text/html` and your session cookie, and read `GET /api/export?format=html|json`.
-
-## Docker
-
-Images for `linux/amd64` and `linux/arm64` are published to GitHub Container Registry. A release publishes the version tags (`1.2.3`, `1.2`) and `latest`; every merge to `main` publishes `main`, the newest unreleased build. The image runs as a non-root user (uid 65532) and keeps the database in the `/data` volume.
-
-```sh
-docker run -d \
-  --name bkd \
-  -p 8080:8080 \
-  -v bkd_data:/data \
-  ghcr.io/henry40408/bkd:latest
-```
-
-The image sets `BKD_DB=/data/bkd.sqlite3` and `BKD_ADDR=0.0.0.0:8080`. Override them, or set `BKD_SECURE_COOKIES=true` when a proxy serves the site over HTTPS, with `-e`. A bind mount must be writable by uid 65532.
-
-On the first start, with an empty database, bkd logs the one-time setup token. Read it with `docker logs bkd`.
-
-To sign in through a reverse proxy such as Authelia, set `BKD_FORWARD_AUTH_TRUSTED_PROXIES` to the proxy's address or CIDR range. `BKD_FORWARD_AUTH_USER_HEADER`, `BKD_FORWARD_AUTH_GROUPS_HEADER` and `BKD_FORWARD_AUTH_ADMIN_GROUP` tune it. See "Sign in through a reverse proxy" above.
-
-To build the image yourself, run `docker build -t bkd .`.
 
 ## Develop
 
