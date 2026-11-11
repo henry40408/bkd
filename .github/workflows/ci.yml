@@ -56,6 +56,27 @@ jobs:
       # bkd is a binary-only crate, so there are no doctests to run.
       - run: cargo nextest run
 
+  # Root crate only: `e2e/` is its own workspace, so it is not measured.
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
+        with:
+          tool: cargo-llvm-cov@0.9.1,nextest
+      - run: cargo llvm-cov nextest --lcov --output-path lcov.info
+      # Dependabot PRs cannot read secrets, so the upload must not fail them.
+      - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: henry40408/bkd
+          files: lcov.info
+          fail_ci_if_error: ${{ github.actor != 'dependabot[bot]' }}
+
   deny:
     name: deny
     runs-on: ubuntu-latest

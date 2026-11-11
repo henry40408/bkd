@@ -1,5 +1,8 @@
 # bkd
 
+[![CI](https://github.com/henry40408/bkd/actions/workflows/ci.yml/badge.svg)](https://github.com/henry40408/bkd/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/henry40408/bkd/graph/badge.svg)](https://codecov.io/gh/henry40408/bkd)
+
 A single-binary, multi-user bookmark manager with a web front end and a JSON API. Bookmarks have tags and notes, search has its own syntax, and bkd can check links, import and export browser bookmarks, and sign people in through a reverse proxy such as Authelia.
 
 ## Run
