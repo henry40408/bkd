@@ -11,7 +11,9 @@
 //! - `"two words"` is one term. `\"` is a quote inside it. A quote that is never
 //!   closed runs to the end of the query.
 //! - `-term` must NOT match. A lone `-` is plain text.
-//! - `title:`, `url:`, `note:` match only that field; `tag:` matches a tag exactly.
+//! - `title:`, `url:`, `note:` match only that field; `tag:` matches a tag exactly;
+//!   `status:` matches the link check result (`ok`, `redirected`, `broken`, `unknown`
+//!   or `unchecked`).
 //!   The value may be quoted: `tag:"to read"`. Any other `name:` (such as
 //!   `https://x.test`) and a prefix with nothing after it are plain text.
 //!
@@ -30,6 +32,7 @@ enum Field {
     Url,
     Note,
     Tag,
+    Status,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -62,6 +65,7 @@ impl Field {
             "url" => Some(Self::Url),
             "note" => Some(Self::Note),
             "tag" => Some(Self::Tag),
+            "status" => Some(Self::Status),
             _ => None,
         }
     }
@@ -74,6 +78,7 @@ impl Field {
             Self::Url => "url",
             Self::Note => "note",
             Self::Tag => "tag",
+            Self::Status => "status",
         }
     }
 
@@ -82,7 +87,7 @@ impl Field {
             Self::Title => Some("title"),
             Self::Url => Some("url"),
             Self::Note => Some("note"),
-            Self::Any | Self::Tag => None,
+            Self::Any | Self::Tag | Self::Status => None,
         }
     }
 }
@@ -207,6 +212,10 @@ fn push_term_match(query: &mut QueryBuilder<Sqlite>, term: &Term) {
         push_tag_equals(query, exact_tag(&term.text).unwrap_or_default());
         return;
     }
+    if term.field == Field::Status {
+        push_status_equals(query, term.text.trim().to_lowercase());
+        return;
+    }
     let pattern = contains_pattern(&term.text);
     let columns: &[&str] = match term.field.column() {
         Some(column) => &[column],
@@ -228,6 +237,13 @@ fn push_term_match(query: &mut QueryBuilder<Sqlite>, term: &Term) {
         query.push_bind(pattern);
         query.push(" ESCAPE '\\')");
     }
+}
+
+/// `unchecked` is a bookmark with no link check. COALESCE keeps `-status:broken` from
+/// dropping those rows: comparing NULL gives NULL, and NOT NULL is still not true.
+fn push_status_equals(query: &mut QueryBuilder<Sqlite>, status: String) {
+    query.push("COALESCE(bookmarks.link_status, 'unchecked') = ");
+    query.push_bind(status);
 }
 
 fn push_tag_equals(query: &mut QueryBuilder<Sqlite>, tag: String) {
@@ -432,6 +448,50 @@ mod tests {
         );
         // Only an exclusion: everything that does not match.
         assert_eq!(titles(&pool, user, "-rust", None).await.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn status_finds_bookmarks_by_their_link_check() {
+        let (_dir, pool) = test_pool().await;
+        let user = insert_user(&pool, "henry").await.unwrap();
+        for (title, status) in [
+            ("fine", Some("ok")),
+            ("dead", Some("broken")),
+            ("fresh", None),
+        ] {
+            add(
+                &pool,
+                user,
+                title,
+                &format!("https://a.test/{title}"),
+                "",
+                &[],
+            )
+            .await;
+            sqlx::query("UPDATE bookmarks SET link_status = ?1 WHERE title = ?2")
+                .bind(status)
+                .bind(title)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(titles(&pool, user, "status:broken", None).await, ["dead"]);
+        assert_eq!(titles(&pool, user, "STATUS:OK", None).await, ["fine"]);
+        assert_eq!(
+            titles(&pool, user, "status:unchecked", None).await,
+            ["fresh"]
+        );
+        // A bookmark that was never checked is not "not broken" by accident of NULL.
+        assert_eq!(
+            titles(&pool, user, "-status:broken", None).await,
+            ["fine", "fresh"]
+        );
+        assert!(
+            titles(&pool, user, "status:nonsense", None)
+                .await
+                .is_empty()
+        );
     }
 
     #[tokio::test]

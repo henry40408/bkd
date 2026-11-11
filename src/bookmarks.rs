@@ -32,6 +32,17 @@ pub struct Bookmark {
     pub tags: Vec<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// `None` until the link is checked, and again after the URL changes.
+    pub link: Option<LinkCheck>,
+}
+
+/// The result of the last link check.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct LinkCheck {
+    /// `ok`, `redirected`, `broken` or `unknown`.
+    pub status: String,
+    pub checked_at: i64,
+    pub detail: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, sqlx::FromRow)]
@@ -204,6 +215,9 @@ struct BookmarkRow {
     note: String,
     created_at: i64,
     updated_at: i64,
+    link_status: Option<String>,
+    link_checked_at: Option<i64>,
+    link_detail: Option<String>,
     tags: Option<String>,
 }
 
@@ -220,6 +234,11 @@ impl From<BookmarkRow> for Bookmark {
                 .unwrap_or_default(),
             created_at: row.created_at,
             updated_at: row.updated_at,
+            link: row.link_status.map(|status| LinkCheck {
+                status,
+                checked_at: row.link_checked_at.unwrap_or_default(),
+                detail: row.link_detail.unwrap_or_default(),
+            }),
         }
     }
 }
@@ -227,6 +246,7 @@ impl From<BookmarkRow> for Bookmark {
 // The tags come from a sub-select so one query returns everything the list needs.
 const SELECT_BOOKMARK: &str = "SELECT bookmarks.id, bookmarks.url, bookmarks.title, bookmarks.note,
     bookmarks.created_at, bookmarks.updated_at,
+    bookmarks.link_status, bookmarks.link_checked_at, bookmarks.link_detail,
     (SELECT group_concat(tag, char(31))
      FROM (SELECT tag FROM bookmark_tags WHERE bookmark_id = bookmarks.id ORDER BY tag)) AS tags
     FROM bookmarks";
@@ -268,7 +288,13 @@ pub async fn update(
 ) -> Result<Option<Bookmark>> {
     let mut transaction = pool.begin().await?;
     let changed = sqlx::query(
-        "UPDATE bookmarks SET url = ?1, title = ?2, note = ?3, updated_at = ?4
+        // A check describes one address, so it is dropped when the URL changes. In SET,
+        // `url` is still the old value.
+        "UPDATE bookmarks SET
+             link_status     = CASE WHEN url = ?1 THEN link_status     END,
+             link_checked_at = CASE WHEN url = ?1 THEN link_checked_at END,
+             link_detail     = CASE WHEN url = ?1 THEN link_detail     END,
+             url = ?1, title = ?2, note = ?3, updated_at = ?4
          WHERE id = ?5 AND user_id = ?6",
     )
     .bind(&bookmark.url)

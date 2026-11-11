@@ -28,6 +28,7 @@ Every word you type must match somewhere in the title, URL, note or a tag. Case 
 | `-word`, `-"a phrase"` | Leave out bookmarks that match. |
 | `title:`, `url:`, `note:` | Match only that field: `url:github.com`. |
 | `tag:` | Match a whole tag, ignoring case: `tag:rust`, `tag:"to read"`. |
+| `status:` | Match the last link check: `status:broken`, `ok`, `redirected`, `unknown`, or `unchecked` for bookmarks never checked. |
 
 Prefixes combine with the rest: `-tag:old`, `title:"rust book"`. Anything else is plain text, so `https://x.test` and a prefix with nothing after it search for what you typed. A search uses at most 8 terms of 100 characters each.
 
@@ -38,6 +39,19 @@ The "Random" button next to the search box shows one bookmark picked from what t
 ## Bulk actions
 
 "Select" next to the search box turns on checkboxes. Tick the bookmarks you want (Shift-click ticks a range, "Select all" ticks every loaded row), then add a tag to all of them, remove a tag from all of them, or delete them. Tags are separated by commas, as in the add form. Delete asks first and cannot be undone. After an action, select mode ends. Over the API: `POST /api/bookmarks/bulk` with `{"ids": [...], "action": "delete" | "add_tags" | "remove_tags", "tags": [...]}` (up to 200 ids; one transaction, so it changes all of them or none; 404 if any id is missing or not yours). It answers `{"changed": n}`.
+
+## Link check
+
+In select mode, tick bookmarks and press "Check links". The server asks each address whether it still answers and shows the result under the bookmark; a bookmark never checked shows nothing. Results appear one by one as the server gets them, and a Stop button ends the check early; what was found so far stays saved. Results (the names below are read out by screen readers; on screen you see the icon and colour):
+
+- **Link OK** (green check, "checked <time>"): the page answers at the saved address.
+- **Broken link** (red cross, red background): HTTP 4xx or 5xx (except the ones below), a refused connection or failed DNS lookup, or a redirect loop.
+- **Link moved** (amber arrow, amber background, "now at <address>"): the page answers, but at another address. bkd only tells you; it does not change the saved URL.
+- **Link not confirmed** (grey question mark): the site refused robots (401, 403, 429), it did not answer within 10 seconds, or the address was not contacted because it is not public.
+
+A result is cleared when you change the bookmark's URL. Search them with `status:broken`.
+
+The server only contacts public addresses, since it makes the requests on behalf of every user. Addresses for private networks, this machine and link-local ranges (such as cloud metadata) are never contacted, including through a redirect or a host name that resolves to one. This means bkd cannot check links to services on your own network. Each request has a 10 second limit and follows at most 5 redirects. One user can run one check at a time (429 otherwise). Over the API: `POST /api/bookmarks/check` with `{"ids": [...]}` (1 to 200 ids; 404 if any id is missing or not yours). It answers with a server-sent event stream: an event `result` with `{"id", "link": {"status", "checked_at", "detail"}}` for each link as soon as it is checked, then `done`. Closing the connection stops the check.
 
 ## Import and export
 

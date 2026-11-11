@@ -25,6 +25,7 @@ use tokio::net::TcpListener;
 use crate::auth::rate_limit::RateLimiter;
 use crate::auth::session;
 use crate::auth::setup_token::SetupToken;
+use crate::linkcheck::{ActiveChecks, Checker};
 
 // A bookmark is a few kilobytes at most.
 const MAX_BODY_BYTES: usize = 64 * 1024;
@@ -47,6 +48,8 @@ pub struct AppState {
     /// `Some` only while no user exists. Held in memory, never stored.
     setup_token: Mutex<Option<Arc<SetupToken>>>,
     pub secure_cookies: bool,
+    pub link_checker: Checker,
+    pub active_checks: ActiveChecks,
 }
 
 pub struct Settings {
@@ -54,6 +57,7 @@ pub struct Settings {
     pub setup_token: Option<SetupToken>,
     /// Mark the session cookie `Secure`. Turn it on when the site is served over HTTPS.
     pub secure_cookies: bool,
+    pub link_checker: Checker,
 }
 
 impl AppState {
@@ -64,6 +68,8 @@ impl AppState {
             setup_limiter: RateLimiter::new(SETUP_ATTEMPTS_PER_WINDOW, RATE_LIMIT_WINDOW),
             setup_token: Mutex::new(settings.setup_token.map(Arc::new)),
             secure_cookies: settings.secure_cookies,
+            link_checker: settings.link_checker,
+            active_checks: ActiveChecks::default(),
         })
     }
 
@@ -93,6 +99,7 @@ pub fn router(state: SharedState) -> Router {
         )
         .route("/bookmarks/random", get(bookmark_routes::random))
         .route("/bookmarks/bulk", post(bookmark_routes::bulk))
+        .route("/bookmarks/check", post(bookmark_routes::check))
         .route(
             "/bookmarks/{id}",
             put(bookmark_routes::update).delete(bookmark_routes::delete),

@@ -498,6 +498,7 @@ mod tests {
             tags: vec!["a,b".to_owned(), "c".to_owned()],
             created_at: 1_700_000_000,
             updated_at: 1_700_000_001,
+            link: None,
         };
         let links = parse(&render(&[bookmark]));
         assert_eq!(

@@ -76,6 +76,36 @@ async fn keep_the_selection(world: &mut BkdWorld) -> Result<()> {
     world.click("#bulk-panel button:not(.danger)").await
 }
 
+#[when("I check the links of the selection")]
+async fn check_links_of_selection(world: &mut BkdWorld) -> Result<()> {
+    world.click("#bulk [data-key=check-links]").await
+}
+
+#[then(expr = "the {string} button is disabled")]
+async fn button_is_disabled(world: &mut BkdWorld, label: String) -> Result<()> {
+    button_disabled_is(world, &label, true).await
+}
+
+#[then(expr = "the {string} button is enabled")]
+async fn button_is_enabled(world: &mut BkdWorld, label: String) -> Result<()> {
+    button_disabled_is(world, &label, false).await
+}
+
+async fn button_disabled_is(world: &BkdWorld, label: &str, disabled: bool) -> Result<()> {
+    let driver = world.driver()?;
+    world
+        .browser()?
+        .eventually(&format!("{label} disabled: {disabled}"), || async {
+            for button in driver.find_all(By::Css("#bulk button")).await? {
+                if button.text().await? == label {
+                    return Ok(!button.is_enabled().await? == disabled);
+                }
+            }
+            Ok(false)
+        })
+        .await
+}
+
 #[then(expr = "the selection count says {string}")]
 async fn selection_count(world: &mut BkdWorld, text: String) -> Result<()> {
     super::text_contains(world, "#bulk .bulk-count", &text).await

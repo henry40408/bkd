@@ -15,6 +15,7 @@ use crate::auth::password;
 use crate::auth::setup_token::SetupToken;
 use crate::db::test_support::tempdir::TempDir;
 use crate::db::test_support::test_pool;
+use crate::linkcheck::Checker;
 
 const PASSWORD: &str = "correct horse battery";
 
@@ -92,12 +93,18 @@ impl Send {
 
 impl TestApp {
     async fn new(setup_token: Option<SetupToken>) -> Self {
+        // Link-check tests talk to a server on this machine.
+        Self::with_checker(setup_token, Checker::allowing_loopback().unwrap()).await
+    }
+
+    async fn with_checker(setup_token: Option<SetupToken>, link_checker: Checker) -> Self {
         let (dir, pool) = test_pool().await;
         let setup_display = None;
         let state = AppState::new(Settings {
             pool,
             setup_token,
             secure_cookies: false,
+            link_checker,
         });
         Self {
             router: router(state.clone()),
@@ -471,6 +478,7 @@ async fn bookmark_routes_need_a_session() {
             "/api/bookmarks/bulk",
             json!({"ids": [1], "action": "delete"}),
         ),
+        Send::post("/api/bookmarks/check", json!({"ids": [1]})),
     ] {
         assert_eq!(app.send(request).await.status, StatusCode::UNAUTHORIZED);
     }
@@ -1419,4 +1427,243 @@ async fn unknown_paths_are_not_found() {
     let app = TestApp::running().await;
     let (status, _, _) = fetch_page(&app, "/nope").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+// --- Link checking ---
+
+/// A web server on this machine with a few fixed pages, and a count of requests it got.
+struct FakeSite {
+    port: u16,
+    requests: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl FakeSite {
+    async fn start() -> Self {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let requests = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = requests.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                counter.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let mut buffer = [0u8; 2048];
+                    let read = socket.read(&mut buffer).await.unwrap_or(0);
+                    let head = String::from_utf8_lossy(&buffer[..read]).into_owned();
+                    let mut words = head.split_whitespace();
+                    let (method, path) = (words.next().unwrap_or(""), words.next().unwrap_or(""));
+                    let reply = match (method, path) {
+                        (_, "/ok") => "200 OK",
+                        (_, "/missing") => "404 Not Found",
+                        (_, "/forbidden") => "403 Forbidden",
+                        ("HEAD", "/no-head") => "405 Method Not Allowed",
+                        (_, "/no-head") => "200 OK",
+                        (_, "/moved") => "301 Moved Permanently\r\nLocation: /ok",
+                        (_, "/loop") => "302 Found\r\nLocation: /loop",
+                        (_, "/inside") => "302 Found\r\nLocation: http://10.0.0.1/secret",
+                        _ => "500 Internal Server Error",
+                    };
+                    let response = format!(
+                        "HTTP/1.1 {reply}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                });
+            }
+        });
+        Self { port, requests }
+    }
+
+    fn url(&self, path: &str) -> String {
+        format!("http://127.0.0.1:{}{path}", self.port)
+    }
+
+    fn requests(&self) -> usize {
+        self.requests.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+async fn create_at(app: &TestApp, token: &str, url: &str, title: &str) -> i64 {
+    let reply = app
+        .send(Send::post("/api/bookmarks", bookmark(url, title, &[])).cookie(token))
+        .await;
+    assert_eq!(reply.status, StatusCode::CREATED);
+    reply.body["id"].as_i64().unwrap()
+}
+
+async fn check_links(app: &TestApp, token: &str, ids: &[i64]) -> Reply {
+    let request = Send::post("/api/bookmarks/check", json!({ "ids": ids })).cookie(token);
+    app.send(request).await
+}
+
+/// The `data:` of every event with this name in a server-sent event stream.
+fn events_named(reply: &Reply, name: &str) -> Vec<Value> {
+    reply
+        .text
+        .split("\n\n")
+        .filter(|event| event.lines().any(|line| line == format!("event: {name}")))
+        .filter_map(|event| event.lines().find_map(|line| line.strip_prefix("data: ")))
+        .map(|data| serde_json::from_str(data).unwrap())
+        .collect()
+}
+
+fn link_of(reply: &Reply, id: i64) -> (String, String) {
+    let results = events_named(reply, "result");
+    let found = results
+        .iter()
+        .find(|result| result["id"] == id)
+        .unwrap_or_else(|| panic!("no result for {id}"));
+    (
+        found["link"]["status"].as_str().unwrap().to_owned(),
+        found["link"]["detail"].as_str().unwrap().to_owned(),
+    )
+}
+
+#[tokio::test]
+async fn checking_links_sorts_them_into_ok_redirected_broken_and_unknown() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let site = FakeSite::start().await;
+    let mut ids = Vec::new();
+    for path in [
+        "/ok",
+        "/no-head",
+        "/moved",
+        "/missing",
+        "/forbidden",
+        "/loop",
+        "/inside",
+    ] {
+        ids.push(create_at(&app, &token, &site.url(path), path).await);
+    }
+
+    let reply = check_links(&app, &token, &ids).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(reply.headers[header::CONTENT_TYPE], "text/event-stream");
+    assert_eq!(reply.headers["x-accel-buffering"], "no");
+    // One event per link, then a single `done` that ends the stream.
+    assert_eq!(events_named(&reply, "result").len(), ids.len());
+    assert_eq!(events_named(&reply, "done").len(), 1);
+    assert!(reply.text.trim_end().ends_with("data: {}"));
+    let status = |index: usize| link_of(&reply, ids[index]);
+    assert_eq!(status(0), ("ok".to_owned(), String::new()));
+    // The server refuses HEAD but serves GET, so the link is fine.
+    assert_eq!(status(1), ("ok".to_owned(), String::new()));
+    assert_eq!(status(2), ("redirected".to_owned(), site.url("/ok")));
+    assert_eq!(status(3), ("broken".to_owned(), "HTTP 404".to_owned()));
+    assert_eq!(status(4), ("unknown".to_owned(), "HTTP 403".to_owned()));
+    assert_eq!(
+        status(5),
+        ("broken".to_owned(), "Too many redirects".to_owned())
+    );
+    // A redirect into a private address is not followed.
+    assert_eq!(status(6).0, "unknown");
+    assert_eq!(status(6).1, "Address is not public");
+
+    let list = app.send(Send::get("/api/bookmarks").cookie(&token)).await;
+    let stored = list.body["bookmarks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|bookmark| bookmark["id"] == ids[3])
+        .unwrap();
+    assert_eq!(stored["link"]["status"], "broken");
+    assert_eq!(stored["link"]["detail"], "HTTP 404");
+    assert!(stored["link"]["checked_at"].as_i64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn editing_the_url_clears_the_check_but_editing_the_title_keeps_it() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let site = FakeSite::start().await;
+    let id = create_at(&app, &token, &site.url("/missing"), "gone").await;
+    check_links(&app, &token, &[id]).await;
+    let uri = format!("/api/bookmarks/{id}");
+
+    let renamed = bookmark(&site.url("/missing"), "renamed", &[]);
+    let renamed = app.send(Send::put(&uri, renamed).cookie(&token)).await;
+    assert_eq!(renamed.body["link"]["status"], "broken");
+
+    let moved = bookmark(&site.url("/ok"), "renamed", &[]);
+    let moved = app.send(Send::put(&uri, moved).cookie(&token)).await;
+    assert_eq!(moved.status, StatusCode::OK);
+    assert!(moved.body["link"].is_null());
+}
+
+#[tokio::test]
+async fn a_host_that_refuses_connections_is_broken() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    // Bind and drop to get a port nobody listens on.
+    let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = closed.local_addr().unwrap().port();
+    drop(closed);
+    let id = create_at(&app, &token, &format!("http://127.0.0.1:{port}/"), "dead").await;
+    let reply = check_links(&app, &token, &[id]).await;
+    assert_eq!(
+        link_of(&reply, id),
+        ("broken".to_owned(), "Could not connect".to_owned())
+    );
+}
+
+#[tokio::test]
+async fn the_server_never_contacts_a_private_address_for_a_user() {
+    let strict = TestApp::with_checker(None, Checker::public_only().unwrap()).await;
+    let token = strict.sign_in_as("henry").await;
+    let site = FakeSite::start().await;
+    let by_address = create_at(&strict, &token, &site.url("/ok"), "by address").await;
+    let by_name = create_at(
+        &strict,
+        &token,
+        &format!("http://localhost:{}/ok", site.port),
+        "by name",
+    )
+    .await;
+
+    let reply = check_links(&strict, &token, &[by_address, by_name]).await;
+    for id in [by_address, by_name] {
+        let (status, detail) = link_of(&reply, id);
+        assert_eq!(status, "unknown");
+        assert_eq!(detail, "Address is not public");
+    }
+    assert_eq!(site.requests(), 0);
+}
+
+#[tokio::test]
+async fn link_checks_cover_only_the_callers_own_bookmarks_and_reject_bad_requests() {
+    let app = TestApp::running().await;
+    let henry = app.sign_in_as("henry").await;
+    let mei = app.sign_in_as("mei").await;
+    let site = FakeSite::start().await;
+    let mine = create_at(&app, &henry, &site.url("/ok"), "mine").await;
+    let theirs = create_at(&app, &mei, &site.url("/ok"), "theirs").await;
+
+    assert_eq!(
+        check_links(&app, &henry, &[mine, theirs]).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        check_links(&app, &henry, &[mine, 99999]).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        site.requests(),
+        0,
+        "nothing is checked when any id is refused"
+    );
+    let too_many: Vec<i64> = (1..=201).collect();
+    for ids in [vec![], too_many] {
+        assert_eq!(
+            check_links(&app, &henry, &ids).await.status,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    let meis = app.send(Send::get("/api/bookmarks").cookie(&mei)).await;
+    assert!(meis.body["bookmarks"][0]["link"].is_null());
 }

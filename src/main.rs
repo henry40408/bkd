@@ -3,6 +3,7 @@ mod bookmarks;
 mod bulk;
 mod db;
 mod import;
+mod linkcheck;
 mod netscape;
 mod search;
 mod users;
@@ -17,6 +18,7 @@ use tokio::net::TcpListener;
 
 use auth::setup_token::SetupToken;
 use auth::{first_admin, password};
+use linkcheck::Checker;
 use web::{AppState, Settings};
 
 #[derive(Debug, Parser)]
@@ -49,6 +51,7 @@ async fn main() -> Result<()> {
         pool: pool.clone(),
         setup_token,
         secure_cookies: args.secure_cookies,
+        link_checker: Checker::public_only()?,
     });
 
     let listener = TcpListener::bind(args.addr)

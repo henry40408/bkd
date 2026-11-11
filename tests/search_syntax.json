@@ -27,5 +27,8 @@
   { "query": "title:a:b", "terms": [["title", "a:b", false]] },
   { "query": "it's", "terms": [["any", "it's", false]] },
   { "query": "學習 tag:\"教學 筆記\"", "terms": [["any", "學習", false], ["tag", "教學 筆記", false]] },
-  { "query": "\"a\"b", "terms": [["any", "a", false], ["any", "b", false]] }
+  { "query": "\"a\"b", "terms": [["any", "a", false], ["any", "b", false]] },
+  { "query": "status:broken", "terms": [["status", "broken", false]] },
+  { "query": "-STATUS:Unchecked x", "terms": [["status", "Unchecked", true], ["any", "x", false]] },
+  { "query": "status:", "terms": [["any", "status:", false]] }
 ]

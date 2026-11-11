@@ -25,6 +25,8 @@ const state = {
   bulkPanel: null,
   bulkError: '',
   bulkBusy: false,
+  // Set while links are being checked: { done, total, stop }.
+  checking: null,
 };
 const MAX_TAG_CHARS = 50;
 
@@ -58,12 +60,12 @@ function once(handler) {
 
 const MAX_TERMS = 8;
 const MAX_TERM_CHARS = 100;
-const SEARCH_FIELDS = ['title', 'url', 'note', 'tag'];
+const SEARCH_FIELDS = ['title', 'url', 'note', 'tag', 'status'];
 const isSpace = (character) => /^\p{White_Space}$/u.test(character);
 
 // Reads `title:`-style prefixes, quotes and `-` exclusions exactly as src/search.rs does;
 // tests/search_syntax.json holds the cases both parsers must agree on.
-// Returns [{ field: 'any' | 'title' | 'url' | 'note' | 'tag', text, negated }].
+// Returns [{ field: 'any' | 'title' | 'url' | 'note' | 'tag' | 'status', text, negated }].
 function parseQuery(query) {
   const chars = Array.from(query);
   const terms = [];
@@ -218,10 +220,59 @@ async function api(method, path, body) {
     try { data = await response.json(); } catch { /* a proxy error page is not JSON */ }
   }
   if (response.ok) return data;
+  throw refusal(response, data);
+}
+
+function refusal(response, data) {
   let fallback = 'The request was refused.';
   if (response.status >= 500) fallback = 'The server had a problem. Try again.';
   if (response.status === 413) fallback = 'That file is too large. The limit is 20 MB.';
-  throw new ApiError(response.status, data?.error ?? fallback, response.headers.get('Retry-After'));
+  return new ApiError(response.status, data?.error ?? fallback, response.headers.get('Retry-After'));
+}
+
+// Calls `onEvent(name, data)` for each server-sent event of a POST. Stops quietly when `signal` aborts.
+async function streamEvents(path, body, signal, onEvent) {
+  let response;
+  try {
+    response = await fetch(`/api${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      credentials: 'same-origin',
+      signal,
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    throw error;
+  }
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw refusal(response, data);
+  }
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffered = '';
+  let ended = false;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffered += value;
+      const events = buffered.split('\n\n');
+      buffered = events.pop();
+      for (const event of events) {
+        const lines = event.split('\n');
+        const name = lines.find((line) => line.startsWith('event: '))?.slice(7);
+        const data = lines.filter((line) => line.startsWith('data: ')).map((line) => line.slice(6)).join('\n');
+        if (name === 'done') ended = true;
+        if (name) onEvent(name, data ? JSON.parse(data) : null);
+      }
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    throw error;
+  }
+  // The server always ends with `done`; a stream that stops short was cut off.
+  if (!ended && !signal.aborted) throw new TypeError('The connection was cut off.');
 }
 
 function describe(error) {
@@ -340,6 +391,33 @@ function actionsFor(b) {
   );
 }
 
+// Static markup, never built from data. `?` is plain text.
+const LINK_ICONS = {
+  ok: '<svg viewBox="0 0 16 16"><path d="M3 8.5l3.2 3.2L13 4.5"/></svg>',
+  redirected: '<svg viewBox="0 0 16 16"><path d="M2.5 8h10.5M9 4l4 4-4 4"/></svg>',
+  broken: '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
+  unknown: '?',
+};
+
+// What the last link check found. A bookmark never checked shows nothing. The label is for
+// screen readers: the icon and colour alone do not say what the line means.
+const LINK_NOTES = {
+  ok: { label: 'Link OK', text: (_detail, moment) => `checked ${exactTime.format(moment)}` },
+  redirected: { label: 'Link moved', text: (detail) => `now at ${detail}` },
+  broken: { label: 'Broken link', text: (detail) => detail },
+  unknown: { label: 'Link not confirmed', text: (detail) => detail },
+};
+
+function linkNote(b) {
+  const note = b.link && LINK_NOTES[b.link.status];
+  if (!note) return null;
+  const moment = new Date(b.link.checked_at * 1000);
+  const glyph = el('span', { class: 'glyph', 'aria-hidden': 'true' });
+  glyph.innerHTML = LINK_ICONS[b.link.status];
+  return el('p', { class: `link-note ${b.link.status}`, title: `Checked ${exactTime.format(moment)}` },
+    glyph, el('span', { class: 'sr-only' }, `${note.label}: `), note.text(b.link.detail, moment));
+}
+
 function itemView(b) {
   if (state.editing === b.id) return editView(b);
   const terms = parseQuery(state.query.trim());
@@ -355,12 +433,13 @@ function itemView(b) {
       // `click`, not `change`: only a click event tells whether Shift was held.
       onclick: (e) => toggleRow(b, e.target.checked, e.shiftKey),
     })) : null;
-  return el('li', { class: `item${isChosen ? ' chosen' : ''}`, 'data-id': b.id },
+  return el('li', { class: `item${isChosen ? ' chosen' : ''}${b.link ? ` link-${b.link.status}` : ''}`, 'data-id': b.id },
     box,
     el('span', { class: 'domain' }, highlight(domainOf(b.url), termsFor(terms, 'url'))),
     el('div', {},
       el('a', { class: 'title', href: normalizeUrl(b.url) || '#', target: '_blank', rel: 'noopener noreferrer' }, highlight(b.title, termsFor(terms, 'title'))),
       b.note ? el('p', { class: 'note' }, highlight(b.note, termsFor(terms, 'note'))) : null,
+      linkNote(b),
       b.tags.length ? el('div', { class: 'tags' }, b.tags.map((t) => el('button', { class: 'tag', onclick: () => setFilter(t) }, highlight(t, tagTerms(t))))) : null,
     ),
     el('div', { class: 'when' }, state.confirming === b.id ? null : savedTime(b.created_at), actionsFor(b)),
@@ -494,6 +573,10 @@ function clearSelection() {
 // Select mode belongs to the bookmark list, so whatever replaces the list also ends the mode.
 function leaveSelectMode() {
   state.selecting = false;
+  if (state.checking) {
+    state.checking.left = true;
+    stopChecking();
+  }
   clearSelection();
 }
 
@@ -608,6 +691,7 @@ function tagsPanel(count, typed) {
 }
 
 function bulkPanel(count, typed) {
+  if (state.checking) return checkingPanel();
   if (state.bulkPanel === 'delete') return deletePanel(count);
   if (state.bulkPanel === 'add' || state.bulkPanel === 'remove') return tagsPanel(count, typed);
   return null;
@@ -639,11 +723,14 @@ function renderBulk() {
   bar.replaceChildren(...[
     el('div', { class: 'bulk-row' },
       el('span', { class: 'bulk-count' }, count ? `${count} selected` : 'Select bookmarks'),
-      el('button', { type: 'button', class: 'quiet', 'data-key': 'select-all', disabled: state.bookmarks.length === 0, onclick: toggleAll },
+      el('button', { type: 'button', class: 'quiet', 'data-key': 'select-all', disabled: state.bookmarks.length === 0 || state.bulkBusy, onclick: toggleAll },
         allChosen ? 'Clear selection' : allLabel),
-      el('div', { class: 'bulk-actions' }, opener('add', 'Add tag'), opener('remove', 'Remove tag'), opener('delete', 'Delete', ' danger'))),
+      el('div', { class: 'bulk-actions' },
+        opener('add', 'Add tag'), opener('remove', 'Remove tag'),
+        el('button', { type: 'button', class: 'quiet', 'data-key': 'check-links', disabled: count === 0 || state.bulkBusy, onclick: once(runLinkCheck) }, 'Check links'),
+        opener('delete', 'Delete', ' danger'))),
     bulkPanel(count, typed),
-    state.bulkPanel ? null : el('p', { class: 'hint' }, 'Shift-click to tick a range. Esc to leave select mode.'),
+    state.bulkPanel || state.checking ? null : el('p', { class: 'hint' }, 'Shift-click to tick a range. Esc to leave select mode.'),
   ].filter(Boolean));
   $('bulk-live').textContent = count ? `${count} selected` : '';
   if (!focusedKey) return;
@@ -696,6 +783,73 @@ async function runBulkTags(e) {
   if (!adding && changed === 0) return showBulkError('None of the selected bookmarks has that tag.');
   if (adding && changed === 0) return finishBulk(`Every selected bookmark already has ${names}`);
   await finishBulk(adding ? `Added ${names} to ${bookmarksOf(changed)}` : `Removed ${names} from ${bookmarksOf(changed)}`);
+}
+
+// Aborting the request makes the server stop; what it already found stays saved.
+function stopChecking() {
+  state.checking.stop = true;
+  state.checking.abort.abort();
+}
+
+function checkingPanel() {
+  const { done, total, stop } = state.checking;
+  return el('div', { class: 'bulk-panel', id: 'bulk-panel' },
+    el('span', { class: 'ask' }, `Checking links: ${done} of ${total}`),
+    el('button', {
+      // Not `disabled`: a disabled button would drop the keyboard focus.
+      type: 'button', class: 'quiet', 'data-key': 'stop-check', 'aria-disabled': String(stop),
+      onclick: () => { stopChecking(); renderBulk(); },
+    }, stop ? 'Stopping' : 'Stop'));
+}
+
+function checkSummary(tally, { done, total, stop }) {
+  const checked = Object.values(tally).reduce((sum, n) => sum + n, 0);
+  const found = [
+    tally.broken && `${tally.broken} broken`,
+    tally.redirected && `${tally.redirected} redirected`,
+    tally.unknown && `${tally.unknown} not confirmed`,
+  ].filter(Boolean);
+  const stopped = stop && done < total ? `Stopped after ${done} of ${total}. ` : '';
+  return `${stopped}Checked ${bookmarksOf(checked)}: ${found.length ? found.join(', ') : 'all fine'}`;
+}
+
+// The server sends each result as soon as it has it, so the list fills in one link at a time.
+async function runLinkCheck() {
+  const ids = state.bookmarks.filter((b) => state.selected.has(b.id)).map((b) => b.id);
+  if (!ids.length || state.bulkBusy) return;
+  if (ids.length > MAX_BULK_IDS) return showBulkError(`You can check at most ${MAX_BULK_IDS} bookmarks at once. Untick some.`);
+  const progress = { done: 0, total: ids.length, stop: false, abort: new AbortController() };
+  Object.assign(state, { bulkBusy: true, bulkPanel: null, bulkError: '', checking: progress });
+  renderBulk();
+  $('bulk').querySelector('[data-key="stop-check"]')?.focus({ preventScroll: true });
+  const tally = { ok: 0, redirected: 0, broken: 0, unknown: 0 };
+  const onEvent = (name, data) => {
+    if (name === 'error') throw new ApiError(500, 'The server had a problem. Try again.');
+    if (name !== 'result') return;
+    const found = state.bookmarks.find((b) => b.id === data.id);
+    if (found) found.link = data.link;
+    tally[data.link.status] += 1;
+    progress.done += 1;
+    renderList();
+  };
+  let finished;
+  try {
+    finished = await attempt(() => streamEvents('/bookmarks/check', { ids }, progress.abort.signal, onEvent));
+  } finally {
+    progress.abort.abort();
+    Object.assign(state, { bulkBusy: false, checking: null });
+  }
+  if (!state.user) return;
+  if (!finished) {
+    renderBulk();
+    return refreshAll();
+  }
+  // The user left select mode during the check; their new state must not be reset or have focus taken.
+  if (progress.left) {
+    renderList();
+    return toast(checkSummary(tally, progress));
+  }
+  await finishBulk(checkSummary(tally, progress));
 }
 
 // Esc backs out one step at a time: the open panel first, then select mode.
