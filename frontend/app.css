@@ -50,7 +50,9 @@ mark { background: var(--marker); color: #17243a; padding: 0 .15em; border-radiu
 main:focus { outline: none; }
 main { padding: var(--s5) clamp(var(--s4), 4vw, var(--s6)); max-width: 56rem; }
 main h1 { font: 700 1.5rem/1.2 var(--serif); margin: 0 0 var(--s4); }
-.bar { display: flex; gap: var(--s3); margin-bottom: var(--s5); }
+.bar { display: flex; gap: var(--s3); margin-bottom: var(--s2); }
+.search-hint { margin: 0 0 var(--s5); color: var(--ink-soft); font-size: .85rem; }
+.search-hint code { font: inherit; color: var(--ink); }
 input, textarea { font: inherit; color: inherit; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: var(--s2) var(--s3); width: 100%; }
 input[type=checkbox] { width: auto; }
 .bar input { flex: 1; }

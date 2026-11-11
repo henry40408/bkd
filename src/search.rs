@@ -1,9 +1,19 @@
 //! Bookmark search. Plain `LIKE`, chosen over FTS5 because FTS5's tokenizers split
 //! words on spaces and punctuation and so handle Chinese poorly.
 //!
-//! Every whitespace-separated term must match (AND) in the title, URL, note or any
+//! Every term must match (AND). A plain term matches in the title, URL, note or any
 //! tag. `LIKE` ignores case for ASCII only, so `É` does not match `é`. Matching
 //! highlights are drawn by the front end.
+//!
+//! The query syntax (the front end reads it the same way; `tests/search_syntax.json`
+//! holds the cases both sides must agree on):
+//!
+//! - `"two words"` is one term. `\"` is a quote inside it. A quote that is never
+//!   closed runs to the end of the query.
+//! - `-term` must NOT match. A lone `-` is plain text.
+//! - `title:`, `url:`, `note:` match only that field; `tag:` matches a tag exactly.
+//!   The value may be quoted: `tag:"to read"`. Any other `name:` (such as
+//!   `https://x.test`) and a prefix with nothing after it are plain text.
 //!
 //! Only SQL *shape* is built from strings here; every user value goes through a bind
 //! parameter.
@@ -13,9 +23,25 @@ use sqlx::{QueryBuilder, Sqlite};
 const MAX_TERMS: usize = 8;
 const MAX_TERM_CHARS: usize = 100;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Field {
+    Any,
+    Title,
+    Url,
+    Note,
+    Tag,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Term {
+    field: Field,
+    text: String,
+    negated: bool,
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Filter {
-    terms: Vec<String>,
+    terms: Vec<Term>,
     tag: Option<String>,
 }
 
@@ -23,19 +49,129 @@ impl Filter {
     /// `query` is what the user typed in the search box; `tag` is an exact tag.
     /// Extra terms beyond the limit are ignored and long terms are cut.
     pub fn new(query: Option<&str>, tag: Option<&str>) -> Self {
-        let terms = query
-            .unwrap_or_default()
-            .split_whitespace()
-            .take(MAX_TERMS)
-            .map(|term| term.chars().take(MAX_TERM_CHARS).collect())
-            .collect();
-        // A tag that could never be stored (too long, control characters) still has
-        // to filter: dropping it would return every bookmark instead of none.
-        let tag = tag.and_then(|raw| match crate::bookmarks::normalize_tag(raw) {
-            Ok(normalized) => normalized,
-            Err(_) => Some(raw.trim().to_lowercase()),
-        });
+        let terms = parse_query(query.unwrap_or_default());
+        let tag = tag.and_then(exact_tag);
         Self { terms, tag }
+    }
+}
+
+impl Field {
+    fn from_prefix(name: &str) -> Option<Self> {
+        match name.to_lowercase().as_str() {
+            "title" => Some(Self::Title),
+            "url" => Some(Self::Url),
+            "note" => Some(Self::Note),
+            "tag" => Some(Self::Tag),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    fn name(self) -> &'static str {
+        match self {
+            Self::Any => "any",
+            Self::Title => "title",
+            Self::Url => "url",
+            Self::Note => "note",
+            Self::Tag => "tag",
+        }
+    }
+
+    fn column(self) -> Option<&'static str> {
+        match self {
+            Self::Title => Some("title"),
+            Self::Url => Some("url"),
+            Self::Note => Some("note"),
+            Self::Any | Self::Tag => None,
+        }
+    }
+}
+
+/// Reads a `title:`-style prefix at `*at` and moves past the colon. Anything else
+/// (including `https:`) leaves `*at` alone and is plain text.
+fn read_field(chars: &[char], at: &mut usize) -> Field {
+    let name_length = chars[*at..]
+        .iter()
+        .take_while(|character| character.is_alphabetic())
+        .count();
+    let colon = *at + name_length;
+    if chars.get(colon) != Some(&':') {
+        return Field::Any;
+    }
+    let name: String = chars[*at..colon].iter().collect();
+    let Some(field) = Field::from_prefix(&name) else {
+        return Field::Any;
+    };
+    *at = colon + 1;
+    field
+}
+
+/// Reads a bare word or a quoted phrase at `*at`.
+fn read_value(chars: &[char], at: &mut usize) -> String {
+    let mut value = String::new();
+    if chars.get(*at) != Some(&'"') {
+        while let Some(&character) = chars.get(*at) {
+            if character.is_whitespace() {
+                break;
+            }
+            value.push(character);
+            *at += 1;
+        }
+        return value;
+    }
+    *at += 1;
+    while let Some(&character) = chars.get(*at) {
+        *at += 1;
+        match character {
+            '"' => break,
+            '\\' if chars.get(*at) == Some(&'"') => {
+                value.push('"');
+                *at += 1;
+            }
+            _ => value.push(character),
+        }
+    }
+    value
+}
+
+fn parse_query(query: &str) -> Vec<Term> {
+    let chars: Vec<char> = query.chars().collect();
+    let mut terms = Vec::new();
+    let mut at = 0;
+    while at < chars.len() && terms.len() < MAX_TERMS {
+        if chars[at].is_whitespace() {
+            at += 1;
+            continue;
+        }
+        let start = at;
+        let negated =
+            chars[at] == '-' && chars.get(at + 1).is_some_and(|next| !next.is_whitespace());
+        if negated {
+            at += 1;
+        }
+        let field = read_field(&chars, &mut at);
+        let value = read_value(&chars, &mut at);
+        let (field, negated, text) = match (value.chars().all(char::is_whitespace), field) {
+            (true, Field::Any) => continue,
+            // A prefix with nothing (or only spaces) after it is what the user typed, not a filter.
+            (true, _) => (Field::Any, false, chars[start..at].iter().collect()),
+            (false, _) => (field, negated, value),
+        };
+        terms.push(Term {
+            field,
+            text: text.chars().take(MAX_TERM_CHARS).collect(),
+            negated,
+        });
+    }
+    terms
+}
+
+/// The stored form of a tag, or a lowercase fallback for one that could never be
+/// stored (too long, control characters): it must match nothing, not everything.
+fn exact_tag(raw: &str) -> Option<String> {
+    match crate::bookmarks::normalize_tag(raw) {
+        Ok(normalized) => normalized,
+        Err(_) => Some(raw.trim().to_lowercase()),
     }
 }
 
@@ -56,28 +192,51 @@ fn contains_pattern(term: &str) -> String {
 /// Appends ` AND ...` conditions for a query that selects from `bookmarks`.
 pub fn push_conditions(query: &mut QueryBuilder<Sqlite>, filter: &Filter) {
     for term in &filter.terms {
-        let pattern = contains_pattern(term);
-        query.push(" AND (");
-        for column in ["title", "url", "note"] {
-            query.push(format_args!("bookmarks.{column} LIKE "));
-            query.push_bind(pattern.clone());
-            query.push(" ESCAPE '\\' OR ");
-        }
-        query.push(
-            "EXISTS (SELECT 1 FROM bookmark_tags
-                     WHERE bookmark_tags.bookmark_id = bookmarks.id AND bookmark_tags.tag LIKE ",
-        );
-        query.push_bind(pattern);
-        query.push(" ESCAPE '\\'))");
-    }
-    if let Some(tag) = &filter.tag {
-        query.push(
-            " AND EXISTS (SELECT 1 FROM bookmark_tags
-                          WHERE bookmark_tags.bookmark_id = bookmarks.id AND bookmark_tags.tag = ",
-        );
-        query.push_bind(tag.clone());
+        query.push(if term.negated { " AND NOT (" } else { " AND (" });
+        push_term_match(query, term);
         query.push(")");
     }
+    if let Some(tag) = &filter.tag {
+        query.push(" AND ");
+        push_tag_equals(query, tag.clone());
+    }
+}
+
+fn push_term_match(query: &mut QueryBuilder<Sqlite>, term: &Term) {
+    if term.field == Field::Tag {
+        push_tag_equals(query, exact_tag(&term.text).unwrap_or_default());
+        return;
+    }
+    let pattern = contains_pattern(&term.text);
+    let columns: &[&str] = match term.field.column() {
+        Some(column) => &[column],
+        None => &["title", "url", "note"],
+    };
+    for (index, column) in columns.iter().enumerate() {
+        if index > 0 {
+            query.push(" OR ");
+        }
+        query.push(format_args!("bookmarks.{column} LIKE "));
+        query.push_bind(pattern.clone());
+        query.push(" ESCAPE '\\'");
+    }
+    if term.field == Field::Any {
+        query.push(
+            " OR EXISTS (SELECT 1 FROM bookmark_tags
+                         WHERE bookmark_tags.bookmark_id = bookmarks.id AND bookmark_tags.tag LIKE ",
+        );
+        query.push_bind(pattern);
+        query.push(" ESCAPE '\\')");
+    }
+}
+
+fn push_tag_equals(query: &mut QueryBuilder<Sqlite>, tag: String) {
+    query.push(
+        "EXISTS (SELECT 1 FROM bookmark_tags
+                 WHERE bookmark_tags.bookmark_id = bookmarks.id AND bookmark_tags.tag = ",
+    );
+    query.push_bind(tag);
+    query.push(")");
 }
 
 #[cfg(test)]
@@ -116,17 +275,34 @@ mod tests {
         assert_eq!(contains_pattern("100%_\\"), "%100\\%\\_\\\\%");
     }
 
+    /// `tests/search_syntax.json` is shared with the front end's parser test.
     #[test]
-    fn the_filter_splits_terms_and_limits_them() {
-        let filter = Filter::new(Some("  a   b\tc "), None);
-        assert_eq!(filter.terms, ["a", "b", "c"]);
+    fn parsing_agrees_with_the_shared_cases() {
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../tests/search_syntax.json")).unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let query = case["query"].as_str().unwrap();
+            let parsed: Vec<_> = parse_query(query)
+                .into_iter()
+                .map(|term| serde_json::json!([term.field.name(), term.text, term.negated]))
+                .collect();
+            assert_eq!(
+                serde_json::Value::Array(parsed),
+                case["terms"],
+                "query: {query}"
+            );
+        }
+    }
+
+    #[test]
+    fn terms_and_their_length_are_limited() {
         let many = (0..20).map(|n| n.to_string()).collect::<Vec<_>>().join(" ");
-        assert_eq!(Filter::new(Some(&many), None).terms.len(), MAX_TERMS);
+        assert_eq!(parse_query(&many).len(), MAX_TERMS);
         let long = "x".repeat(500);
-        assert_eq!(
-            Filter::new(Some(&long), None).terms[0].len(),
-            MAX_TERM_CHARS
-        );
+        assert_eq!(parse_query(&long)[0].text.len(), MAX_TERM_CHARS);
+        let long_quoted = format!("title:\"{long}\"");
+        assert_eq!(parse_query(&long_quoted)[0].text.len(), MAX_TERM_CHARS);
     }
 
     #[test]
@@ -224,6 +400,100 @@ mod tests {
         add(&pool, user, "it's fine", "https://a.test/1", "", &[]).await;
         assert_eq!(titles(&pool, user, "it's", None).await, ["it's fine"]);
         assert!(titles(&pool, user, "' OR 1=1 --", None).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn phrases_match_as_one_term() {
+        let (_dir, pool) = test_pool().await;
+        let user = insert_user(&pool, "henry").await.unwrap();
+        add(&pool, user, "the quick fox", "https://a.test/1", "", &[]).await;
+        add(&pool, user, "quick the fox", "https://a.test/2", "", &[]).await;
+
+        assert_eq!(
+            titles(&pool, user, "\"quick fox\"", None).await,
+            ["the quick fox"]
+        );
+        assert_eq!(titles(&pool, user, "quick fox", None).await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn excluded_terms_remove_matches_from_every_field() {
+        let (_dir, pool) = test_pool().await;
+        let user = insert_user(&pool, "henry").await.unwrap();
+        add(&pool, user, "rust a", "https://a.test/1", "", &[]).await;
+        add(&pool, user, "rust b", "https://a.test/2", "old news", &[]).await;
+        add(&pool, user, "rust c", "https://a.test/3", "", &["old"]).await;
+        add(&pool, user, "rust d", "https://old.test/4", "", &[]).await;
+
+        assert_eq!(titles(&pool, user, "rust -old", None).await, ["rust a"]);
+        assert_eq!(
+            titles(&pool, user, "-\"old news\" rust", None).await,
+            ["rust a", "rust c", "rust d"]
+        );
+        // Only an exclusion: everything that does not match.
+        assert_eq!(titles(&pool, user, "-rust", None).await.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn field_prefixes_search_only_that_field() {
+        let (_dir, pool) = test_pool().await;
+        let user = insert_user(&pool, "henry").await.unwrap();
+        add(&pool, user, "zebra", "https://a.test/1", "", &[]).await;
+        add(&pool, user, "by url", "https://zebra.test/2", "", &[]).await;
+        add(&pool, user, "by note", "https://a.test/3", "zebra", &[]).await;
+        add(&pool, user, "by tag", "https://a.test/4", "", &["zebra"]).await;
+
+        assert_eq!(titles(&pool, user, "title:zebra", None).await, ["zebra"]);
+        assert_eq!(titles(&pool, user, "url:zebra", None).await, ["by url"]);
+        assert_eq!(titles(&pool, user, "note:zebra", None).await, ["by note"]);
+        assert_eq!(titles(&pool, user, "tag:zebra", None).await, ["by tag"]);
+        assert_eq!(
+            titles(&pool, user, "zebra -title:zebra", None).await,
+            ["by note", "by tag", "by url"]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_tag_prefix_is_exact_case_insensitive_and_may_contain_spaces() {
+        let (_dir, pool) = test_pool().await;
+        let user = insert_user(&pool, "henry").await.unwrap();
+        add(&pool, user, "exact", "https://a.test/1", "", &["rust"]).await;
+        add(
+            &pool,
+            user,
+            "longer",
+            "https://a.test/2",
+            "",
+            &["rustacean"],
+        )
+        .await;
+        add(&pool, user, "spaced", "https://a.test/3", "", &["to read"]).await;
+
+        assert_eq!(titles(&pool, user, "tag:Rust", None).await, ["exact"]);
+        assert_eq!(
+            titles(&pool, user, "tag:\"to read\"", None).await,
+            ["spaced"]
+        );
+        assert_eq!(
+            titles(&pool, user, "-tag:rust -tag:rustacean", None).await,
+            ["spaced"]
+        );
+        let too_long = format!("tag:{}", "x".repeat(200));
+        assert!(titles(&pool, user, &too_long, None).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_empty_prefix_and_urls_are_plain_text() {
+        let (_dir, pool) = test_pool().await;
+        let user = insert_user(&pool, "henry").await.unwrap();
+        add(&pool, user, "has https", "https://x.test/1", "", &[]).await;
+        add(&pool, user, "tag: colon", "https://a.test/2", "", &[]).await;
+
+        assert_eq!(
+            titles(&pool, user, "https://x.test", None).await,
+            ["has https"]
+        );
+        assert_eq!(titles(&pool, user, "tag:", None).await, ["tag: colon"]);
     }
 
     #[tokio::test]

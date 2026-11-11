@@ -337,6 +337,45 @@ async fn is_highlighted(world: &mut BkdWorld, text: String) -> Result<()> {
     super::text_contains(world, "#list mark", &text).await
 }
 
+#[then(expr = "{string} is not highlighted")]
+async fn is_not_highlighted(world: &mut BkdWorld, text: String) -> Result<()> {
+    super::text_lacks(world, "#list mark", &text).await
+}
+
+/// The cases the server's parser is tested against (`src/search.rs`).
+const SHARED_SEARCH_CASES: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../tests/search_syntax.json"
+));
+
+#[then("the browser reads every shared search case as the server does")]
+async fn browser_parses_shared_cases(world: &mut BkdWorld) -> Result<()> {
+    let cases: Vec<serde_json::Value> = serde_json::from_str(SHARED_SEARCH_CASES)?;
+    ensure!(!cases.is_empty(), "no shared search cases");
+    let read = world
+        .driver()?
+        .execute(
+            "return JSON.parse(arguments[0]).map((c) => parseQuery(c.query).map((t) => [t.field, t.text, t.negated]));",
+            vec![json!(SHARED_SEARCH_CASES)],
+        )
+        .await?;
+    let read = read.json().as_array().cloned().unwrap_or_default();
+    ensure!(
+        read.len() == cases.len(),
+        "the browser read {} cases",
+        read.len()
+    );
+    for (case, terms) in cases.iter().zip(read) {
+        ensure!(
+            terms == case["terms"],
+            "query {}: the browser read {terms}, the server reads {}",
+            case["query"],
+            case["terms"]
+        );
+    }
+    Ok(())
+}
+
 #[then(expr = "I see the empty message {string}")]
 async fn sees_empty_message(world: &mut BkdWorld, text: String) -> Result<()> {
     super::text_contains(world, "#empty", &text).await

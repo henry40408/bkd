@@ -48,8 +48,74 @@ function once(handler) {
   };
 }
 
-function searchTerms(query) {
-  return query.split(/\s+/).filter(Boolean).slice(0, 8);
+const MAX_TERMS = 8;
+const MAX_TERM_CHARS = 100;
+const SEARCH_FIELDS = ['title', 'url', 'note', 'tag'];
+const isSpace = (character) => /^\p{White_Space}$/u.test(character);
+
+// Reads `title:`-style prefixes, quotes and `-` exclusions exactly as src/search.rs does;
+// tests/search_syntax.json holds the cases both parsers must agree on.
+// Returns [{ field: 'any' | 'title' | 'url' | 'note' | 'tag', text, negated }].
+function parseQuery(query) {
+  const chars = Array.from(query);
+  const terms = [];
+  let at = 0;
+
+  function readField() {
+    let end = at;
+    while (end < chars.length && /^\p{Alphabetic}$/u.test(chars[end])) end += 1;
+    const name = chars.slice(at, end).join('').toLowerCase();
+    if (chars[end] !== ':' || !SEARCH_FIELDS.includes(name)) return 'any';
+    at = end + 1;
+    return name;
+  }
+
+  function readValue() {
+    let value = '';
+    if (chars[at] !== '"') {
+      while (at < chars.length && !isSpace(chars[at])) value += chars[at++];
+      return value;
+    }
+    at += 1;
+    while (at < chars.length) {
+      const character = chars[at++];
+      if (character === '"') break;
+      if (character === '\\' && chars[at] === '"') {
+        value += '"';
+        at += 1;
+      } else {
+        value += character;
+      }
+    }
+    return value;
+  }
+
+  while (at < chars.length && terms.length < MAX_TERMS) {
+    if (isSpace(chars[at])) {
+      at += 1;
+      continue;
+    }
+    const start = at;
+    let negated = chars[at] === '-' && at + 1 < chars.length && !isSpace(chars[at + 1]);
+    if (negated) at += 1;
+    let field = readField();
+    let text = readValue();
+    const blank = Array.from(text).every(isSpace);
+    if (blank && field === 'any') continue;
+    if (blank) {
+      // A prefix with nothing (or only spaces) after it is what the user typed, not a filter.
+      field = 'any';
+      negated = false;
+      text = chars.slice(start, at).join('');
+    }
+    terms.push({ field, text: Array.from(text).slice(0, MAX_TERM_CHARS).join(''), negated });
+  }
+  return terms;
+}
+
+// What to highlight in one field: terms that must match there, never excluded ones.
+function termsFor(terms, field) {
+  return terms.filter((term) => !term.negated && (term.field === 'any' || term.field === field)).map((term) => term.text);
 }
 
 function highlight(text, terms) {
@@ -266,13 +332,18 @@ function actionsFor(b) {
 
 function itemView(b) {
   if (state.editing === b.id) return editView(b);
-  const terms = searchTerms(state.query);
+  const terms = parseQuery(state.query.trim());
+  // A `tag:` term matches a whole tag, so only that tag is highlighted.
+  const tagTerms = (tag) => [
+    ...termsFor(terms, 'any'),
+    ...terms.filter((term) => !term.negated && term.field === 'tag' && term.text.trim().toLowerCase() === tag).map((term) => term.text.trim()),
+  ];
   return el('li', { class: 'item' },
-    el('span', { class: 'domain' }, highlight(domainOf(b.url), terms)),
+    el('span', { class: 'domain' }, highlight(domainOf(b.url), termsFor(terms, 'url'))),
     el('div', {},
-      el('a', { class: 'title', href: normalizeUrl(b.url) || '#', target: '_blank', rel: 'noopener noreferrer' }, highlight(b.title, terms)),
-      b.note ? el('p', { class: 'note' }, highlight(b.note, terms)) : null,
-      b.tags.length ? el('div', { class: 'tags' }, b.tags.map((t) => el('button', { class: 'tag', onclick: () => setFilter(t) }, highlight(t, terms)))) : null,
+      el('a', { class: 'title', href: normalizeUrl(b.url) || '#', target: '_blank', rel: 'noopener noreferrer' }, highlight(b.title, termsFor(terms, 'title'))),
+      b.note ? el('p', { class: 'note' }, highlight(b.note, termsFor(terms, 'note'))) : null,
+      b.tags.length ? el('div', { class: 'tags' }, b.tags.map((t) => el('button', { class: 'tag', onclick: () => setFilter(t) }, highlight(t, tagTerms(t))))) : null,
     ),
     el('div', { class: 'when' }, state.confirming === b.id ? null : savedTime(b.created_at), actionsFor(b)),
   );

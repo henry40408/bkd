@@ -53,6 +53,40 @@ Feature: Bookmarks
     And the list does not show "Beta"
     And "ferris" is highlighted
 
+  Scenario: Search syntax narrows by phrase, exclusion and field
+    Given I have the bookmark "https://a.test" titled "Quick brown fox" tagged "to read"
+    And I have the bookmark "https://b.test" titled "Brown quick fox" tagged "done"
+    And I have the bookmark "https://zebra.test" titled "Plain page"
+    When I open the site
+    And I search for "\"quick brown\""
+    Then the list shows "Quick brown fox"
+    And the list does not show "Brown quick fox"
+    When I search for "fox -done"
+    Then the list shows "Quick brown fox"
+    And the list does not show "Brown quick fox"
+    When I search for "tag:\"to read\""
+    Then the list shows "Quick brown fox"
+    And the list does not show "Plain page"
+    When I search for "title:zebra"
+    Then I see the empty message "match"
+    When I search for "url:zebra"
+    Then the list shows "Plain page"
+
+  Scenario: A field prefix marks matches only in that field
+    Given I have the bookmark "https://zebra.test" titled "zebra stripes"
+    When I open the site
+    And I search for "title:zebra"
+    Then "zebra" is highlighted
+    When I search for "title:stripes -title:zebra"
+    Then I see the empty message "match"
+    When I search for "stripes"
+    Then "stripes" is highlighted
+    And "zebra" is not highlighted
+
+  Scenario: The browser reads the search syntax the way the server does
+    When I open the site
+    Then the browser reads every shared search case as the server does
+
   Scenario: A tag filter plus a search that finds nothing names both
     Given I have the bookmark "https://a.test" titled "Alpha" tagged "rust"
     When I open the site
