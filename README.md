@@ -102,7 +102,7 @@ Over the API: send the file to `POST /api/import` with `Content-Type: text/html`
 
 ## Docker
 
-Images for `linux/amd64` and `linux/arm64` are published to GitHub Container Registry when a release is published. The image runs as a non-root user (uid 65532) and keeps the database in the `/data` volume.
+Images for `linux/amd64` and `linux/arm64` are published to GitHub Container Registry. A release publishes the version tags (`1.2.3`, `1.2`) and `latest`; every merge to `main` publishes `main`, the newest unreleased build. The image runs as a non-root user (uid 65532) and keeps the database in the `/data` volume.
 
 ```sh
 docker run -d \
