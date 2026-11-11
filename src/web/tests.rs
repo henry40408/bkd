@@ -592,6 +592,56 @@ async fn search_and_tag_filters_work_through_the_api() {
 }
 
 #[tokio::test]
+async fn random_picks_from_the_filtered_bookmarks_of_the_caller_only() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let other = app.sign_in_as("mei").await;
+    create_bookmark(&app, &token, "Rust async", &["rust"]).await;
+    create_bookmark(&app, &token, "Cooking", &[]).await;
+    create_bookmark(&app, &other, "Mei only", &["rust"]).await;
+
+    let by_tag = app
+        .send(Send::get("/api/bookmarks/random?tag=rust").cookie(&token))
+        .await;
+    assert_eq!(by_tag.status, StatusCode::OK);
+    assert_eq!(by_tag.body["title"], "Rust async");
+    let by_text = app
+        .send(Send::get("/api/bookmarks/random?q=cook").cookie(&token))
+        .await;
+    assert_eq!(by_text.body["title"], "Cooking");
+
+    let none = app
+        .send(Send::get("/api/bookmarks/random?q=zzz").cookie(&token))
+        .await;
+    assert_eq!(none.status, StatusCode::NOT_FOUND);
+    // Only the other user has this one: a missing user filter would return it.
+    let theirs = app
+        .send(Send::get("/api/bookmarks/random?q=Mei").cookie(&token))
+        .await;
+    assert_eq!(theirs.status, StatusCode::NOT_FOUND);
+    let signed_out = app.send(Send::get("/api/bookmarks/random")).await;
+    assert_eq!(signed_out.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn random_does_not_always_pick_the_same_bookmark() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    for n in 0..10 {
+        create_bookmark(&app, &token, &format!("item {n}"), &[]).await;
+    }
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..40 {
+        let reply = app
+            .send(Send::get("/api/bookmarks/random").cookie(&token))
+            .await;
+        seen.insert(reply.body["id"].as_i64().unwrap());
+    }
+    // 40 draws from 10 would all agree with probability 10^-39.
+    assert!(seen.len() > 1);
+}
+
+#[tokio::test]
 async fn paging_returns_distinct_slices() {
     let app = TestApp::running().await;
     let token = app.sign_in_as("henry").await;

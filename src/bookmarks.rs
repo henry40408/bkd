@@ -346,6 +346,17 @@ pub async fn list(
     Ok(rows.into_iter().map(Bookmark::from).collect())
 }
 
+/// One bookmark chosen at random from those `filter` lets through.
+pub async fn random(pool: &SqlitePool, user_id: i64, filter: &Filter) -> Result<Option<Bookmark>> {
+    let mut query = QueryBuilder::<Sqlite>::new(SELECT_BOOKMARK);
+    query.push(" WHERE bookmarks.user_id = ");
+    query.push_bind(user_id);
+    search::push_conditions(&mut query, filter);
+    query.push(" ORDER BY RANDOM() LIMIT 1");
+    let row: Option<BookmarkRow> = query.build_query_as().fetch_optional(pool).await?;
+    Ok(row.map(Bookmark::from))
+}
+
 /// Every tag the user has used, with how many bookmarks carry it.
 pub async fn tag_counts(pool: &SqlitePool, user_id: i64) -> Result<Vec<TagCount>> {
     let counts = sqlx::query_as(

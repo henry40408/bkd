@@ -31,6 +31,10 @@ Every word you type must match somewhere in the title, URL, note or a tag. Case 
 
 Prefixes combine with the rest: `-tag:old`, `title:"rust book"`. Anything else is plain text, so `https://x.test` and a prefix with nothing after it search for what you typed. A search uses at most 8 terms of 100 characters each.
 
+## Random
+
+The "Random" button next to the search box shows one bookmark picked from what the search and the tag filter show right now (with neither, from all of yours). "Another" picks again; changing the search or the tag, or adding, editing or deleting a bookmark, closes the pick. Over the API: `GET /api/bookmarks/random?q=&tag=` (404 when nothing matches).
+
 ## Import and export
 
 Under "Import and export" in the sidebar, choose the bookmarks file your browser exported (Chrome, Firefox, Safari, Pocket and Raindrop all write the same `.html` format). Folders become tags, the date saved is kept when the file has one (Safari's does not), and a link you already have is skipped, so importing the same file twice is safe. Links that are not web links (`javascript:`, `place:`) are skipped and listed in the result. The same screen downloads your bookmarks as HTML (for a browser or another service) or JSON (a backup).

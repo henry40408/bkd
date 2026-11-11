@@ -286,6 +286,7 @@ async function loadUsers() {
 }
 
 async function refreshAll() {
+  closePick();
   await Promise.all([loadBookmarks({ mode: 'keep' }), loadTags()]);
 }
 
@@ -391,6 +392,54 @@ function renderList() {
   $('summary').textContent = state.hasMore ? `Showing the newest ${count}` : `${count} ${count === 1 ? 'bookmark' : 'bookmarks'}`;
   // Focus after the next paint so the form shows up first; the item the user clicked is already in view.
   requestAnimationFrame(() => keepFocus($('list')));
+}
+
+/* ---------- random pick ---------- */
+
+let pickTicket = 0;
+
+function closePick() {
+  pickTicket++;
+  $('pick').hidden = true;
+  $('pick').replaceChildren();
+}
+
+// The Close button is gone once the pick closes; focus the button that opens a pick.
+function dismissPick() {
+  closePick();
+  $('random').focus({ preventScroll: true });
+}
+
+function renderPick(b) {
+  $('pick').replaceChildren(
+    el('span', { class: 'domain' }, domainOf(b.url)),
+    el('a', { class: 'title', href: normalizeUrl(b.url) || '#', target: '_blank', rel: 'noopener noreferrer' }, b.title),
+    b.note ? el('p', { class: 'note' }, b.note) : null,
+    b.tags.length ? el('div', { class: 'tags' }, b.tags.map((t) => el('button', { class: 'tag', onclick: () => setFilter(t) }, t))) : null,
+    el('div', { class: 'actions' },
+      el('button', { id: 'pick-another', class: 'quiet', onclick: once(pickRandom) }, 'Another'),
+      el('button', { class: 'quiet', onclick: dismissPick }, 'Close')),
+  );
+  $('pick').hidden = false;
+}
+
+// Picks from what the search box and the tag filter show now, so "random" means "random of these".
+async function pickRandom() {
+  const ticket = ++pickTicket;
+  const params = new URLSearchParams();
+  if (state.query.trim()) params.set('q', state.query.trim());
+  if (state.tag !== 'all') params.set('tag', state.tag);
+  // A 404 only means nothing matches; it is not a failure worth a server-error message.
+  const result = await attempt(() => api('GET', `/bookmarks/random?${params}`)
+    .catch((error) => { if (error instanceof ApiError && error.status === 404) return null; throw error; }));
+  if (!result || ticket !== pickTicket || !state.user) return;
+  if (!result.value) {
+    closePick();
+    return toast('No bookmarks to pick from. Clear the search or the tag first.');
+  }
+  renderPick(result.value);
+  // The old button is gone after a rebuild. Focusing the title also makes a screen reader read what was picked.
+  $('pick').querySelector('.title').focus({ preventScroll: true });
 }
 
 // After a rebuild the control the user was on is gone. Focus the form or confirmation that just
@@ -524,6 +573,7 @@ function setMenu(open) {
 }
 
 function setFilter(key) {
+  closePick();
   setMenu(false);
   state.view = 'list';
   state.tag = key;
@@ -558,6 +608,7 @@ function showView() {
 }
 
 function clearSearch() {
+  closePick();
   state.query = '';
   $('search').value = '';
   loadBookmarks();
@@ -581,6 +632,7 @@ function resetForms() {
 
 function endSession(message) {
   listTicket++;
+  closePick();
   setMenu(false);
   Object.assign(state, {
     user: null, view: 'list', tag: 'all', query: '', bookmarks: [], hasMore: false, tags: [], users: [],
@@ -638,6 +690,7 @@ $('search').addEventListener('input', (e) => {
   state.query = e.target.value;
   if (unchanged) return;
   // Rebuilding the list would discard unsaved edits, so close any open edit or confirmation first.
+  closePick();
   Object.assign(state, { editing: null, confirming: null, hasMore: false });
   $('more').hidden = true;
   clearTimeout(searchTimer);
@@ -645,6 +698,7 @@ $('search').addEventListener('input', (e) => {
 });
 
 $('more').addEventListener('click', () => loadBookmarks({ mode: 'append' }));
+$('random').addEventListener('click', once(pickRandom));
 
 $('add-form').addEventListener('submit', once(async (e) => {
   e.preventDefault();

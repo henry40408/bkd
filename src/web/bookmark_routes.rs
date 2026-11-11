@@ -36,6 +36,24 @@ pub async fn list(
     Ok(Json(BookmarkList { bookmarks }))
 }
 
+#[derive(Deserialize)]
+pub struct RandomParams {
+    q: Option<String>,
+    tag: Option<String>,
+}
+
+pub async fn random(
+    State(state): State<SharedState>,
+    CurrentUser(user): CurrentUser,
+    Query(params): Query<RandomParams>,
+) -> Result<Json<Bookmark>, ApiError> {
+    let filter = Filter::new(params.q.as_deref(), params.tag.as_deref());
+    bookmarks::random(&state.pool, user.user_id, &filter)
+        .await?
+        .map(Json)
+        .ok_or(ApiError::NotFound)
+}
+
 pub async fn create(
     State(state): State<SharedState>,
     CurrentUser(user): CurrentUser,

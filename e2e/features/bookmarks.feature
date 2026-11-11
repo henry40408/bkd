@@ -87,6 +87,36 @@ Feature: Bookmarks
     When I open the site
     Then the browser reads every shared search case as the server does
 
+  Scenario: Random picks from what the tag filter shows
+    Given I have the bookmark "https://a.test" titled "Alpha" tagged "rust"
+    And I have the bookmark "https://b.test" titled "Beta" tagged "go"
+    When I open the site
+    And I choose the tag "rust"
+    And I choose Random
+    Then the pick shows "Alpha"
+    And the pick does not show "Beta"
+    When I choose Another
+    Then the pick shows "Alpha"
+    When I close the pick
+    Then the pick does not show "Alpha"
+
+  Scenario: Random picks from what the search finds, and a new search clears the pick
+    Given I have the bookmark "https://a.test" titled "Alpha"
+    And I have the bookmark "https://b.test" titled "Beta"
+    When I open the site
+    And I search for "beta"
+    And I choose Random
+    Then the pick shows "Beta"
+    When I search for "alpha"
+    Then the pick does not show "Beta"
+
+  Scenario: Random says so when nothing matches
+    Given I have the bookmark "https://a.test" titled "Alpha"
+    When I open the site
+    And I search for "zzz"
+    And I choose Random
+    Then I am told "No bookmarks to pick from"
+
   Scenario: A tag filter plus a search that finds nothing names both
     Given I have the bookmark "https://a.test" titled "Alpha" tagged "rust"
     When I open the site

@@ -91,6 +91,7 @@ pub fn router(state: SharedState) -> Router {
             "/bookmarks",
             get(bookmark_routes::list).post(bookmark_routes::create),
         )
+        .route("/bookmarks/random", get(bookmark_routes::random))
         .route(
             "/bookmarks/{id}",
             put(bookmark_routes::update).delete(bookmark_routes::delete),

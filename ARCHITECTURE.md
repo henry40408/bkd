@@ -52,6 +52,7 @@ JSON under `/api`. Handlers are thin: they call `auth`, `bookmarks` and `users`.
 | `POST /api/setup` | setup token | create the first admin and sign in |
 | `POST /api/login`, `POST /api/logout` | none | start and end a session |
 | `GET /api/bookmarks?q=&tag=&limit=&offset=` | session | newest first; `limit` defaults to 50, at most 200 |
+| `GET /api/bookmarks/random?q=&tag=` | session | one bookmark chosen at random (`ORDER BY RANDOM() LIMIT 1`) from those `q` and `tag` let through; 404 when none |
 | `POST /api/bookmarks`, `PUT`/`DELETE /api/bookmarks/{id}` | session | create, replace, delete |
 | `GET /api/tags` | session | the user's tags with counts |
 | `POST /api/import` | session | body is a Netscape bookmark file sent as `text/html`; returns `{added, duplicates, invalid, invalid_examples}` |

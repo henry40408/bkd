@@ -234,6 +234,45 @@ async fn choose_tag(world: &mut BkdWorld, tag: String) -> Result<()> {
     Ok(())
 }
 
+#[when("I choose Random")]
+async fn choose_random(world: &mut BkdWorld) -> Result<()> {
+    world.click("#random").await
+}
+
+#[when("I choose Another")]
+async fn choose_another(world: &mut BkdWorld) -> Result<()> {
+    world.click("#pick-another").await
+}
+
+#[when("I close the pick")]
+async fn close_pick(world: &mut BkdWorld) -> Result<()> {
+    // "Another" rebuilds the pick, so a Close button found a moment ago can already be gone.
+    world
+        .browser()?
+        .eventually("the pick can be closed", || async {
+            let close = By::XPath("//*[@id='pick']//button[text()='Close']".to_owned());
+            world.element_by(close).await?.click().await?;
+            Ok(true)
+        })
+        .await
+}
+
+#[then(expr = "the pick shows {string}")]
+async fn pick_shows(world: &mut BkdWorld, text: String) -> Result<()> {
+    super::text_contains(world, "#pick", &text).await
+}
+
+// A hidden element has no text, so this also passes once the pick is closed.
+#[then(expr = "the pick does not show {string}")]
+async fn pick_does_not_show(world: &mut BkdWorld, text: String) -> Result<()> {
+    super::text_lacks(world, "#pick", &text).await
+}
+
+#[then(expr = "I am told {string}")]
+async fn am_told(world: &mut BkdWorld, text: String) -> Result<()> {
+    world.expect_text(&text).await
+}
+
 #[when("I choose Show more")]
 async fn choose_show_more(world: &mut BkdWorld) -> Result<()> {
     world.click("#more").await

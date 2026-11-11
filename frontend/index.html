@@ -26,6 +26,7 @@
     <section id="bookmarks-view">
       <form class="bar" role="search" id="search-form">
         <input type="search" id="search" aria-label="Search bookmarks" aria-describedby="search-hint" placeholder="Search title, note, URL, or tag">
+        <button type="button" id="random">Random</button>
       </form>
       <p class="search-hint" id="search-hint">Use <code>"exact phrase"</code>, <code>-exclude</code>, <code>tag:name</code>, <code>title:</code>, <code>url:</code> or <code>note:</code>.</p>
 
@@ -40,6 +41,8 @@
           <div><button type="submit">Save bookmark</button></div>
         </form>
       </details>
+
+      <section class="pick" id="pick" aria-label="Random bookmark" hidden></section>
 
       <p class="summary" id="summary"></p>
       <ul class="list" id="list"></ul>
