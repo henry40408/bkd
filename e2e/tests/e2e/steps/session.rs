@@ -242,10 +242,10 @@ async fn no_query_string(world: &mut BkdWorld) -> Result<()> {
     Ok(())
 }
 
-#[when("I open Change password")]
-async fn open_change_password(world: &mut BkdWorld) -> Result<()> {
+#[when("I open Account")]
+async fn open_account(world: &mut BkdWorld) -> Result<()> {
     world
-        .element_by(By::XPath("//*[@id='me']//a[text()='Change password']"))
+        .element_by(By::XPath("//*[@id='me']//a[text()='Account']"))
         .await?
         .click()
         .await?;
@@ -313,4 +313,83 @@ async fn no_policy_violation(world: &mut BkdWorld) -> Result<()> {
         .context("the violation watcher is gone: the page reloaded")?;
     ensure!(violations.is_empty(), "the browser reported {violations:?}");
     Ok(())
+}
+
+#[given("I am also signed in on another browser")]
+async fn also_signed_in_elsewhere(world: &mut BkdWorld) -> Result<()> {
+    let username = world.me.clone().context("nobody is signed in")?;
+    let session = world.api().login(&username, PASSWORD).await?;
+    world.remember("elsewhere", session);
+    Ok(())
+}
+
+#[then(expr = "the list of browsers has {int} rows")]
+async fn browser_list_has_rows(world: &mut BkdWorld, expected: usize) -> Result<()> {
+    let driver = world.driver()?;
+    world
+        .browser()?
+        .eventually(&format!("the list has {expected} rows"), || async {
+            let rows = driver.find_all(By::Css("#session-list .user-row")).await?;
+            Ok(rows.len() == expected)
+        })
+        .await
+}
+
+#[when("I sign out the other browser")]
+async fn sign_out_other_browser(world: &mut BkdWorld) -> Result<()> {
+    world.click("#session-list button").await
+}
+
+#[when("I sign out all other browsers")]
+async fn sign_out_all_other_browsers(world: &mut BkdWorld) -> Result<()> {
+    world.click("#sessions-others").await
+}
+
+/// The server asks for the password again once the last one is five minutes old. Waiting
+/// that long is not an option, so the row is aged in the database.
+#[given("my password confirmation is old")]
+async fn confirmation_is_old(world: &mut BkdWorld) -> Result<()> {
+    let output = tokio::process::Command::new("sqlite3")
+        .arg(world.db_path())
+        .arg("UPDATE sessions SET confirmed_at = 0")
+        .output()
+        .await
+        .context("running the sqlite3 command-line tool")?;
+    ensure!(
+        output.status.success(),
+        "sqlite3 failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+#[then("I am asked to confirm my password")]
+async fn asked_to_confirm(world: &mut BkdWorld) -> Result<()> {
+    world.element("#confirm-dialog[open]").await?;
+    Ok(())
+}
+
+#[when(expr = "I confirm my password with {string}")]
+async fn confirm_password(world: &mut BkdWorld, password: String) -> Result<()> {
+    world
+        .fill("#confirm-form input[name=password]", &password)
+        .await?;
+    world.click("#confirm-form button[type=submit]").await
+}
+
+#[when("I cancel the confirmation")]
+async fn cancel_confirmation(world: &mut BkdWorld) -> Result<()> {
+    world.click("#confirm-cancel").await
+}
+
+#[then("the confirmation dialog is closed")]
+async fn confirmation_is_closed(world: &mut BkdWorld) -> Result<()> {
+    let driver = world.driver()?;
+    world
+        .browser()?
+        .eventually("the dialog is closed", || async {
+            let open = driver.find_all(By::Css("#confirm-dialog[open]")).await?;
+            Ok(open.is_empty())
+        })
+        .await
 }

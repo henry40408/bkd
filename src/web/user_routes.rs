@@ -1,5 +1,6 @@
-//! Admin-only user management. Every handler takes `AdminUser`, which re-reads the
-//! role from the database, so a demoted admin loses access on the next request.
+//! Admin-only user management. Every handler takes `AdminUser` (reading) or
+//! `ConfirmedAdmin` (changing), which re-read the role from the database, so a demoted
+//! admin loses access on the next request.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::SharedState;
 use super::error::ApiError;
-use super::guard::AdminUser;
+use super::guard::{AdminUser, ConfirmedAdmin};
 use crate::auth::{password, unix_now, username};
 use crate::users::{self, Change, NewAccount, UserRecord};
 
@@ -58,7 +59,7 @@ pub struct NewUser {
 }
 
 pub async fn create(
-    admin: AdminUser,
+    admin: ConfirmedAdmin,
     State(state): State<SharedState>,
     Json(request): Json<NewUser>,
 ) -> Result<Response, ApiError> {
@@ -86,7 +87,7 @@ pub struct RoleRequest {
 }
 
 pub async fn set_role(
-    admin: AdminUser,
+    admin: ConfirmedAdmin,
     State(state): State<SharedState>,
     Path(id): Path<i64>,
     Json(request): Json<RoleRequest>,
@@ -101,7 +102,7 @@ pub struct DisabledRequest {
 }
 
 pub async fn set_disabled(
-    admin: AdminUser,
+    admin: ConfirmedAdmin,
     State(state): State<SharedState>,
     Path(id): Path<i64>,
     Json(request): Json<DisabledRequest>,
@@ -117,7 +118,7 @@ pub struct PasswordRequest {
 }
 
 pub async fn reset_password(
-    admin: AdminUser,
+    admin: ConfirmedAdmin,
     State(state): State<SharedState>,
     Path(id): Path<i64>,
     Json(request): Json<PasswordRequest>,
@@ -132,7 +133,7 @@ pub async fn reset_password(
 }
 
 pub async fn delete(
-    admin: AdminUser,
+    admin: ConfirmedAdmin,
     State(state): State<SharedState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
@@ -142,7 +143,7 @@ pub async fn delete(
 
 fn finish(
     change: Change,
-    admin: &AdminUser,
+    admin: &ConfirmedAdmin,
     user_id: i64,
     action: &'static str,
 ) -> Result<StatusCode, ApiError> {

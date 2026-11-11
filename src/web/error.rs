@@ -21,6 +21,9 @@ pub enum ApiError {
     /// No valid session.
     Unauthorized,
     Forbidden(&'static str),
+    /// An admin change that needs the password typed again. The front end looks for the
+    /// `code`, asks for the password and repeats the request.
+    ReauthRequired,
     NotFound,
     Conflict(&'static str),
     UnsupportedMediaType(&'static str),
@@ -31,6 +34,8 @@ pub enum ApiError {
 #[derive(Serialize)]
 struct ErrorBody<'a> {
     error: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<&'a str>,
 }
 
 impl IntoResponse for ApiError {
@@ -40,6 +45,7 @@ impl IntoResponse for ApiError {
             Self::InvalidCredentials => (StatusCode::UNAUTHORIZED, "invalid username or password"),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "not signed in"),
             Self::Forbidden(message) => (StatusCode::FORBIDDEN, *message),
+            Self::ReauthRequired => (StatusCode::FORBIDDEN, "confirm your password to continue"),
             Self::NotFound => (StatusCode::NOT_FOUND, "not found"),
             Self::Conflict(message) => (StatusCode::CONFLICT, *message),
             Self::UnsupportedMediaType(message) => (StatusCode::UNSUPPORTED_MEDIA_TYPE, *message),
@@ -52,7 +58,12 @@ impl IntoResponse for ApiError {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal error")
             }
         };
-        let mut response = (status, Json(ErrorBody { error: message })).into_response();
+        let code = matches!(self, Self::ReauthRequired).then_some("reauth_required");
+        let body = ErrorBody {
+            error: message,
+            code,
+        };
+        let mut response = (status, Json(body)).into_response();
         if let Self::TooManyRequests(wait) = self {
             let seconds = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
             response

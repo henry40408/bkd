@@ -75,6 +75,10 @@ impl BkdWorld {
         &self.harness.endpoints().base_url
     }
 
+    pub fn db_path(&self) -> &std::path::Path {
+        &self.harness.endpoints().db_path
+    }
+
     pub fn setup_token(&self) -> &str {
         &self.harness.endpoints().setup_token
     }

@@ -427,7 +427,9 @@ mod tests {
         let user = add(&pool, "mei", false).await;
         let other = add(&pool, "bob", false).await;
         for id in [user, user, other] {
-            session::create(&pool, id, 0).await.unwrap();
+            session::create(&pool, &session::SessionStart::new(id, 0))
+                .await
+                .unwrap();
         }
 
         assert_eq!(
@@ -437,7 +439,9 @@ mod tests {
         assert_eq!(sessions_of(&pool, user).await, 0);
         assert_eq!(sessions_of(&pool, other).await, 1);
 
-        session::create(&pool, user, 0).await.unwrap();
+        session::create(&pool, &session::SessionStart::new(user, 0))
+            .await
+            .unwrap();
         assert_eq!(
             set_disabled(&pool, admin, user, Some(1)).await.unwrap(),
             Change::Done
@@ -456,7 +460,9 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let admin = add(&pool, "henry", true).await;
         let user = add(&pool, "mei", false).await;
-        session::create(&pool, user, 0).await.unwrap();
+        session::create(&pool, &session::SessionStart::new(user, 0))
+            .await
+            .unwrap();
         sqlx::query(
             "INSERT INTO bookmarks (user_id, url, title, created_at, updated_at)
              VALUES (?1, 'https://a.b', 't', 0, 0)",

@@ -88,7 +88,8 @@
     </section>
 
     <section id="account-view" hidden>
-      <h1>Change password</h1>
+      <h1>Account</h1>
+      <h2>Change password</h2>
       <p class="summary">Use at least 12 characters, and do not put your username in it. Changing it signs you out everywhere else.</p>
       <form class="stack password-form" id="password-form" novalidate>
         <label>Current password <input type="password" name="current" autocomplete="current-password"></label>
@@ -97,6 +98,11 @@
         <p class="err" id="password-error" role="alert" hidden></p>
         <div><button type="submit">Change password</button></div>
       </form>
+      <h2>Signed-in browsers</h2>
+      <p class="summary">Every browser that is signed in to your account. End the ones you do not recognize.</p>
+      <p class="err" id="session-error" role="alert" hidden></p>
+      <div id="session-list"></div>
+      <p class="downloads"><button type="button" class="quiet" id="sessions-others" hidden>Sign out all other browsers</button></p>
     </section>
   </main>
 </div>
@@ -122,6 +128,19 @@
     <button type="submit">Create admin</button>
   </form>
 </section>
+
+<dialog id="confirm-dialog" aria-labelledby="confirm-title">
+  <form id="confirm-form" novalidate>
+    <h2 id="confirm-title">Confirm your password</h2>
+    <p class="summary">This change needs your password again.</p>
+    <label>Password <input type="password" name="password" autocomplete="current-password" autofocus></label>
+    <p class="err" id="confirm-error" role="alert" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="quiet" id="confirm-cancel">Cancel</button>
+      <button type="submit">Confirm</button>
+    </div>
+  </form>
+</dialog>
 
 <div class="toast" id="toast" role="status"></div>
 

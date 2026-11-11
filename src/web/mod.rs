@@ -94,6 +94,12 @@ pub fn router(state: SharedState) -> Router {
         .route("/login", post(account::login))
         .route("/logout", post(account::logout))
         .route("/account/password", put(account::change_password))
+        .route("/account/confirm", post(account::confirm_password))
+        .route(
+            "/account/sessions",
+            get(account::list_sessions).delete(account::revoke_other_sessions),
+        )
+        .route("/account/sessions/{id}", delete(account::revoke_session))
         .route(
             "/bookmarks",
             get(bookmark_routes::list).post(bookmark_routes::create),
@@ -135,7 +141,7 @@ pub fn router(state: SharedState) -> Router {
 pub async fn serve(state: SharedState, listener: TcpListener) -> Result<()> {
     tokio::spawn(sweep_expired_sessions(state.clone()));
     let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
-    let server = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal());
+    let server = axum::serve(listener, app).with_graceful_shutdown(announce_shutdown());
     // A client that stalls mid-request must not keep the process alive forever.
     tokio::select! {
         result = server => result?,
@@ -158,6 +164,11 @@ async fn shutdown_signal() {
         _ = tokio::signal::ctrl_c() => {}
         () = terminate => {}
     }
+}
+
+/// Logs once; `forced_shutdown_after_signal` waits for the same signal and must stay silent.
+async fn announce_shutdown() {
+    shutdown_signal().await;
     tracing::info!("shutting down");
 }
 

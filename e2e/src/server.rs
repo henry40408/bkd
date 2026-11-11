@@ -20,6 +20,9 @@ pub struct Endpoints {
     pub base_url: String,
     /// The first-run setup token the server printed to its log.
     pub setup_token: String,
+    /// The server's database file, for a scenario that must age a row (a confirmation
+    /// older than five minutes) instead of waiting.
+    pub db_path: PathBuf,
 }
 
 /// A running server, stopped (and its database deleted) on drop.
@@ -39,11 +42,12 @@ impl Harness {
             .tempdir()
             .context("creating the directory for the test database")?;
         let port = free_port()?;
+        let db_path = temp.path().join("test.sqlite3");
         let base_url = format!("http://127.0.0.1:{port}");
 
         let mut child = Command::new(binary)
             .arg("--db")
-            .arg(temp.path().join("test.sqlite3"))
+            .arg(&db_path)
             .arg("--addr")
             .arg(format!("127.0.0.1:{port}"))
             // No ANSI codes, so the setup token parses cleanly out of the log.
@@ -58,6 +62,7 @@ impl Harness {
             endpoints: Endpoints {
                 base_url: base_url.clone(),
                 setup_token: String::new(),
+                db_path,
             },
             child,
             _temp: temp,

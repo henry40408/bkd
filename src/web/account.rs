@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::time::Instant;
 
 use axum::Json;
-use axum::extract::{ConnectInfo, State};
+use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use super::SharedState;
 use super::cookie;
 use super::error::ApiError;
 use super::guard::{CurrentUser, user_from_headers};
-use crate::auth::session::{self, SessionUser};
+use crate::auth::session::{self, SessionStart, SessionUser};
 use crate::auth::{first_admin, password, unix_now, username};
 use crate::users;
 
@@ -64,6 +64,7 @@ pub struct SetupRequest {
 pub async fn setup(
     State(state): State<SharedState>,
     ConnectInfo(client): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(request): Json<SetupRequest>,
 ) -> Result<Response, ApiError> {
     let ip = client.ip();
@@ -94,7 +95,12 @@ pub async fn setup(
         return Err(ApiError::Conflict("setup is already complete"));
     };
     tracing::info!(%ip, user_id, "first admin created, setup token discarded");
-    start_session(&state, user_id, StatusCode::CREATED).await
+    start_session(
+        &state,
+        &session_start(user_id, client, &headers),
+        StatusCode::CREATED,
+    )
+    .await
 }
 
 #[derive(Deserialize)]
@@ -106,6 +112,7 @@ pub struct LoginRequest {
 pub async fn login(
     State(state): State<SharedState>,
     ConnectInfo(client): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(request): Json<LoginRequest>,
 ) -> Result<Response, ApiError> {
     let ip = client.ip();
@@ -118,13 +125,8 @@ pub async fn login(
         tracing::warn!(%ip, "login failed");
         return Err(ApiError::InvalidCredentials);
     };
-    let token = session::create_if_unchanged(
-        &state.pool,
-        verified.id,
-        &verified.password_hash,
-        unix_now(),
-    )
-    .await?;
+    let start = session_start(verified.id, client, &headers);
+    let token = session::create_if_unchanged(&state.pool, &start, &verified.password_hash).await?;
     let Some(token) = token else {
         tracing::warn!(%ip, "login refused: the account changed while the password was checked");
         return Err(ApiError::InvalidCredentials);
@@ -151,12 +153,30 @@ async fn authenticate(
     Ok(correct.then_some(record))
 }
 
+/// Where a session starts, for the session list. A client can send any `User-Agent`, so
+/// it is cut short: it is displayed, never trusted.
+fn session_start(user_id: i64, client: SocketAddr, headers: &HeaderMap) -> SessionStart {
+    let user_agent = headers
+        .get(header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .chars()
+        .take(200)
+        .collect();
+    SessionStart {
+        user_id,
+        now: unix_now(),
+        ip: client.ip().to_canonical().to_string(),
+        user_agent,
+    }
+}
+
 async fn start_session(
     state: &SharedState,
-    user_id: i64,
+    start: &SessionStart,
     status: StatusCode,
 ) -> Result<Response, ApiError> {
-    let token = session::create(&state.pool, user_id, unix_now()).await?;
+    let token = session::create(&state.pool, start).await?;
     Ok(session_response(state, &token, status))
 }
 
@@ -177,6 +197,7 @@ pub async fn change_password(
     user: CurrentUser,
     State(state): State<SharedState>,
     ConnectInfo(client): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(request): Json<ChangePasswordRequest>,
 ) -> Result<Response, ApiError> {
     let ip = client.ip();
@@ -208,14 +229,89 @@ pub async fn change_password(
     state.login_limiter.refund(ip);
     tracing::info!(user_id = user.user_id, "password changed");
     // Not `session::create`: a reset that lands after the change must not be followed by a session.
-    let token =
-        session::create_if_unchanged(&state.pool, user.user_id, &new_hash, unix_now()).await?;
+    let start = session_start(user.user_id, client, &headers);
+    let token = session::create_if_unchanged(&state.pool, &start, &new_hash).await?;
     let Some(token) = token else {
         return Err(ApiError::Conflict(
             "password changed meanwhile, sign in again",
         ));
     };
     Ok(session_response(&state, &token, StatusCode::NO_CONTENT))
+}
+
+/// The caller's live sessions, so they can spot a browser they do not know.
+pub async fn list_sessions(
+    user: CurrentUser,
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<session::SessionInfo>>, ApiError> {
+    let token = cookie::read_token(&headers, state.secure_cookies).unwrap_or_default();
+    let sessions = session::list_for_user(&state.pool, user.0.user_id, token, unix_now()).await?;
+    Ok(Json(sessions))
+}
+
+/// Ends one of the caller's own sessions. Another user's id answers 404, like a missing one.
+pub async fn revoke_session(
+    user: CurrentUser,
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    if !session::revoke_by_id(&state.pool, user.0.user_id, &id).await? {
+        return Err(ApiError::NotFound);
+    }
+    tracing::info!(user_id = user.0.user_id, "session ended by its owner");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn revoke_other_sessions(
+    user: CurrentUser,
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<StatusCode, ApiError> {
+    let token = cookie::read_token(&headers, state.secure_cookies).unwrap_or_default();
+    let count = session::revoke_others(&state.pool, user.0.user_id, token).await?;
+    tracing::info!(
+        user_id = user.0.user_id,
+        count,
+        "other sessions ended by their owner"
+    );
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct ConfirmRequest {
+    password: String,
+}
+
+/// Proves the person at the keyboard knows the password, for the admin changes that ask
+/// for it. Shares the login rate limit: it is a password oracle for a stolen session.
+pub async fn confirm_password(
+    user: CurrentUser,
+    State(state): State<SharedState>,
+    ConnectInfo(client): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(request): Json<ConfirmRequest>,
+) -> Result<StatusCode, ApiError> {
+    let ip = client.ip();
+    state
+        .login_limiter
+        .try_acquire(ip, Instant::now())
+        .map_err(ApiError::TooManyRequests)?;
+
+    let user = user.0;
+    let Some(record) = users::find_for_login(&state.pool, &user.username).await? else {
+        return Err(ApiError::Unauthorized);
+    };
+    if !password::verify_async(request.password, record.password_hash).await? {
+        tracing::warn!(%ip, user_id = user.user_id, "confirmation refused: wrong password");
+        return Err(ApiError::Forbidden("password is wrong"));
+    }
+    let Some(token) = cookie::read_token(&headers, state.secure_cookies) else {
+        return Err(ApiError::Unauthorized);
+    };
+    session::confirm(&state.pool, token, unix_now()).await?;
+    state.login_limiter.refund(ip);
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn logout(

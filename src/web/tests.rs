@@ -1773,3 +1773,155 @@ async fn link_checks_cover_only_the_callers_own_bookmarks_and_reject_bad_request
     let meis = app.send(Send::get("/api/bookmarks").cookie(&mei)).await;
     assert!(meis.body["bookmarks"][0]["link"].is_null());
 }
+
+// ------------------------------------------------- sessions and confirmation
+
+/// Ages every session's confirmation, as if its password was typed long ago.
+async fn make_sessions_stale(app: &TestApp) {
+    sqlx::query("UPDATE sessions SET confirmed_at = 0")
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+}
+
+async fn confirm(app: &TestApp, token: &str, password: &str) -> Reply {
+    let body = json!({"password": password});
+    app.send(Send::post("/api/account/confirm", body).cookie(token))
+        .await
+}
+
+#[tokio::test]
+async fn an_admin_change_needs_a_recent_password_confirmation() {
+    let app = TestApp::running().await;
+    let (_, admin) = app.sign_in_as_admin("root").await;
+    let mei = app.add_user("mei", false).await;
+    let promote = |token: &str| {
+        let uri = format!("/api/users/{mei}/role");
+        Send::put(&uri, json!({"is_admin": true})).cookie(token)
+    };
+
+    // Signing in counts as a confirmation.
+    make_sessions_stale(&app).await;
+    let refused = app.send(promote(&admin)).await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN);
+    assert_eq!(refused.body["code"], "reauth_required");
+    // Reading is not a change.
+    let list = app.send(Send::get("/api/users").cookie(&admin)).await;
+    assert_eq!(list.status, StatusCode::OK);
+
+    let wrong = confirm(&app, &admin, "not the password").await;
+    assert_eq!(wrong.status, StatusCode::FORBIDDEN);
+    assert!(wrong.body["code"].is_null());
+    assert_eq!(
+        app.send(promote(&admin)).await.status,
+        StatusCode::FORBIDDEN
+    );
+
+    let right = confirm(&app, &admin, PASSWORD).await;
+    assert_eq!(right.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        app.send(promote(&admin)).await.status,
+        StatusCode::NO_CONTENT
+    );
+}
+
+#[tokio::test]
+async fn confirming_needs_a_session_and_is_rate_limited() {
+    let app = TestApp::running().await;
+    let body = json!({"password": PASSWORD});
+    let anonymous = app.send(Send::post("/api/account/confirm", body)).await;
+    assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
+
+    let token = app.sign_in_as("henry").await;
+    for _ in 0..super::LOGIN_ATTEMPTS_PER_WINDOW {
+        let reply = confirm(&app, &token, "not the password").await;
+        assert_eq!(reply.status, StatusCode::FORBIDDEN);
+    }
+    let blocked = confirm(&app, &token, PASSWORD).await;
+    assert_eq!(blocked.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+async fn session_list(app: &TestApp, token: &str) -> Reply {
+    app.send(Send::get("/api/account/sessions").cookie(token))
+        .await
+}
+
+#[tokio::test]
+async fn the_session_list_shows_where_each_session_started() {
+    let app = TestApp::running().await;
+    let first = app.sign_in_as("henry").await;
+    let second = session_token(&app.login("henry", PASSWORD).await);
+    let other = app.sign_in_as("mei").await;
+
+    let list = session_list(&app, &second).await;
+    assert_eq!(list.status, StatusCode::OK);
+    let sessions = list.body.as_array().unwrap();
+    assert_eq!(sessions.len(), 2, "only henry's sessions");
+    let current = sessions.iter().filter(|s| s["is_current"] == true);
+    assert_eq!(current.count(), 1);
+    assert_eq!(sessions[0]["ip"], "192.0.2.1");
+    assert!(sessions[0].get("token_hash").is_none());
+
+    // Another user's session id is a 404, and nothing is ended.
+    let mei_id = session_list(&app, &other).await.body[0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let foreign = app
+        .send(Send::delete(&format!("/api/account/sessions/{mei_id}")).cookie(&second))
+        .await;
+    assert_eq!(foreign.status, StatusCode::NOT_FOUND);
+    let still = app.send(Send::get("/api/bookmarks").cookie(&other)).await;
+    assert_eq!(still.status, StatusCode::OK);
+
+    let first_id = sessions.iter().find(|s| s["is_current"] == false).unwrap()["id"]
+        .as_str()
+        .unwrap();
+    let ended = app
+        .send(Send::delete(&format!("/api/account/sessions/{first_id}")).cookie(&second))
+        .await;
+    assert_eq!(ended.status, StatusCode::NO_CONTENT);
+    let gone = app.send(Send::get("/api/bookmarks").cookie(&first)).await;
+    assert_eq!(gone.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn ending_the_other_sessions_keeps_this_one() {
+    let app = TestApp::running().await;
+    let first = app.sign_in_as("henry").await;
+    let second = session_token(&app.login("henry", PASSWORD).await);
+
+    let reply = app
+        .send(Send::delete("/api/account/sessions").cookie(&second))
+        .await;
+    assert_eq!(reply.status, StatusCode::NO_CONTENT);
+    let gone = app.send(Send::get("/api/bookmarks").cookie(&first)).await;
+    assert_eq!(gone.status, StatusCode::UNAUTHORIZED);
+    let kept = app.send(Send::get("/api/bookmarks").cookie(&second)).await;
+    assert_eq!(kept.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_session_records_a_cut_down_user_agent() {
+    let app = TestApp::running().await;
+    app.add_user("henry", false).await;
+    let body = json!({"username": "henry", "password": PASSWORD});
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri("/api/login")
+        .header(header::HOST, "bkd.test")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::USER_AGENT, "A".repeat(500))
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let client: SocketAddr = "192.0.2.1:50000".parse().unwrap();
+    request.extensions_mut().insert(ConnectInfo(client));
+    let response = app.router.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let stored: String = sqlx::query_scalar("SELECT user_agent FROM sessions")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(stored.len(), 200);
+}

@@ -26,7 +26,7 @@ Only SQLite is supported. SQL stays plain so a PostgreSQL port would mostly chan
 ## Authentication (`src/auth/`)
 
 - `password`: Argon2id with the crate defaults. New passwords need 12 characters (at most 256 bytes) and must not contain the username (compared in lowercase); login accepts any password up to 256 bytes, so an older, weaker password still works. Hashing runs on the blocking thread pool. For an unknown or disabled user, login must call `verify_against_dummy_async` so response time does not reveal which usernames exist. `warm_up` builds the dummy hash at startup.
-- `session`: the cookie holds 256 random bits; the database holds only their SHA-256. Sessions last 30 days and also end after 7 days without use (`last_used_at`, moved forward at most once an hour). Every lookup joins `users`, so a disabled account loses access at once and `is_admin` is never cached. Disabling, deleting or resetting the password of a user must call `revoke_all_for_user`.
+- `session`: the cookie holds 256 random bits; the database holds only their SHA-256. Sessions last 30 days and also end after 7 days without use (`last_used_at`, moved forward at most once an hour). A session also records its IP address and `User-Agent` (cut to 200 characters) for the session list, and `confirmed_at`, the last time its owner typed the password (a login counts). Every lookup joins `users`, so a disabled account loses access at once and `is_admin` is never cached. Disabling, deleting or resetting the password of a user must call `revoke_all_for_user`.
 - `setup_token`: 50 random bits shown as `XXXXX-XXXXX` (Crockford base32). It lives only in memory and is compared as HMACs in constant time. Case, dashes and spaces are ignored, and `O`, `I`, `L` read as `0`, `1`, `1`.
 - `first_admin`: one `INSERT ... WHERE NOT EXISTS` inside `BEGIN IMMEDIATE`, so concurrent submissions create exactly one admin.
 - `rate_limit`: per-IP, in memory. A caller charges an attempt before checking the secret and refunds it only on success, so parallel requests cannot all pass the check and a success cannot erase earlier failures. Clients are grouped by IPv4 address or IPv6 /64; IPv4-mapped IPv6 addresses count as IPv4. When 10,000 addresses are tracked, new ones are refused until some windows end.
@@ -52,6 +52,8 @@ JSON under `/api`. Handlers are thin: they call `auth`, `bookmarks` and `users`.
 | `GET /api/state` | none | `{setup_required, user}`; the front end reads it to pick the first screen |
 | `POST /api/setup` | setup token | create the first admin and sign in |
 | `POST /api/login`, `POST /api/logout` | none | start and end a session |
+| `GET /api/account/sessions`, `DELETE /api/account/sessions`, `DELETE /api/account/sessions/{id}` | session | list the caller's live sessions (`is_current` marks this one; the id is the first 16 hex digits of the token hash, honoured only together with the caller's `user_id`); end all the others; end one (404 for another user's id) |
+| `POST /api/account/confirm` | session | `{password}`; wrong password answers 403; shares the login rate limit; sets `confirmed_at` for this session |
 | `PUT /api/account/password` | session | `{current, new}`; wrong current password answers 403; shares the login rate limit; ends every session, then sets a fresh cookie for the caller |
 | `GET /api/bookmarks?q=&tag=&limit=&offset=` | session | newest first; `limit` defaults to 50, at most 200 |
 | `GET /api/bookmarks/random?q=&tag=` | session | one bookmark chosen at random (`ORDER BY RANDOM() LIMIT 1`) from those `q` and `tag` let through; 404 when none |
@@ -61,11 +63,12 @@ JSON under `/api`. Handlers are thin: they call `auth`, `bookmarks` and `users`.
 | `GET /api/tags` | session | the user's tags with counts |
 | `POST /api/import` | session | body is a Netscape bookmark file sent as `text/html`; returns `{added, duplicates, invalid, invalid_examples}` |
 | `GET /api/export?format=html\|json` | session | the user's own bookmarks as a download (`Content-Disposition: attachment`) |
-| `GET /api/users`, `POST /api/users` | admin | list accounts; create one (`username`, `password`, optional `is_admin`) |
-| `PUT /api/users/{id}/role` | admin | `{is_admin}` promote or demote |
-| `PUT /api/users/{id}/disabled` | admin | `{is_disabled}` disable or enable |
-| `PUT /api/users/{id}/password` | admin | `{password}` reset; ends all sessions of that user |
-| `DELETE /api/users/{id}` | admin | delete the account with its bookmarks and sessions |
+| `GET /api/users` | admin | list accounts |
+| `POST /api/users` | confirmed admin | create one (`username`, `password`, optional `is_admin`) |
+| `PUT /api/users/{id}/role` | confirmed admin | `{is_admin}` promote or demote |
+| `PUT /api/users/{id}/disabled` | confirmed admin | `{is_disabled}` disable or enable |
+| `PUT /api/users/{id}/password` | confirmed admin | `{password}` reset; ends all sessions of that user |
+| `DELETE /api/users/{id}` | confirmed admin | delete the account with its bookmarks and sessions |
 
 ### Import and export (`netscape.rs`, `import.rs`, `web/transfer_routes.rs`)
 
@@ -97,6 +100,7 @@ JSON under `/api`. Handlers are thin: they call `auth`, `bookmarks` and `users`.
 - **Host header.** Writes (POST, PUT, DELETE) are refused with 403 when the `Origin` header does not equal `Host`. A proxy that rewrites `Host` breaks every write, so it must pass `Host` through unchanged.
 - **Session cookie.** `bkd_session`, or `__Host-bkd_session` when `--secure-cookies` is on, so a sibling subdomain cannot plant a cookie.
 - **Shutdown.** SIGTERM and Ctrl-C both stop the server. In-flight requests get 10 seconds to finish.
+- **Confirmed admin.** Creating, promoting, demoting, disabling, resetting and deleting users need `ConfirmedAdmin`: the session must have typed its password in the last 5 minutes (`CONFIRM_WINDOW_SECONDS`), else 403 with `code: "reauth_required"`. A login counts, so an admin who just signed in is not asked. The front end catches the code in `api()`, shows a password dialog, calls `POST /api/account/confirm` and repeats the request. A stolen admin cookie therefore cannot change accounts without the password.
 - **Response headers.** Every response, API and static, carries `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy` `same-origin`, and a restrictive `Permissions-Policy`. `Strict-Transport-Security` is added only with `--secure-cookies`.
 - **Password work.** Argon2 runs at most as many times at once as there are CPU cores, so a burst of logins cannot exhaust memory.
 - **Malformed input.** A body or query that axum cannot parse gets axum's plain-text 4xx response, not the JSON error format.

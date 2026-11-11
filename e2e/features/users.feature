@@ -38,3 +38,23 @@ Feature: Managing users
     When I open Manage users
     And I delete "mei"
     Then the user list does not show "mei"
+
+  Scenario: An old confirmation asks for the password before an admin change
+    Given the member "mei" exists
+    And my password confirmation is old
+    When I open Manage users
+    And I disable "mei"
+    Then I am asked to confirm my password
+    When I confirm my password with "not-the-password"
+    Then I see the error "password is wrong"
+    When I confirm my password with "correct-horse-battery"
+    Then the user list shows "mei" as disabled
+
+  Scenario: Cancelling the confirmation leaves the account alone
+    Given the member "mei" exists
+    And my password confirmation is old
+    When I open Manage users
+    And I disable "mei"
+    And I cancel the confirmation
+    Then the confirmation dialog is closed
+    And "mei" can sign in with the temporary password

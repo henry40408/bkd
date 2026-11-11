@@ -21,17 +21,42 @@ pub struct SessionUser {
     pub is_admin: bool,
 }
 
-/// Starts a session and returns the raw token for the cookie.
-pub async fn create(pool: &SqlitePool, user_id: i64, now: i64) -> Result<String> {
+/// Who starts a session, and from where. `ip` and `user_agent` are only shown in the
+/// session list, so they may be blank.
+pub struct SessionStart {
+    pub user_id: i64,
+    pub now: i64,
+    pub ip: String,
+    pub user_agent: String,
+}
+
+#[cfg(test)]
+impl SessionStart {
+    pub fn new(user_id: i64, now: i64) -> Self {
+        Self {
+            user_id,
+            now,
+            ip: String::new(),
+            user_agent: String::new(),
+        }
+    }
+}
+
+/// Starts a session and returns the raw token for the cookie. Starting one proves the
+/// password, so it also counts as a confirmation.
+pub async fn create(pool: &SqlitePool, start: &SessionStart) -> Result<String> {
     let token = to_hex(&random_bytes::<32>());
     sqlx::query(
-        "INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_used_at)
-         VALUES (?1, ?2, ?3, ?4, ?3)",
+        "INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_used_at,
+                               confirmed_at, ip, user_agent)
+         VALUES (?1, ?2, ?3, ?4, ?3, ?3, ?5, ?6)",
     )
     .bind(sha256_hex(&token))
-    .bind(user_id)
-    .bind(now)
-    .bind(now + SESSION_LIFETIME_SECONDS)
+    .bind(start.user_id)
+    .bind(start.now)
+    .bind(start.now + SESSION_LIFETIME_SECONDS)
+    .bind(&start.ip)
+    .bind(&start.user_agent)
     .execute(pool)
     .await?;
     Ok(token)
@@ -43,21 +68,23 @@ pub async fn create(pool: &SqlitePool, user_id: i64, now: i64) -> Result<String>
 /// session. Returns `None` when the account changed.
 pub async fn create_if_unchanged(
     pool: &SqlitePool,
-    user_id: i64,
+    start: &SessionStart,
     verified_hash: &str,
-    now: i64,
 ) -> Result<Option<String>> {
     let token = to_hex(&random_bytes::<32>());
     let result = sqlx::query(
-        "INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_used_at)
-         SELECT ?1, id, ?3, ?4, ?3 FROM users
+        "INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_used_at,
+                               confirmed_at, ip, user_agent)
+         SELECT ?1, id, ?3, ?4, ?3, ?3, ?6, ?7 FROM users
          WHERE id = ?2 AND password_hash = ?5 AND disabled_at IS NULL",
     )
     .bind(sha256_hex(&token))
-    .bind(user_id)
-    .bind(now)
-    .bind(now + SESSION_LIFETIME_SECONDS)
+    .bind(start.user_id)
+    .bind(start.now)
+    .bind(start.now + SESSION_LIFETIME_SECONDS)
     .bind(verified_hash)
+    .bind(&start.ip)
+    .bind(&start.user_agent)
     .execute(pool)
     .await?;
     Ok((result.rows_affected() == 1).then_some(token))
@@ -121,6 +148,101 @@ where
     Ok(())
 }
 
+/// How long a password confirmation stays good for the admin changes that ask for one.
+pub const CONFIRM_WINDOW_SECONDS: i64 = 5 * 60;
+
+/// Records that the owner just typed the password in this session. The caller verified
+/// it. A session revoked in the meantime (a reset ends all of them) stays gone.
+pub async fn confirm(pool: &SqlitePool, token: &str, now: i64) -> Result<()> {
+    sqlx::query("UPDATE sessions SET confirmed_at = ?2 WHERE token_hash = ?1")
+        .bind(sha256_hex(token))
+        .bind(now)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn is_confirmed(pool: &SqlitePool, token: &str, now: i64) -> Result<bool> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM sessions WHERE token_hash = ?1 AND confirmed_at > ?2",
+    )
+    .bind(sha256_hex(token))
+    .bind(now - CONFIRM_WINDOW_SECONDS)
+    .fetch_one(pool)
+    .await?;
+    Ok(count == 1)
+}
+
+/// One row of the session list. `id` is how the owner names a session to end: the start
+/// of the token's SHA-256, which is never reused (a rowid would be) and cannot be turned
+/// back into the cookie. Use it only together with `user_id`.
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+pub struct SessionInfo {
+    pub id: String,
+    pub created_at: i64,
+    pub last_used_at: i64,
+    pub ip: String,
+    pub user_agent: String,
+    pub is_current: bool,
+}
+
+/// The live sessions of one user, most recently used first. `current_token` marks the
+/// caller's own.
+pub async fn list_for_user(
+    pool: &SqlitePool,
+    user_id: i64,
+    current_token: &str,
+    now: i64,
+) -> Result<Vec<SessionInfo>> {
+    let rows: Vec<(String, i64, i64, String, String, bool)> = sqlx::query_as(
+        "SELECT substr(token_hash, 1, 16), created_at, last_used_at, ip, user_agent, token_hash = ?2
+         FROM sessions
+         WHERE user_id = ?1 AND expires_at > ?3 AND last_used_at > ?4
+         ORDER BY last_used_at DESC, created_at DESC",
+    )
+    .bind(user_id)
+    .bind(sha256_hex(current_token))
+    .bind(now)
+    .bind(now - SESSION_IDLE_SECONDS)
+    .fetch_all(pool)
+    .await?;
+    let sessions = rows
+        .into_iter()
+        .map(
+            |(id, created_at, last_used_at, ip, user_agent, is_current)| SessionInfo {
+                id,
+                created_at,
+                last_used_at,
+                ip,
+                user_agent,
+                is_current,
+            },
+        )
+        .collect();
+    Ok(sessions)
+}
+
+/// Ends one of the user's own sessions. Returns false when the id is not theirs.
+pub async fn revoke_by_id(pool: &SqlitePool, user_id: i64, id: &str) -> Result<bool> {
+    let result =
+        sqlx::query("DELETE FROM sessions WHERE substr(token_hash, 1, 16) = ?1 AND user_id = ?2")
+            .bind(id)
+            .bind(user_id)
+            .execute(pool)
+            .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Ends every session of the user except the one holding `keep_token`.
+pub async fn revoke_others(pool: &SqlitePool, user_id: i64, keep_token: &str) -> Result<u64> {
+    let result = sqlx::query("DELETE FROM sessions WHERE user_id = ?1 AND token_hash != ?2")
+        .bind(user_id)
+        .bind(sha256_hex(keep_token))
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
+}
+
 pub async fn delete_expired(pool: &SqlitePool, now: i64) -> Result<u64> {
     let result = sqlx::query("DELETE FROM sessions WHERE expires_at <= ?1 OR last_used_at <= ?2")
         .bind(now)
@@ -141,7 +263,9 @@ mod tests {
     async fn a_new_session_finds_its_user() {
         let (_dir, pool) = test_pool().await;
         let user_id = insert_user(&pool, "henry").await.unwrap();
-        let token = create(&pool, user_id, NOW).await.unwrap();
+        let token = create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
 
         let user = lookup(&pool, &token, NOW).await.unwrap().unwrap();
         assert_eq!(
@@ -164,13 +288,13 @@ mod tests {
             .await
             .unwrap();
 
-        let token = create_if_unchanged(&pool, user_id, &hash, NOW)
+        let token = create_if_unchanged(&pool, &SessionStart::new(user_id, NOW), &hash)
             .await
             .unwrap();
         assert!(lookup(&pool, &token.unwrap(), NOW).await.unwrap().is_some());
 
         // The password was reset after the old one was verified.
-        let stale = create_if_unchanged(&pool, user_id, "old-hash", NOW)
+        let stale = create_if_unchanged(&pool, &SessionStart::new(user_id, NOW), "old-hash")
             .await
             .unwrap();
         assert!(stale.is_none());
@@ -181,7 +305,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let disabled = create_if_unchanged(&pool, user_id, &hash, NOW)
+        let disabled = create_if_unchanged(&pool, &SessionStart::new(user_id, NOW), &hash)
             .await
             .unwrap();
         assert!(disabled.is_none());
@@ -196,7 +320,9 @@ mod tests {
     async fn the_database_never_holds_the_raw_token() {
         let (_dir, pool) = test_pool().await;
         let user_id = insert_user(&pool, "henry").await.unwrap();
-        let token = create(&pool, user_id, NOW).await.unwrap();
+        let token = create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
 
         let stored: String = sqlx::query_scalar("SELECT token_hash FROM sessions")
             .fetch_one(&pool)
@@ -210,8 +336,12 @@ mod tests {
     async fn tokens_are_unique_and_unknown_tokens_fail() {
         let (_dir, pool) = test_pool().await;
         let user_id = insert_user(&pool, "henry").await.unwrap();
-        let first = create(&pool, user_id, NOW).await.unwrap();
-        let second = create(&pool, user_id, NOW).await.unwrap();
+        let first = create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
+        let second = create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
         assert_ne!(first, second);
         assert!(lookup(&pool, "not-a-token", NOW).await.unwrap().is_none());
     }
@@ -220,7 +350,9 @@ mod tests {
     async fn an_expired_session_is_rejected() {
         let (_dir, pool) = test_pool().await;
         let user_id = insert_user(&pool, "henry").await.unwrap();
-        let token = create(&pool, user_id, NOW).await.unwrap();
+        let token = create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
 
         // Use keeps the session from going idle; only the absolute lifetime ends it.
         for day in (1..30).step_by(5) {
@@ -237,8 +369,12 @@ mod tests {
     async fn an_idle_session_ends_but_use_keeps_it_alive() {
         let (_dir, pool) = test_pool().await;
         let user_id = insert_user(&pool, "henry").await.unwrap();
-        let idle = create(&pool, user_id, NOW).await.unwrap();
-        let active = create(&pool, user_id, NOW).await.unwrap();
+        let idle = create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
+        let active = create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
 
         // Used just before the idle limit, so its clock restarts.
         let almost = NOW + SESSION_IDLE_SECONDS - 1;
@@ -256,7 +392,9 @@ mod tests {
     async fn the_idle_clock_moves_at_most_once_an_interval() {
         let (_dir, pool) = test_pool().await;
         let user_id = insert_user(&pool, "henry").await.unwrap();
-        let token = create(&pool, user_id, NOW).await.unwrap();
+        let token = create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
         let last_used = || async {
             sqlx::query_scalar::<_, i64>("SELECT last_used_at FROM sessions")
                 .fetch_one(&pool)
@@ -273,10 +411,101 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_list_shows_only_the_users_live_sessions_and_marks_the_current_one() {
+        let (_dir, pool) = test_pool().await;
+        let henry = insert_user(&pool, "henry").await.unwrap();
+        let mei = insert_user(&pool, "mei").await.unwrap();
+        let start = SessionStart {
+            ip: "192.0.2.7".into(),
+            user_agent: "Firefox".into(),
+            ..SessionStart::new(henry, NOW)
+        };
+        let first = create(&pool, &start).await.unwrap();
+        let second = create(&pool, &SessionStart::new(henry, NOW + 10))
+            .await
+            .unwrap();
+        create(&pool, &SessionStart::new(mei, NOW)).await.unwrap();
+        // One that went idle is not listed.
+        create(&pool, &SessionStart::new(henry, NOW - SESSION_IDLE_SECONDS))
+            .await
+            .unwrap();
+
+        let list = list_for_user(&pool, henry, &first, NOW + 20).await.unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].last_used_at, NOW + 10);
+        assert!(!list[0].is_current);
+        assert!(list[1].is_current);
+        assert_eq!(
+            (list[1].ip.as_str(), list[1].user_agent.as_str()),
+            ("192.0.2.7", "Firefox")
+        );
+        let list = list_for_user(&pool, henry, &second, NOW + 20)
+            .await
+            .unwrap();
+        assert!(list[0].is_current && !list[1].is_current);
+    }
+
+    #[tokio::test]
+    async fn a_session_can_be_ended_only_by_its_owner() {
+        let (_dir, pool) = test_pool().await;
+        let henry = insert_user(&pool, "henry").await.unwrap();
+        let mei = insert_user(&pool, "mei").await.unwrap();
+        let mine = create(&pool, &SessionStart::new(henry, NOW)).await.unwrap();
+        let theirs = create(&pool, &SessionStart::new(mei, NOW)).await.unwrap();
+        let their_id = list_for_user(&pool, mei, &theirs, NOW).await.unwrap()[0]
+            .id
+            .clone();
+
+        assert!(!revoke_by_id(&pool, henry, &their_id).await.unwrap());
+        assert!(lookup(&pool, &theirs, NOW).await.unwrap().is_some());
+        assert!(revoke_by_id(&pool, mei, &their_id).await.unwrap());
+        assert!(lookup(&pool, &theirs, NOW).await.unwrap().is_none());
+        assert!(lookup(&pool, &mine, NOW).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn ending_the_others_keeps_the_current_session() {
+        let (_dir, pool) = test_pool().await;
+        let henry = insert_user(&pool, "henry").await.unwrap();
+        let mei = insert_user(&pool, "mei").await.unwrap();
+        let keep = create(&pool, &SessionStart::new(henry, NOW)).await.unwrap();
+        let other = create(&pool, &SessionStart::new(henry, NOW)).await.unwrap();
+        let mei_token = create(&pool, &SessionStart::new(mei, NOW)).await.unwrap();
+
+        assert_eq!(revoke_others(&pool, henry, &keep).await.unwrap(), 1);
+        assert!(lookup(&pool, &keep, NOW).await.unwrap().is_some());
+        assert!(lookup(&pool, &other, NOW).await.unwrap().is_none());
+        assert!(lookup(&pool, &mei_token, NOW).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn a_confirmation_lasts_five_minutes() {
+        let (_dir, pool) = test_pool().await;
+        let user_id = insert_user(&pool, "henry").await.unwrap();
+        let token = create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
+
+        // Signing in counts as a confirmation.
+        assert!(
+            is_confirmed(&pool, &token, NOW + CONFIRM_WINDOW_SECONDS - 1)
+                .await
+                .unwrap()
+        );
+        let stale = NOW + CONFIRM_WINDOW_SECONDS;
+        assert!(!is_confirmed(&pool, &token, stale).await.unwrap());
+        confirm(&pool, &token, stale).await.unwrap();
+        assert!(is_confirmed(&pool, &token, stale + 1).await.unwrap());
+        assert!(!is_confirmed(&pool, "not-a-token", stale).await.unwrap());
+    }
+
+    #[tokio::test]
     async fn the_sweep_deletes_idle_sessions() {
         let (_dir, pool) = test_pool().await;
         let user_id = insert_user(&pool, "henry").await.unwrap();
-        create(&pool, user_id, NOW).await.unwrap();
+        create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
         let before_idle = NOW + SESSION_IDLE_SECONDS - 1;
         assert_eq!(delete_expired(&pool, before_idle).await.unwrap(), 0);
         let at_idle = NOW + SESSION_IDLE_SECONDS;
@@ -287,7 +516,9 @@ mod tests {
     async fn a_disabled_user_loses_access_immediately() {
         let (_dir, pool) = test_pool().await;
         let user_id = insert_user(&pool, "henry").await.unwrap();
-        let token = create(&pool, user_id, NOW).await.unwrap();
+        let token = create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
 
         sqlx::query("UPDATE users SET disabled_at = ?1 WHERE id = ?2")
             .bind(NOW)
@@ -302,7 +533,9 @@ mod tests {
     async fn the_admin_flag_is_read_on_every_lookup() {
         let (_dir, pool) = test_pool().await;
         let user_id = insert_user(&pool, "henry").await.unwrap();
-        let token = create(&pool, user_id, NOW).await.unwrap();
+        let token = create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
 
         sqlx::query("UPDATE users SET is_admin = 1 WHERE id = ?1")
             .bind(user_id)
@@ -317,8 +550,12 @@ mod tests {
     async fn revoke_removes_only_that_session() {
         let (_dir, pool) = test_pool().await;
         let user_id = insert_user(&pool, "henry").await.unwrap();
-        let kept = create(&pool, user_id, NOW).await.unwrap();
-        let revoked = create(&pool, user_id, NOW).await.unwrap();
+        let kept = create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
+        let revoked = create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
 
         revoke(&pool, &revoked).await.unwrap();
         assert!(lookup(&pool, &revoked, NOW).await.unwrap().is_none());
@@ -330,8 +567,8 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let henry = insert_user(&pool, "henry").await.unwrap();
         let mei = insert_user(&pool, "mei").await.unwrap();
-        let henry_token = create(&pool, henry, NOW).await.unwrap();
-        let mei_token = create(&pool, mei, NOW).await.unwrap();
+        let henry_token = create(&pool, &SessionStart::new(henry, NOW)).await.unwrap();
+        let mei_token = create(&pool, &SessionStart::new(mei, NOW)).await.unwrap();
 
         revoke_all_for_user(&pool, henry).await.unwrap();
         assert!(lookup(&pool, &henry_token, NOW).await.unwrap().is_none());
@@ -342,9 +579,13 @@ mod tests {
     async fn delete_expired_keeps_live_sessions() {
         let (_dir, pool) = test_pool().await;
         let user_id = insert_user(&pool, "henry").await.unwrap();
-        let old = create(&pool, user_id, NOW).await.unwrap();
+        let old = create(&pool, &SessionStart::new(user_id, NOW))
+            .await
+            .unwrap();
         let later = NOW + SESSION_LIFETIME_SECONDS;
-        let fresh = create(&pool, user_id, later).await.unwrap();
+        let fresh = create(&pool, &SessionStart::new(user_id, later))
+            .await
+            .unwrap();
 
         assert_eq!(delete_expired(&pool, later).await.unwrap(), 1);
         assert!(lookup(&pool, &old, NOW).await.unwrap().is_none());

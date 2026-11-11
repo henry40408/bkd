@@ -200,15 +200,31 @@ function toast(message) {
 /* ---------- server calls ---------- */
 
 class ApiError extends Error {
-  constructor(status, message, retryAfter) {
+  constructor(status, message, retryAfter, code) {
     super(message);
     this.status = status;
     this.retryAfter = retryAfter;
+    this.code = code;
+  }
+}
+
+// Calls the server. An admin change that needs the password again asks for it in a dialog and
+// is sent once more, so no screen has to know about the confirmation.
+async function api(method, path, body) {
+  try {
+    return await request(method, path, body);
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.code !== 'reauth_required') throw error;
+    if (!(await confirmPassword())) {
+      // The dialog also closes when the session ended under it; say that, not "confirm your password".
+      throw state.user ? error : new ApiError(401, 'Your session ended.');
+    }
+    return request(method, path, body);
   }
 }
 
 // A File is sent as it is, as HTML; anything else is JSON.
-async function api(method, path, body) {
+async function request(method, path, body) {
   const isFile = body instanceof Blob;
   const contentType = isFile ? 'text/html' : 'application/json';
   const response = await fetch(`/api${path}`, {
@@ -229,7 +245,7 @@ function refusal(response, data) {
   let fallback = 'The request was refused.';
   if (response.status >= 500) fallback = 'The server had a problem. Try again.';
   if (response.status === 413) fallback = 'That file is too large. The limit is 20 MB.';
-  return new ApiError(response.status, data?.error ?? fallback, response.headers.get('Retry-After'));
+  return new ApiError(response.status, data?.error ?? fallback, response.headers.get('Retry-After'), data?.code);
 }
 
 // Calls `onEvent(name, data)` for each server-sent event of a POST. Stops quietly when `signal` aborts.
@@ -275,6 +291,25 @@ async function streamEvents(path, body, signal, onEvent) {
   }
   // The server always ends with `done`; a stream that stops short was cut off.
   if (!ended && !signal.aborted) throw new TypeError('The connection was cut off.');
+}
+
+// Several requests may need the password at once; they share one dialog.
+let pendingConfirmation = null;
+
+function confirmPassword() {
+  if (pendingConfirmation) return pendingConfirmation;
+  const dialog = $('confirm-dialog');
+  $('confirm-form').reset();
+  showError($('confirm-error'), '');
+  dialog.returnValue = '';
+  pendingConfirmation = new Promise((resolve) => {
+    dialog.addEventListener('close', () => {
+      pendingConfirmation = null;
+      resolve(dialog.returnValue === 'confirmed');
+    }, { once: true });
+  });
+  dialog.showModal();
+  return pendingConfirmation;
 }
 
 function describe(error) {
@@ -392,7 +427,7 @@ function renderSide() {
   })));
 
   const manageUsersLink = el('a', { href: '#', onclick: (e) => { e.preventDefault(); showUsers(); } }, 'Manage users');
-  const accountLink = el('a', { href: '#', onclick: (e) => { e.preventDefault(); showAccount(); } }, 'Change password');
+  const accountLink = el('a', { href: '#', onclick: (e) => { e.preventDefault(); showAccount(); } }, 'Account');
   const transferLink = el('a', { href: '#', onclick: (e) => { e.preventDefault(); showTransfer(); } }, 'Import and export');
   $('me').replaceChildren(...[
     el('span', {}, 'Signed in as ', el('strong', {}, state.user.username)),
@@ -1069,6 +1104,7 @@ function showAccount() {
   showError($('password-error'), '');
   syncHash({ push: true });
   showView();
+  loadSessions();
 }
 
 function showView() {
@@ -1143,6 +1179,7 @@ function restoreFromHash() {
   syncHash();
   showView();
   if (state.view === 'users') loadUsers();
+  if (state.view === 'account') loadSessions();
   if (state.view !== 'list') return;
   // The tag list may be old (a tag made in another tab); loadTags drops a tag that is not there.
   loadBookmarks();
@@ -1158,8 +1195,66 @@ async function removeBookmark(b) {
   await refreshAll();
 }
 
+/* ---------- signed-in browsers ---------- */
+
+// The server sends the raw User-Agent. A rough "Browser on System" is enough to tell sessions apart.
+function describeAgent(agent) {
+  const browser = [['Edg/', 'Edge'], ['OPR/', 'Opera'], ['Firefox/', 'Firefox'], ['Chrome/', 'Chrome'], ['CriOS/', 'Chrome'], ['Safari/', 'Safari']]
+    .find(([mark]) => agent.includes(mark))?.[1];
+  const system = [['iPhone', 'iOS'], ['iPad', 'iOS'], ['Android', 'Android'], ['Windows', 'Windows'], ['Mac OS X', 'macOS'], ['Linux', 'Linux']]
+    .find(([mark]) => agent.includes(mark))?.[1];
+  if (browser && system) return `${browser} on ${system}`;
+  return browser ?? system ?? 'Unknown browser';
+}
+
+function renderSessions(sessions) {
+  const rows = sessions.map((s) => {
+    const name = describeAgent(s.user_agent);
+    return el('div', { class: 'user-row' },
+      el('div', { class: 'name' }, name, s.is_current ? el('span', { class: 'here' }, 'This browser') : null),
+      el('div', { class: 'meta' }, 'Last used ', savedTime(s.last_used_at), s.ip ? `, from ${s.ip}` : ''),
+      el('div', { class: 'user-actions' }, s.is_current ? null : el('button', {
+        class: 'quiet danger', 'aria-label': `Sign out ${name}, last used ${timeAgo(s.last_used_at)}`, onclick: once(() => endSessionById(s.id)),
+      }, 'Sign out')));
+  });
+  $('session-list').replaceChildren(...rows);
+  $('sessions-others').hidden = sessions.length < 2;
+}
+
+async function loadSessions() {
+  const error = $('session-error');
+  const result = await attempt(() => api('GET', '/account/sessions'), (message) => showError(error, message));
+  if (!result || state.view !== 'account') return;
+  showError(error, '');
+  renderSessions(result.value);
+}
+
+async function endSessionById(id) {
+  await attempt(() => api('DELETE', `/account/sessions/${id}`), (message) => showError($('session-error'), message));
+  await loadSessions();
+}
+
+$('sessions-others').addEventListener('click', once(async () => {
+  const result = await attempt(() => api('DELETE', '/account/sessions'), (message) => showError($('session-error'), message));
+  if (result) toast('Signed out of all other browsers.');
+  await loadSessions();
+}));
+
+$('confirm-cancel').addEventListener('click', () => $('confirm-dialog').close());
+$('confirm-form').addEventListener('submit', once(async (e) => {
+  const dialog = $('confirm-dialog');
+  const password = new FormData(e.target).get('password');
+  if (!password) return showError($('confirm-error'), 'Enter your password.');
+  showError($('confirm-error'), '');
+  const result = await attempt(() => request('POST', '/account/confirm', { password }), (message) => showError($('confirm-error'), message));
+  if (result) return dialog.close('confirmed');
+  // The session itself ended: there is nobody left to confirm.
+  if (!state.user) dialog.close();
+}));
+
 function resetForms() {
-  for (const id of ['add-form', 'user-form', 'login-form', 'setup-form', 'import-form', 'password-form']) $(id).reset();
+  if ($('confirm-dialog').open) $('confirm-dialog').close();
+  for (const id of ['add-form', 'user-form', 'login-form', 'setup-form', 'import-form', 'password-form', 'confirm-form']) $(id).reset();
   $('search').value = '';
   $('add').open = false;
   for (const id of ['add-error', 'user-error', 'login-error', 'setup-error', 'import-error', 'password-error']) showError($(id), '');
@@ -1202,6 +1297,7 @@ async function enterApp(user) {
   showView();
   await refreshAll();
   if (state.view === 'users') loadUsers();
+  if (state.view === 'account') loadSessions();
 }
 
 async function start() {
@@ -1331,6 +1427,7 @@ $('password-form').addEventListener('submit', once(async (e) => {
   if (!result) return;
   e.target.reset();
   toast('Password changed. You are signed out everywhere else.');
+  await loadSessions();
 }));
 
 $('login-form').addEventListener('submit', once(async (e) => {

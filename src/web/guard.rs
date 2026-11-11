@@ -42,6 +42,27 @@ impl FromRequestParts<SharedState> for AdminUser {
     }
 }
 
+/// An admin who typed their password in the last few minutes. Changes to accounts take
+/// this, so a stolen admin session cannot promote, disable or reset anyone without the
+/// password. Refused with `ReauthRequired` when the confirmation is old.
+pub struct ConfirmedAdmin(pub SessionUser);
+
+impl FromRequestParts<SharedState> for ConfirmedAdmin {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &SharedState) -> Result<Self, ApiError> {
+        let AdminUser(user) = AdminUser::from_request_parts(parts, state).await?;
+        let confirmed = match cookie::read_token(&parts.headers, state.secure_cookies) {
+            Some(token) => session::is_confirmed(&state.pool, token, unix_now()).await?,
+            None => false,
+        };
+        if !confirmed {
+            return Err(ApiError::ReauthRequired);
+        }
+        Ok(Self(user))
+    }
+}
+
 /// `None` when the request carries no cookie or the session is not valid.
 pub async fn user_from_headers(
     state: &SharedState,
