@@ -94,6 +94,7 @@ Feature: Bookmarks
     And I choose the tag "rust"
     And I choose Random
     Then the pick shows "Alpha"
+    And the pick does not show "null"
     And the pick does not show "Beta"
     When I choose Another
     Then the pick shows "Alpha"
@@ -107,6 +108,7 @@ Feature: Bookmarks
     And I search for "beta"
     And I choose Random
     Then the pick shows "Beta"
+    And the pick does not show "null"
     When I search for "alpha"
     Then the pick does not show "Beta"
 

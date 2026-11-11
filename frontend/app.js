@@ -411,7 +411,7 @@ function dismissPick() {
 }
 
 function renderPick(b) {
-  $('pick').replaceChildren(
+  const parts = [
     el('span', { class: 'domain' }, domainOf(b.url)),
     el('a', { class: 'title', href: normalizeUrl(b.url) || '#', target: '_blank', rel: 'noopener noreferrer' }, b.title),
     b.note ? el('p', { class: 'note' }, b.note) : null,
@@ -419,7 +419,9 @@ function renderPick(b) {
     el('div', { class: 'actions' },
       el('button', { id: 'pick-another', class: 'quiet', onclick: once(pickRandom) }, 'Another'),
       el('button', { class: 'quiet', onclick: dismissPick }, 'Close')),
-  );
+  ];
+  // replaceChildren() would print a null part as the text "null"; el() drops them.
+  $('pick').replaceChildren(...parts.filter(Boolean));
   $('pick').hidden = false;
 }
 
