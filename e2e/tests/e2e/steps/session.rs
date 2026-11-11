@@ -32,6 +32,60 @@ async fn open_the_site(world: &mut BkdWorld) -> Result<()> {
     world.goto("/").await
 }
 
+#[when(expr = "I open the site at {string}")]
+async fn open_the_site_at(world: &mut BkdWorld, path: String) -> Result<()> {
+    world.goto(&path).await?;
+    // The sign-in step already loaded the page, and a new fragment alone does not reload it.
+    // This is a link opened cold, so the page must start again.
+    world.driver()?.refresh().await?;
+    Ok(())
+}
+
+#[when("I reload the page")]
+async fn reload_the_page(world: &mut BkdWorld) -> Result<()> {
+    world.driver()?.refresh().await?;
+    Ok(())
+}
+
+#[when("I go back")]
+async fn go_back(world: &mut BkdWorld) -> Result<()> {
+    world.driver()?.back().await?;
+    Ok(())
+}
+
+/// The page writes the hash after a click or a keystroke, so the check waits for it.
+#[then(expr = "the address hash is {string}")]
+async fn address_hash_is(world: &mut BkdWorld, expected: String) -> Result<()> {
+    let mut actual = String::new();
+    for _ in 0..30 {
+        let url = world.driver()?.current_url().await?;
+        actual = url.fragment().unwrap_or_default().to_owned();
+        if actual == expected {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    anyhow::bail!("the address hash is {actual:?}")
+}
+
+#[then(expr = "the search box holds {string}")]
+async fn search_box_holds(world: &mut BkdWorld, expected: String) -> Result<()> {
+    let mut actual = String::new();
+    for _ in 0..30 {
+        actual = world
+            .element("#search")
+            .await?
+            .value()
+            .await?
+            .unwrap_or_default();
+        if actual == expected {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    anyhow::bail!("the search box holds {actual:?}")
+}
+
 #[then("I see the setup page")]
 #[then("I still see the setup page")]
 async fn setup_page(world: &mut BkdWorld) -> Result<()> {

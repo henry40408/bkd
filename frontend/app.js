@@ -340,6 +340,7 @@ async function loadTags() {
   if (tagGone || linkGone) {
     if (tagGone) state.tag = 'all';
     if (linkGone) state.link = 'all';
+    syncHash();
     await loadBookmarks();
   }
   renderSide();
@@ -1029,6 +1030,7 @@ function showFilter({ tag, link }) {
   state.confirming = null;
   // A different list is coming; what was ticked will not be on screen.
   clearSelection();
+  syncHash({ push: true });
   showView();
   loadBookmarks();
 }
@@ -1040,6 +1042,7 @@ function showUsers() {
   state.view = 'users';
   state.confirmingUser = null;
   state.resettingUser = null;
+  syncHash({ push: true });
   showView();
   loadUsers();
 }
@@ -1051,6 +1054,7 @@ function showTransfer() {
   state.view = 'transfer';
   showError($('import-error'), '');
   $('import-result').hidden = true;
+  syncHash({ push: true });
   showView();
 }
 
@@ -1066,7 +1070,64 @@ function clearSearch() {
   clearSelection();
   state.query = '';
   $('search').value = '';
+  syncHash();
   loadBookmarks();
+}
+
+/* ---------- address bar ---------- */
+
+// The view, the filter and the search live in the URL hash, so a reload, the back button and a
+// shared link bring them back: `#/users`, `#/transfer`, or `#/?q=rust&tag=web&status=broken`.
+function hashForState() {
+  if (state.view !== 'list') return `#/${state.view}`;
+  const params = new URLSearchParams();
+  if (state.query.trim()) params.set('q', state.query.trim());
+  if (state.tag !== 'all') params.set('tag', state.tag);
+  if (state.link !== 'all') params.set('status', state.link);
+  const text = params.toString();
+  return text ? `#/?${text}` : '';
+}
+
+// A change of view or filter is a new history entry; typing in the search box only replaces the
+// current one, so back does not step through every keystroke.
+function syncHash({ push = false } = {}) {
+  const hash = hashForState();
+  if (hash === location.hash) return;
+  history[push ? 'pushState' : 'replaceState'](null, '', hash || location.pathname + location.search);
+}
+
+// Anything the page does not know (a typo, a tag deleted since, a view only admins have) falls back to the list.
+function stateFromHash() {
+  const rest = location.hash.replace(/^#\/?/, '');
+  const cut = rest.indexOf('?');
+  const name = cut === -1 ? rest : rest.slice(0, cut);
+  const params = new URLSearchParams(cut === -1 ? '' : rest.slice(cut + 1));
+  const link = params.get('status');
+  const tag = params.get('tag');
+  const view = name === 'transfer' || (name === 'users' && state.user.is_admin) ? name : 'list';
+  return {
+    view,
+    query: params.get('q') ?? '',
+    tag: tag || 'all',
+    link: LINK_FILTERS.some(([status]) => status === link) ? link : 'all',
+  };
+}
+
+// Back, forward and an edited address all end up here.
+function restoreFromHash() {
+  closePick();
+  setMenu(false);
+  leaveSelectMode();
+  renderBulk();
+  Object.assign(state, stateFromHash(), { editing: null, confirming: null, confirmingUser: null, resettingUser: null });
+  $('search').value = state.query;
+  syncHash();
+  showView();
+  if (state.view === 'users') loadUsers();
+  if (state.view !== 'list') return;
+  // The tag list may be old (a tag made in another tab); loadTags drops a tag that is not there.
+  loadBookmarks();
+  loadTags();
 }
 
 /* ---------- actions ---------- */
@@ -1103,6 +1164,7 @@ function endSession(message) {
 async function signOut() {
   await attempt(() => api('POST', '/logout'));
   endSession('');
+  syncHash();
 }
 
 // Shows exactly one of: the app, the login form, the first-run setup form.
@@ -1114,10 +1176,13 @@ function showScreen(name) {
 
 async function enterApp(user) {
   state.user = user;
-  state.view = 'list';
+  Object.assign(state, stateFromHash());
+  $('search').value = state.query;
+  syncHash();
   showScreen('app');
   showView();
   await refreshAll();
+  if (state.view === 'users') loadUsers();
 }
 
 async function start() {
@@ -1145,6 +1210,7 @@ document.addEventListener('keydown', (e) => {
 // The drawer exists only in the narrow layout; widening the window must not leave the page inert.
 window.matchMedia('(max-width: 760px)').addEventListener('change', (e) => { if (!e.matches) setMenu(false); });
 $('search-form').addEventListener('submit', (e) => e.preventDefault());
+window.addEventListener('popstate', () => { if (state.user) restoreFromHash(); });
 
 let searchTimer;
 $('search').addEventListener('input', (e) => {
@@ -1158,7 +1224,8 @@ $('search').addEventListener('input', (e) => {
   Object.assign(state, { editing: null, confirming: null, hasMore: false });
   $('more').hidden = true;
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(loadBookmarks, SEARCH_DELAY_MS);
+  // Some browsers refuse a page that rewrites the address many times a second, so it waits with the load.
+  searchTimer = setTimeout(() => { syncHash(); loadBookmarks(); }, SEARCH_DELAY_MS);
 });
 
 $('more').addEventListener('click', () => loadBookmarks({ mode: 'append' }));
@@ -1178,9 +1245,10 @@ $('add-form').addEventListener('submit', once(async (e) => {
   form.reset();
   showError($('add-error'), '');
   $('add').open = false;
-  Object.assign(state, { tag: 'all', query: '', editing: null, confirming: null });
+  Object.assign(state, { tag: 'all', link: 'all', query: '', editing: null, confirming: null });
   leaveSelectMode();
   $('search').value = '';
+  syncHash({ push: true });
   toast(`Saved “${title}”`);
   showView();
   await refreshAll();
