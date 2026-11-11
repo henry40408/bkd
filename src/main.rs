@@ -16,6 +16,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use tokio::net::TcpListener;
 
+use auth::forward_auth::{ForwardAuth, ForwardAuthConfig};
 use auth::setup_token::SetupToken;
 use auth::{first_admin, password};
 use linkcheck::Checker;
@@ -35,6 +36,47 @@ struct Args {
     /// Mark the session cookie Secure. Turn it on when the site is served over HTTPS.
     #[arg(long, env = "BKD_SECURE_COOKIES")]
     secure_cookies: bool,
+
+    /// Reverse proxies (addresses or CIDR ranges, comma separated) whose user header is
+    /// believed, such as Authelia's. Leave empty to turn forward auth off.
+    #[arg(long, env = "BKD_FORWARD_AUTH_TRUSTED_PROXIES", value_delimiter = ',')]
+    forward_auth_trusted_proxies: Vec<String>,
+
+    /// Header that carries the signed-in user name.
+    #[arg(
+        long,
+        env = "BKD_FORWARD_AUTH_USER_HEADER",
+        default_value = "Remote-User"
+    )]
+    forward_auth_user_header: String,
+
+    /// Header that carries the user's groups, comma separated.
+    #[arg(
+        long,
+        env = "BKD_FORWARD_AUTH_GROUPS_HEADER",
+        default_value = "Remote-Groups"
+    )]
+    forward_auth_groups_header: String,
+
+    /// Members of this group are admins; everyone else is a member. Without it the
+    /// roles stay as an admin sets them in bkd.
+    #[arg(long, env = "BKD_FORWARD_AUTH_ADMIN_GROUP")]
+    forward_auth_admin_group: Option<String>,
+}
+
+impl Args {
+    fn forward_auth(&self) -> Result<Option<ForwardAuth>> {
+        if self.forward_auth_trusted_proxies.is_empty() {
+            return Ok(None);
+        }
+        let forward_auth = ForwardAuth::new(ForwardAuthConfig {
+            trusted_proxies: self.forward_auth_trusted_proxies.clone(),
+            user_header: self.forward_auth_user_header.clone(),
+            groups_header: self.forward_auth_groups_header.clone(),
+            admin_group: self.forward_auth_admin_group.clone(),
+        })?;
+        Ok(Some(forward_auth))
+    }
 }
 
 #[tokio::main]
@@ -51,6 +93,9 @@ async fn main() -> Result<()> {
         pool: pool.clone(),
         setup_token,
         secure_cookies: args.secure_cookies,
+        forward_auth: args
+            .forward_auth()
+            .context("invalid forward auth setting")?,
         link_checker: Checker::public_only()?,
     });
 

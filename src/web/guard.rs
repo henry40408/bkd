@@ -1,7 +1,9 @@
 //! Request checks shared by all routes: who is calling, and whether the request may
 //! come from the page that sent it.
 
-use axum::extract::{FromRequestParts, Request, State};
+use std::net::{IpAddr, SocketAddr};
+
+use axum::extract::{ConnectInfo, FromRequestParts, Request, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, header};
 use axum::middleware::Next;
@@ -10,8 +12,10 @@ use axum::response::{IntoResponse, Response};
 use super::SharedState;
 use super::cookie;
 use super::error::ApiError;
+use crate::auth::forward_auth::{Forwarded, ForwardedUser};
 use crate::auth::session::{self, SessionUser};
 use crate::auth::unix_now;
+use crate::users::{self, ForwardedAccount};
 
 /// The signed-in user. A handler that takes this argument rejects anonymous requests.
 pub struct CurrentUser(pub SessionUser);
@@ -20,7 +24,7 @@ impl FromRequestParts<SharedState> for CurrentUser {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &SharedState) -> Result<Self, ApiError> {
-        user_from_headers(state, &parts.headers)
+        user_from_request(state, peer_ip(parts), &parts.headers)
             .await?
             .map(Self)
             .ok_or(ApiError::Unauthorized)
@@ -52,6 +56,10 @@ impl FromRequestParts<SharedState> for ConfirmedAdmin {
 
     async fn from_request_parts(parts: &mut Parts, state: &SharedState) -> Result<Self, ApiError> {
         let AdminUser(user) = AdminUser::from_request_parts(parts, state).await?;
+        // The proxy already proved who this is, and there is no password to ask for.
+        if user.via_proxy {
+            return Ok(Self(user));
+        }
         let confirmed = match cookie::read_token(&parts.headers, state.secure_cookies) {
             Some(token) => session::is_confirmed(&state.pool, token, unix_now()).await?,
             None => false,
@@ -63,8 +71,57 @@ impl FromRequestParts<SharedState> for ConfirmedAdmin {
     }
 }
 
+/// The address of the TCP peer: the proxy when there is one, not the end user.
+pub fn peer_ip(parts: &Parts) -> Option<IpAddr> {
+    let ConnectInfo(peer) = parts.extensions.get::<ConnectInfo<SocketAddr>>()?;
+    Some(peer.ip())
+}
+
+/// A trusted proxy's word wins over a cookie: when the proxy signs the user out, bkd must
+/// not keep them in. `None` when nobody is signed in.
+pub async fn user_from_request(
+    state: &SharedState,
+    peer: Option<IpAddr>,
+    headers: &HeaderMap,
+) -> Result<Option<SessionUser>, ApiError> {
+    let forwarded = match &state.forward_auth {
+        Some(forward_auth) => forward_auth.identify(peer, headers),
+        None => Forwarded::Absent,
+    };
+    match forwarded {
+        Forwarded::Absent => user_from_cookie(state, headers).await,
+        Forwarded::Invalid => Ok(None),
+        Forwarded::User(forwarded) => user_from_proxy(state, &forwarded).await,
+    }
+}
+
+async fn user_from_proxy(
+    state: &SharedState,
+    forwarded: &ForwardedUser,
+) -> Result<Option<SessionUser>, ApiError> {
+    let account = ForwardedAccount {
+        username: &forwarded.username,
+        is_admin: forwarded.is_admin,
+        now: unix_now(),
+    };
+    let adopted = users::adopt_forwarded(&state.pool, &account).await?;
+    // The first account may have just been made here, which closes setup.
+    if adopted.is_some()
+        && state.setup_token().is_some()
+        && crate::auth::first_admin::users_exist(&state.pool).await?
+    {
+        state.clear_setup_token();
+    }
+    Ok(adopted.map(|(user_id, is_admin)| SessionUser {
+        user_id,
+        username: forwarded.username.clone(),
+        is_admin,
+        via_proxy: true,
+    }))
+}
+
 /// `None` when the request carries no cookie or the session is not valid.
-pub async fn user_from_headers(
+async fn user_from_cookie(
     state: &SharedState,
     headers: &HeaderMap,
 ) -> Result<Option<SessionUser>, ApiError> {

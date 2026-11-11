@@ -22,6 +22,7 @@ use axum::{Router, middleware};
 use sqlx::SqlitePool;
 use tokio::net::TcpListener;
 
+use crate::auth::forward_auth::ForwardAuth;
 use crate::auth::rate_limit::RateLimiter;
 use crate::auth::session;
 use crate::auth::setup_token::SetupToken;
@@ -48,6 +49,8 @@ pub struct AppState {
     /// `Some` only while no user exists. Held in memory, never stored.
     setup_token: Mutex<Option<Arc<SetupToken>>>,
     pub secure_cookies: bool,
+    /// `Some` when a trusted proxy may sign users in.
+    pub forward_auth: Option<ForwardAuth>,
     pub link_checker: Checker,
     pub active_checks: ActiveChecks,
 }
@@ -57,6 +60,7 @@ pub struct Settings {
     pub setup_token: Option<SetupToken>,
     /// Mark the session cookie `Secure`. Turn it on when the site is served over HTTPS.
     pub secure_cookies: bool,
+    pub forward_auth: Option<ForwardAuth>,
     pub link_checker: Checker,
 }
 
@@ -68,6 +72,7 @@ impl AppState {
             setup_limiter: RateLimiter::new(SETUP_ATTEMPTS_PER_WINDOW, RATE_LIMIT_WINDOW),
             setup_token: Mutex::new(settings.setup_token.map(Arc::new)),
             secure_cookies: settings.secure_cookies,
+            forward_auth: settings.forward_auth,
             link_checker: settings.link_checker,
             active_checks: ActiveChecks::default(),
         })

@@ -432,9 +432,10 @@ function renderSide() {
   $('me').replaceChildren(...[
     el('span', {}, 'Signed in as ', el('strong', {}, state.user.username)),
     transferLink,
-    accountLink,
+    // The proxy owns the password and the sign-out of the people it signs in.
+    state.user.forwarded ? null : accountLink,
     state.user.is_admin ? manageUsersLink : null,
-    el('button', { class: 'link', onclick: signOut }, 'Sign out'),
+    state.user.forwarded ? null : el('button', { class: 'link', onclick: signOut }, 'Sign out'),
   ].filter(Boolean));
 }
 
@@ -1159,7 +1160,7 @@ function stateFromHash() {
   const params = new URLSearchParams(cut === -1 ? '' : rest.slice(cut + 1));
   const link = params.get('status');
   const tag = params.get('tag');
-  const view = name === 'transfer' || name === 'account' || (name === 'users' && state.user.is_admin) ? name : 'list';
+  const view = name === 'transfer' || (name === 'account' && !state.user.forwarded) || (name === 'users' && state.user.is_admin) ? name : 'list';
   return {
     view,
     query: params.get('q') ?? '',

@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use super::{AppState, Settings, SharedState, router};
+use crate::auth::forward_auth::{ForwardAuth, ForwardAuthConfig};
 use crate::auth::password;
 use crate::auth::setup_token::SetupToken;
 use crate::db::test_support::tempdir::TempDir;
@@ -42,6 +43,7 @@ struct Send {
     ip: &'static str,
     origin: Option<&'static str>,
     raw: Option<(&'static str, Vec<u8>)>,
+    headers: Vec<(&'static str, &'static str)>,
 }
 
 impl Send {
@@ -54,6 +56,7 @@ impl Send {
             ip: "192.0.2.1",
             origin: None,
             raw: None,
+            headers: Vec::new(),
         }
     }
     fn get(uri: &str) -> Self {
@@ -85,6 +88,10 @@ impl Send {
         self.ip = ip;
         self
     }
+    fn header(mut self, name: &'static str, value: &'static str) -> Self {
+        self.headers.push((name, value));
+        self
+    }
     fn origin(mut self, origin: &'static str) -> Self {
         self.origin = Some(origin);
         self
@@ -104,6 +111,7 @@ impl TestApp {
             pool,
             setup_token,
             secure_cookies: false,
+            forward_auth: None,
             link_checker,
         });
         Self {
@@ -134,6 +142,9 @@ impl TestApp {
             .header(header::HOST, "bkd.test");
         if let Some(cookie) = request.cookie {
             builder = builder.header(header::COOKIE, cookie);
+        }
+        for (name, value) in request.headers {
+            builder = builder.header(name, value);
         }
         if let Some(origin) = request.origin {
             builder = builder.header(header::ORIGIN, origin);
@@ -553,6 +564,7 @@ async fn hsts_is_sent_only_when_cookies_are_secure() {
         pool,
         setup_token: None,
         secure_cookies: true,
+        forward_auth: None,
         link_checker: Checker::allowing_loopback().unwrap(),
     });
     let request = Request::builder()
@@ -1924,4 +1936,280 @@ async fn a_session_records_a_cut_down_user_agent() {
         .await
         .unwrap();
     assert_eq!(stored.len(), 200);
+}
+
+// ---- forward auth ----
+
+const PROXY_IP: &str = "10.0.0.2";
+
+impl TestApp {
+    /// A server that believes `Remote-User` from 10.0.0.0/8 only.
+    async fn behind_proxy(admin_group: Option<&str>) -> Self {
+        let (dir, pool) = test_pool().await;
+        let forward_auth = ForwardAuth::new(ForwardAuthConfig {
+            trusted_proxies: vec!["10.0.0.0/8".into()],
+            user_header: "Remote-User".into(),
+            groups_header: "Remote-Groups".into(),
+            admin_group: admin_group.map(str::to_owned),
+        })
+        .unwrap();
+        let state = AppState::new(Settings {
+            pool,
+            setup_token: None,
+            secure_cookies: false,
+            forward_auth: Some(forward_auth),
+            link_checker: Checker::allowing_loopback().unwrap(),
+        });
+        Self {
+            router: router(state.clone()),
+            state,
+            setup_display: None,
+            _dir: dir,
+        }
+    }
+}
+
+/// A request as the proxy forwards it for `user`.
+fn proxied(request: Send, user: &'static str) -> Send {
+    request.ip(PROXY_IP).header("remote-user", user)
+}
+
+async fn forwarded_state(app: &TestApp, user: &'static str, groups: &'static str) -> Reply {
+    let request = proxied(Send::get("/api/state"), user).header("remote-groups", groups);
+    app.send(request).await
+}
+
+#[tokio::test]
+async fn a_trusted_proxy_signs_a_new_user_in() {
+    let app = TestApp::behind_proxy(None).await;
+    app.add_user("root", true).await;
+
+    let reply = forwarded_state(&app, "Mei", "").await;
+    assert_eq!(reply.body["user"]["username"], "mei");
+    assert_eq!(reply.body["user"]["forwarded"], true);
+    assert_eq!(reply.body["user"]["is_admin"], false);
+    assert!(reply.headers.get(header::SET_COOKIE).is_none());
+
+    let created = app
+        .send(proxied(
+            Send::post(
+                "/api/bookmarks",
+                json!({"url": "https://a.test", "title": "A"}),
+            ),
+            "mei",
+        ))
+        .await;
+    assert_eq!(created.status, StatusCode::CREATED);
+    let again = forwarded_state(&app, "mei", "").await;
+    assert_eq!(
+        again.body["user"]["id"], reply.body["user"]["id"],
+        "one account, not two"
+    );
+}
+
+#[tokio::test]
+async fn the_header_is_ignored_unless_it_comes_from_a_trusted_proxy() {
+    let app = TestApp::behind_proxy(None).await;
+    app.add_user("root", true).await;
+
+    let direct = app
+        .send(
+            Send::get("/api/state")
+                .ip("192.0.2.1")
+                .header("remote-user", "root"),
+        )
+        .await;
+    assert_eq!(direct.body["user"], Value::Null);
+    let bookmarks = app
+        .send(
+            Send::get("/api/bookmarks")
+                .ip("192.0.2.1")
+                .header("remote-user", "root"),
+        )
+        .await;
+    assert_eq!(bookmarks.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_name_bkd_cannot_hold_signs_nobody_in() {
+    let app = TestApp::behind_proxy(None).await;
+    app.add_user("root", true).await;
+    let reply = forwarded_state(&app, "a@b.test", "").await;
+    assert_eq!(reply.body["user"], Value::Null);
+}
+
+#[tokio::test]
+async fn the_proxy_wins_over_a_cookie() {
+    let app = TestApp::behind_proxy(None).await;
+    app.add_user("root", true).await;
+    let mei_cookie = app.sign_in_as("mei").await;
+
+    let request = proxied(Send::get("/api/state"), "root").cookie(&mei_cookie);
+    let reply = app.send(request).await;
+    assert_eq!(reply.body["user"]["username"], "root");
+}
+
+#[tokio::test]
+async fn without_the_header_the_cookie_still_works() {
+    let app = TestApp::behind_proxy(None).await;
+    let cookie = app.sign_in_as("mei").await;
+    let reply = app
+        .send(Send::get("/api/state").ip(PROXY_IP).cookie(&cookie))
+        .await;
+    assert_eq!(reply.body["user"]["username"], "mei");
+    assert_eq!(reply.body["user"]["forwarded"], false);
+}
+
+#[tokio::test]
+async fn an_account_with_a_password_is_the_same_person() {
+    let app = TestApp::behind_proxy(None).await;
+    let id = app.add_user("mei", true).await;
+    let reply = forwarded_state(&app, "mei", "").await;
+    assert_eq!(reply.body["user"]["id"], id);
+    assert_eq!(
+        reply.body["user"]["is_admin"], true,
+        "no admin group: the role is untouched"
+    );
+}
+
+#[tokio::test]
+async fn the_first_forwarded_user_is_the_admin_and_the_next_is_a_member() {
+    let app = TestApp::behind_proxy(None).await;
+    let first = forwarded_state(&app, "mei", "").await;
+    assert_eq!(first.body["user"]["is_admin"], true);
+    let second = forwarded_state(&app, "henry", "").await;
+    assert_eq!(second.body["user"]["is_admin"], false);
+}
+
+#[tokio::test]
+async fn two_first_requests_at_once_make_one_admin() {
+    let app = TestApp::behind_proxy(None).await;
+    let names = ["mei", "henry", "alice", "bob", "carol", "dave"];
+    let requests = names.map(|name| forwarded_state(&app, name, ""));
+    futures_util::future::join_all(requests).await;
+    let admins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE is_admin = 1")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(admins, 1);
+}
+
+#[tokio::test]
+async fn the_first_forwarded_user_closes_setup() {
+    let (token, _display) = SetupToken::generate();
+    let mut app = TestApp::behind_proxy(None).await;
+    app.state = {
+        // Same server, but still waiting for setup.
+        let (dir, pool) = test_pool().await;
+        let forward_auth = ForwardAuth::new(ForwardAuthConfig {
+            trusted_proxies: vec!["10.0.0.0/8".into()],
+            user_header: "Remote-User".into(),
+            groups_header: "Remote-Groups".into(),
+            admin_group: None,
+        })
+        .unwrap();
+        app._dir = dir;
+        AppState::new(Settings {
+            pool,
+            setup_token: Some(token),
+            secure_cookies: false,
+            forward_auth: Some(forward_auth),
+            link_checker: Checker::allowing_loopback().unwrap(),
+        })
+    };
+    app.router = router(app.state.clone());
+
+    let before = app.send(Send::get("/api/state")).await;
+    assert_eq!(before.body["setup_required"], true);
+    forwarded_state(&app, "mei", "").await;
+    let after = app.send(Send::get("/api/state")).await;
+    assert_eq!(after.body["setup_required"], false);
+}
+
+#[tokio::test]
+async fn the_admin_group_makes_the_first_admin() {
+    let app = TestApp::behind_proxy(Some("admins")).await;
+    let reply = forwarded_state(&app, "henry", "dev,admins").await;
+    assert_eq!(reply.body["user"]["is_admin"], true);
+}
+
+#[tokio::test]
+async fn the_admin_group_promotes_and_demotes_but_keeps_the_last_admin() {
+    let app = TestApp::behind_proxy(Some("admins")).await;
+    app.add_user("root", true).await;
+
+    let promoted = forwarded_state(&app, "mei", "admins").await;
+    assert_eq!(promoted.body["user"]["is_admin"], true);
+    let demoted = forwarded_state(&app, "mei", "dev").await;
+    assert_eq!(demoted.body["user"]["is_admin"], false);
+
+    // root is the only admin left: leaving the group must not lock everyone out.
+    let kept = forwarded_state(&app, "root", "dev").await;
+    assert_eq!(kept.body["user"]["is_admin"], true);
+}
+
+#[tokio::test]
+async fn a_forwarded_admin_needs_no_password_confirmation() {
+    let app = TestApp::behind_proxy(Some("admins")).await;
+    let mei = app.add_user("mei", false).await;
+    forwarded_state(&app, "henry", "admins").await;
+
+    let request = proxied(
+        Send::put(
+            &format!("/api/users/{mei}/disabled"),
+            json!({"is_disabled": true}),
+        ),
+        "henry",
+    )
+    .header("remote-groups", "admins");
+    let reply = app.send(request).await;
+    assert_eq!(reply.status, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn a_disabled_account_gets_no_access_through_the_proxy() {
+    let app = TestApp::behind_proxy(None).await;
+    app.add_user("root", true).await;
+    let mei = app.add_user("mei", false).await;
+    sqlx::query("UPDATE users SET disabled_at = 1 WHERE id = ?1")
+        .bind(mei)
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+    let reply = forwarded_state(&app, "mei", "").await;
+    assert_eq!(reply.body["user"], Value::Null);
+}
+
+#[tokio::test]
+async fn a_forwarded_user_has_no_password_to_change_or_confirm() {
+    let app = TestApp::behind_proxy(None).await;
+    app.add_user("root", true).await;
+    let change = app
+        .send(proxied(
+            Send::put(
+                "/api/account/password",
+                json!({"current": "x", "new": "a-long-new-password"}),
+            ),
+            "mei",
+        ))
+        .await;
+    assert_eq!(change.status, StatusCode::FORBIDDEN);
+    let confirm = app
+        .send(proxied(
+            Send::post("/api/account/confirm", json!({"password": "x"})),
+            "mei",
+        ))
+        .await;
+    assert_eq!(confirm.status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn an_account_made_by_the_proxy_cannot_sign_in_with_a_password() {
+    let app = TestApp::behind_proxy(None).await;
+    app.add_user("root", true).await;
+    forwarded_state(&app, "mei", "").await;
+    for password in ["!", "", "anything at all"] {
+        let reply = app.login("mei", password).await;
+        assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{password:?}");
+    }
 }

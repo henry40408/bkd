@@ -16,6 +16,36 @@ On the first start, with an empty database, bkd logs a one-time setup token like
 | `--addr` | `BKD_ADDR` | `127.0.0.1:8080` | Address to listen on. |
 | `--secure-cookies` | `BKD_SECURE_COOKIES` | off | Mark the session cookie `Secure`. Turn on when serving over HTTPS. |
 
+## Sign in through a reverse proxy (Authelia)
+
+bkd can let a reverse proxy that already signs people in (Authelia, Authentik, oauth2-proxy) tell it who is calling. Set `--forward-auth-trusted-proxies` to the proxy's address and bkd believes the `Remote-User` header, but only on requests that come from that address. Any other client's header is ignored.
+
+| Flag | Environment | Default | Meaning |
+| --- | --- | --- | --- |
+| `--forward-auth-trusted-proxies` | `BKD_FORWARD_AUTH_TRUSTED_PROXIES` | none (off) | Addresses or CIDR ranges, comma separated, such as `127.0.0.1,172.18.0.0/16`. |
+| `--forward-auth-user-header` | `BKD_FORWARD_AUTH_USER_HEADER` | `Remote-User` | Header with the user name. |
+| `--forward-auth-groups-header` | `BKD_FORWARD_AUTH_GROUPS_HEADER` | `Remote-Groups` | Header with the groups, comma separated. |
+| `--forward-auth-admin-group` | `BKD_FORWARD_AUTH_ADMIN_GROUP` | none | Members of this group are admins and everyone else is a member, checked on every request. Without it, roles stay as admins set them in bkd. |
+
+- A user bkd has not seen is created on the first request. A name that fits bkd's rules (3 to 32 characters: `a-z`, `0-9`, `.`, `_`, `-`) is needed; the name is lowercased. An account of the same name that already has a password is the same person.
+- Accounts the proxy makes have no password and cannot sign in without the proxy. They have no "Account" page and no "Sign out" (sign out at the proxy), and admin changes do not ask for a password.
+- The proxy decides who is signed in on every request, so signing out at the proxy signs out of bkd. A disabled account still gets no access.
+- Without an admin group, the first account in an empty database is the admin, as with the setup token (two requests at once still make only one admin), and everyone after is a member. Anyone who reaches the proxy first becomes the admin, so protect the site before you start bkd, or set an admin group.
+- The proxy must replace `Remote-User` and `Remote-Groups` on every request it forwards, and bkd must not be reachable except through it. A header the proxy does not replace passes straight through from the client, and then anyone can name themselves an admin. With nginx:
+
+  ```nginx
+  auth_request_set $user   $upstream_http_remote_user;
+  auth_request_set $groups $upstream_http_remote_groups;
+  proxy_set_header Remote-User   $user;
+  proxy_set_header Remote-Groups $groups;
+  ```
+
+  With Caddy, use `forward_auth` with `copy_headers Remote-User Remote-Groups`.
+- List the proxy's exact address, not a wide range, and do not publish bkd's port. With Docker, a published port can make every client look like the bridge gateway, which would then be trusted. Put bkd on a network only the proxy shares.
+- An account of the same name that has a password is the same person, admin role included. Only turn this on if your identity provider does not let people pick their own user names.
+- Delete does not remove a proxy user for good: the next request creates the account again. Disable the account instead.
+- The rate limit and the session list see the proxy's address, not the end user's.
+
 SQLite runs in WAL mode, so `bkd.sqlite3-wal` and `bkd.sqlite3-shm` appear next to the database while it is open. Back up with SQLite's backup API (`sqlite3 bkd.sqlite3 ".backup copy.sqlite3"`), or copy all three files together while bkd is stopped.
 
 ## Search

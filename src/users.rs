@@ -30,6 +30,130 @@ pub async fn find_for_login(pool: &SqlitePool, username: &str) -> Result<Option<
     }))
 }
 
+/// What a trusted proxy said about the caller.
+pub struct ForwardedAccount<'a> {
+    /// Must already be normalized.
+    pub username: &'a str,
+    /// `Some` when the proxy decides the role (an admin group is configured).
+    pub is_admin: Option<bool>,
+    pub now: i64,
+}
+
+/// The stored hash of an account that has no password. It is not a valid Argon2 string, so
+/// no password verifies against it.
+const NO_PASSWORD: &str = "!";
+
+/// Finds the account a trusted proxy named, creating it on first sight, and applies the
+/// role the proxy decided. `None` means the caller gets no access: the account is disabled.
+///
+/// When no admin group decides the role, the first account of an empty database is the
+/// admin, as in setup. The emptiness check and the insert are one statement inside
+/// `BEGIN IMMEDIATE`, so two first requests at once cannot both become admin.
+///
+/// An account of the same name that has a password is the same person, so it is reused.
+pub async fn adopt_forwarded(
+    pool: &SqlitePool,
+    account: &ForwardedAccount<'_>,
+) -> Result<Option<(i64, bool)>> {
+    if let Some(found) = find_forwarded(pool, account.username).await? {
+        return settle_forwarded(pool, found, account.is_admin).await;
+    }
+    let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let created: Option<(i64, bool)> = sqlx::query_as(
+        "INSERT INTO users (username, password_hash, is_admin, created_at)
+         VALUES (?1, ?2, COALESCE(?3, NOT EXISTS (SELECT 1 FROM users)), ?4)
+         ON CONFLICT (username) DO NOTHING RETURNING id, is_admin",
+    )
+    .bind(account.username)
+    .bind(NO_PASSWORD)
+    .bind(account.is_admin)
+    .bind(account.now)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    if let Some((id, is_admin)) = created {
+        tracing::info!(user_id = id, is_admin, "account created from forward auth");
+    }
+    let Some(found) = find_forwarded(pool, account.username).await? else {
+        return Ok(None);
+    };
+    settle_forwarded(pool, found, account.is_admin).await
+}
+
+struct ForwardedRow {
+    id: i64,
+    is_admin: bool,
+    is_disabled: bool,
+}
+
+async fn find_forwarded(pool: &SqlitePool, username: &str) -> Result<Option<ForwardedRow>> {
+    let row: Option<(i64, bool, Option<i64>)> =
+        sqlx::query_as("SELECT id, is_admin, disabled_at FROM users WHERE username = ?1")
+            .bind(username)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.map(|(id, is_admin, disabled_at)| ForwardedRow {
+        id,
+        is_admin,
+        is_disabled: disabled_at.is_some(),
+    }))
+}
+
+async fn settle_forwarded(
+    pool: &SqlitePool,
+    row: ForwardedRow,
+    wanted_admin: Option<bool>,
+) -> Result<Option<(i64, bool)>> {
+    if row.is_disabled {
+        return Ok(None);
+    }
+    let Some(wanted) = wanted_admin.filter(|wanted| *wanted != row.is_admin) else {
+        return Ok(Some((row.id, row.is_admin)));
+    };
+    let is_admin = change_forwarded_role(pool, row.id, wanted).await?;
+    Ok(Some((row.id, is_admin)))
+}
+
+async fn another_active_admin(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let found: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM users WHERE id <> ?1 AND is_admin = 1 AND disabled_at IS NULL)",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?;
+    Ok(found)
+}
+
+/// Returns the role the account has afterwards. Like every demotion, this keeps the last
+/// active admin: the proxy cannot lock everyone out of user management.
+async fn change_forwarded_role(pool: &SqlitePool, id: i64, is_admin: bool) -> Result<bool> {
+    // The last admin asks for this on every request while outside the group, so the common
+    // refusal is decided without the write lock.
+    if !is_admin && !another_active_admin(pool, id).await? {
+        return Ok(true);
+    }
+    let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
+    if !is_admin {
+        let another_admin: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM users WHERE id <> ?1 AND is_admin = 1 AND disabled_at IS NULL)",
+        )
+        .bind(id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !another_admin {
+            return Ok(true);
+        }
+    }
+    sqlx::query("UPDATE users SET is_admin = ?1 WHERE id = ?2")
+        .bind(is_admin)
+        .bind(id)
+        .execute(&mut *transaction)
+        .await?;
+    transaction.commit().await?;
+    tracing::info!(user_id = id, is_admin, "role set by forward auth");
+    Ok(is_admin)
+}
+
 pub async fn username_of(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
     let row: Option<(String,)> = sqlx::query_as("SELECT username FROM users WHERE id = ?1")
         .bind(id)

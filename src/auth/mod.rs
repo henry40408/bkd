@@ -1,7 +1,8 @@
-//! Everything that decides who a request belongs to: passwords, sessions, the
-//! first-admin setup token and the per-IP rate limit.
+//! Everything that decides who a request belongs to: passwords, sessions, forward
+//! authentication, the first-admin setup token and the per-IP rate limit.
 
 pub mod first_admin;
+pub mod forward_auth;
 pub mod password;
 pub mod rate_limit;
 pub mod session;

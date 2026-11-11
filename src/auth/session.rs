@@ -19,6 +19,9 @@ pub struct SessionUser {
     pub user_id: i64,
     pub username: String,
     pub is_admin: bool,
+    /// Signed in by a trusted proxy, not by a password and cookie. Such a user has no
+    /// password here and no session of their own, so the proxy also decides when they leave.
+    pub via_proxy: bool,
 }
 
 /// Who starts a session, and from where. `ip` and `user_agent` are only shown in the
@@ -124,6 +127,7 @@ pub async fn lookup(pool: &SqlitePool, token: &str, now: i64) -> Result<Option<S
         user_id,
         username,
         is_admin,
+        via_proxy: false,
     }))
 }
 
@@ -273,7 +277,8 @@ mod tests {
             SessionUser {
                 user_id,
                 username: "henry".into(),
-                is_admin: false
+                is_admin: false,
+                via_proxy: false,
             }
         );
     }

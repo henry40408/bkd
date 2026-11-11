@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::SharedState;
 use super::cookie;
 use super::error::ApiError;
-use super::guard::{CurrentUser, user_from_headers};
+use super::guard::{CurrentUser, user_from_request};
 use crate::auth::session::{self, SessionStart, SessionUser};
 use crate::auth::{first_admin, password, unix_now, username};
 use crate::users;
@@ -23,6 +23,8 @@ pub struct UserView {
     id: i64,
     username: String,
     is_admin: bool,
+    /// Signed in by the reverse proxy: no password and no Sign out here.
+    forwarded: bool,
 }
 
 impl From<SessionUser> for UserView {
@@ -31,6 +33,7 @@ impl From<SessionUser> for UserView {
             id: user.user_id,
             username: user.username,
             is_admin: user.is_admin,
+            forwarded: user.via_proxy,
         }
     }
 }
@@ -45,9 +48,10 @@ pub struct StateView {
 /// What the front end needs to pick its first screen. Open to everyone.
 pub async fn current_state(
     State(state): State<SharedState>,
+    ConnectInfo(client): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> Result<Json<StateView>, ApiError> {
-    let user = user_from_headers(&state, &headers).await?;
+    let user = user_from_request(&state, Some(client.ip()), &headers).await?;
     Ok(Json(StateView {
         setup_required: state.setup_token().is_some(),
         user: user.map(UserView::from),
@@ -185,6 +189,16 @@ fn session_response(state: &SharedState, token: &str, status: StatusCode) -> Res
     (status, [(header::SET_COOKIE, cookie)]).into_response()
 }
 
+/// A user the proxy signed in has no password here to change or confirm.
+fn refuse_proxy_user(user: &SessionUser) -> Result<(), ApiError> {
+    if user.via_proxy {
+        return Err(ApiError::Forbidden(
+            "your sign-in is managed by the single sign-on provider",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 pub struct ChangePasswordRequest {
     current: String,
@@ -200,6 +214,7 @@ pub async fn change_password(
     headers: HeaderMap,
     Json(request): Json<ChangePasswordRequest>,
 ) -> Result<Response, ApiError> {
+    refuse_proxy_user(&user.0)?;
     let ip = client.ip();
     // A stolen session must not be a free oracle for the current password.
     state
@@ -292,6 +307,7 @@ pub async fn confirm_password(
     headers: HeaderMap,
     Json(request): Json<ConfirmRequest>,
 ) -> Result<StatusCode, ApiError> {
+    refuse_proxy_user(&user.0)?;
     let ip = client.ip();
     state
         .login_limiter
