@@ -13,19 +13,7 @@ A single-binary, multi-user bookmark manager with a web front end and a JSON API
 
 ## Run
 
-```sh
-cargo run -- --db bkd.sqlite3 --addr 127.0.0.1:8080
-```
-
-On the first start, with an empty database, bkd logs a one-time setup token like `WDP4S-V8PGD`. Whoever can read the log can create the first admin, so keep the log private. Open the site and enter it, with the first admin's username and password, on the setup page (or send them to `POST /api/setup`). Afterwards, admins manage accounts under "Manage users" (create, promote, demote, disable, reset password, delete); bkd never lets the last active admin be removed. Everyone can change their own password under "Change password": new passwords need at least 12 characters and must not contain the username, and a change signs the account out everywhere else. A session also ends after 7 days without use. "Account" also lists the browsers signed in to your account, where you can end any of them. Admin changes to accounts (create, promote, demote, disable, reset password, delete) ask for your password again if you have not typed it in the last 5 minutes.
-
-| Flag | Environment | Default | Meaning |
-| --- | --- | --- | --- |
-| `--db` | `BKD_DB` | `bkd.sqlite3` | Path of the SQLite database file. Created if missing. |
-| `--addr` | `BKD_ADDR` | `127.0.0.1:8080` | Address to listen on. |
-| `--secure-cookies` | `BKD_SECURE_COOKIES` | off | Mark the session cookie `Secure`. Turn on when serving over HTTPS. |
-
-## Docker
+### Docker
 
 Images for `linux/amd64` and `linux/arm64` are published to GitHub Container Registry. A release publishes the version tags (`1.2.3`, `1.2`) and `latest`; every merge to `main` publishes `main`, the newest unreleased build. The image runs as a non-root user (uid 65532) and keeps the database in the `/data` volume.
 
@@ -44,6 +32,22 @@ On the first start, with an empty database, bkd logs the one-time setup token. R
 To sign in through a reverse proxy such as Authelia, set `BKD_FORWARD_AUTH_TRUSTED_PROXIES` to the proxy's address or CIDR range. `BKD_FORWARD_AUTH_USER_HEADER`, `BKD_FORWARD_AUTH_GROUPS_HEADER` and `BKD_FORWARD_AUTH_ADMIN_GROUP` tune it. See "Sign in through a reverse proxy" below.
 
 To build the image yourself, run `docker build -t bkd .`.
+
+### From source
+
+```sh
+cargo run -- --db bkd.sqlite3 --addr 127.0.0.1:8080
+```
+
+### Setup and settings
+
+On the first start, with an empty database, bkd logs a one-time setup token like `WDP4S-V8PGD`. Whoever can read the log can create the first admin, so keep the log private. Open the site and enter it, with the first admin's username and password, on the setup page (or send them to `POST /api/setup`). Afterwards, admins manage accounts under "Manage users" (create, promote, demote, disable, reset password, delete); bkd never lets the last active admin be removed. Everyone can change their own password under "Change password": new passwords need at least 12 characters and must not contain the username, and a change signs the account out everywhere else. A session also ends after 7 days without use. "Account" also lists the browsers signed in to your account, where you can end any of them. Admin changes to accounts (create, promote, demote, disable, reset password, delete) ask for your password again if you have not typed it in the last 5 minutes.
+
+| Flag | Environment | Default | Meaning |
+| --- | --- | --- | --- |
+| `--db` | `BKD_DB` | `bkd.sqlite3` | Path of the SQLite database file. Created if missing. |
+| `--addr` | `BKD_ADDR` | `127.0.0.1:8080` | Address to listen on. |
+| `--secure-cookies` | `BKD_SECURE_COOKIES` | off | Mark the session cookie `Secure`. Turn on when serving over HTTPS. |
 
 ## Sign in through a reverse proxy (Authelia)
 
