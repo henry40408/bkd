@@ -94,6 +94,26 @@ Under "Import and export" in the sidebar, choose the bookmarks file your browser
 
 Over the API: send the file to `POST /api/import` with `Content-Type: text/html` and your session cookie, and read `GET /api/export?format=html|json`.
 
+## Docker
+
+Images for `linux/amd64` and `linux/arm64` are published to GitHub Container Registry when a release is published. The image runs as a non-root user (uid 65532) and keeps the database in the `/data` volume.
+
+```sh
+docker run -d \
+  --name bkd \
+  -p 8080:8080 \
+  -v bkd_data:/data \
+  ghcr.io/henry40408/bkd:latest
+```
+
+The image sets `BKD_DB=/data/bkd.sqlite3` and `BKD_ADDR=0.0.0.0:8080`. Override them, or set `BKD_SECURE_COOKIES=true` when a proxy serves the site over HTTPS, with `-e`. A bind mount must be writable by uid 65532.
+
+On the first start, with an empty database, bkd logs the one-time setup token. Read it with `docker logs bkd`.
+
+To sign in through a reverse proxy such as Authelia, set `BKD_FORWARD_AUTH_TRUSTED_PROXIES` to the proxy's address or CIDR range. `BKD_FORWARD_AUTH_USER_HEADER`, `BKD_FORWARD_AUTH_GROUPS_HEADER` and `BKD_FORWARD_AUTH_ADMIN_GROUP` tune it. See "Sign in through a reverse proxy" above.
+
+To build the image yourself, run `docker build -t bkd .`.
+
 ## Develop
 
 ```sh

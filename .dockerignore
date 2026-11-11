@@ -1,0 +1,29 @@
+# Build artifacts (the e2e suite has its own target/)
+target/
+e2e/
+
+# Git and CI
+.git/
+.gitignore
+.github/
+.claude/
+
+# Database files
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Environment files
+.env
+.env.*
+
+# Documentation
+*.md
+LICENSE.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
