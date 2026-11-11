@@ -7,6 +7,10 @@ use sqlx::SqlitePool;
 use super::{random_bytes, sha256_hex, to_hex};
 
 pub const SESSION_LIFETIME_SECONDS: i64 = 30 * 24 * 60 * 60;
+/// A session unused for this long ends, even before `SESSION_LIFETIME_SECONDS` is over.
+pub const SESSION_IDLE_SECONDS: i64 = 7 * 24 * 60 * 60;
+/// `last_used_at` moves forward at most this often, so a busy session is not a write per request.
+const IDLE_REFRESH_SECONDS: i64 = 60 * 60;
 
 /// The account a valid session belongs to, read fresh from the database on every
 /// request so that a role change or a disable takes effect at once.
@@ -20,13 +24,16 @@ pub struct SessionUser {
 /// Starts a session and returns the raw token for the cookie.
 pub async fn create(pool: &SqlitePool, user_id: i64, now: i64) -> Result<String> {
     let token = to_hex(&random_bytes::<32>());
-    sqlx::query("INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)")
-        .bind(sha256_hex(&token))
-        .bind(user_id)
-        .bind(now)
-        .bind(now + SESSION_LIFETIME_SECONDS)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_used_at)
+         VALUES (?1, ?2, ?3, ?4, ?3)",
+    )
+    .bind(sha256_hex(&token))
+    .bind(user_id)
+    .bind(now)
+    .bind(now + SESSION_LIFETIME_SECONDS)
+    .execute(pool)
+    .await?;
     Ok(token)
 }
 
@@ -42,8 +49,8 @@ pub async fn create_if_unchanged(
 ) -> Result<Option<String>> {
     let token = to_hex(&random_bytes::<32>());
     let result = sqlx::query(
-        "INSERT INTO sessions (token_hash, user_id, created_at, expires_at)
-         SELECT ?1, id, ?3, ?4 FROM users
+        "INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_used_at)
+         SELECT ?1, id, ?3, ?4, ?3 FROM users
          WHERE id = ?2 AND password_hash = ?5 AND disabled_at IS NULL",
     )
     .bind(sha256_hex(&token))
@@ -57,17 +64,35 @@ pub async fn create_if_unchanged(
 }
 
 /// Returns the user for a live session, or `None` when the token is unknown,
-/// expired, or belongs to a disabled account.
+/// expired, idle for too long, or belongs to a disabled account. A hit moves the
+/// idle clock forward.
 pub async fn lookup(pool: &SqlitePool, token: &str, now: i64) -> Result<Option<SessionUser>> {
     let row: Option<(i64, String, bool)> = sqlx::query_as(
         "SELECT users.id, users.username, users.is_admin
          FROM sessions JOIN users ON users.id = sessions.user_id
-         WHERE sessions.token_hash = ?1 AND sessions.expires_at > ?2 AND users.disabled_at IS NULL",
+         WHERE sessions.token_hash = ?1 AND sessions.expires_at > ?2
+           AND sessions.last_used_at > ?3 AND users.disabled_at IS NULL",
     )
     .bind(sha256_hex(token))
     .bind(now)
+    .bind(now - SESSION_IDLE_SECONDS)
     .fetch_optional(pool)
     .await?;
+    if row.is_some() {
+        let refresh = sqlx::query(
+            "UPDATE sessions SET last_used_at = ?2 WHERE token_hash = ?1 AND last_used_at <= ?3",
+        )
+        .bind(sha256_hex(token))
+        .bind(now)
+        .bind(now - IDLE_REFRESH_SECONDS)
+        .execute(pool)
+        .await;
+        // The session is already proven valid; a busy database must not fail the request.
+        // The refresh is retried on the next request.
+        if let Err(error) = refresh {
+            tracing::warn!("cannot refresh the session idle clock: {error}");
+        }
+    }
     Ok(row.map(|(user_id, username, is_admin)| SessionUser {
         user_id,
         username,
@@ -97,8 +122,9 @@ where
 }
 
 pub async fn delete_expired(pool: &SqlitePool, now: i64) -> Result<u64> {
-    let result = sqlx::query("DELETE FROM sessions WHERE expires_at <= ?1")
+    let result = sqlx::query("DELETE FROM sessions WHERE expires_at <= ?1 OR last_used_at <= ?2")
         .bind(now)
+        .bind(now - SESSION_IDLE_SECONDS)
         .execute(pool)
         .await?;
     Ok(result.rows_affected())
@@ -196,10 +222,65 @@ mod tests {
         let user_id = insert_user(&pool, "henry").await.unwrap();
         let token = create(&pool, user_id, NOW).await.unwrap();
 
+        // Use keeps the session from going idle; only the absolute lifetime ends it.
+        for day in (1..30).step_by(5) {
+            let now = NOW + day * 24 * 60 * 60;
+            assert!(lookup(&pool, &token, now).await.unwrap().is_some());
+        }
         let last_valid = NOW + SESSION_LIFETIME_SECONDS - 1;
         assert!(lookup(&pool, &token, last_valid).await.unwrap().is_some());
         let expired = NOW + SESSION_LIFETIME_SECONDS;
         assert!(lookup(&pool, &token, expired).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn an_idle_session_ends_but_use_keeps_it_alive() {
+        let (_dir, pool) = test_pool().await;
+        let user_id = insert_user(&pool, "henry").await.unwrap();
+        let idle = create(&pool, user_id, NOW).await.unwrap();
+        let active = create(&pool, user_id, NOW).await.unwrap();
+
+        // Used just before the idle limit, so its clock restarts.
+        let almost = NOW + SESSION_IDLE_SECONDS - 1;
+        assert!(lookup(&pool, &active, almost).await.unwrap().is_some());
+
+        let later = NOW + SESSION_IDLE_SECONDS + 1;
+        assert!(lookup(&pool, &idle, later).await.unwrap().is_none());
+        assert!(lookup(&pool, &active, later).await.unwrap().is_some());
+        // The absolute lifetime still applies to a session that is always in use.
+        let end = NOW + SESSION_LIFETIME_SECONDS;
+        assert!(lookup(&pool, &active, end).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn the_idle_clock_moves_at_most_once_an_interval() {
+        let (_dir, pool) = test_pool().await;
+        let user_id = insert_user(&pool, "henry").await.unwrap();
+        let token = create(&pool, user_id, NOW).await.unwrap();
+        let last_used = || async {
+            sqlx::query_scalar::<_, i64>("SELECT last_used_at FROM sessions")
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        };
+
+        lookup(&pool, &token, NOW + 60).await.unwrap();
+        assert_eq!(last_used().await, NOW);
+        lookup(&pool, &token, NOW + IDLE_REFRESH_SECONDS)
+            .await
+            .unwrap();
+        assert_eq!(last_used().await, NOW + IDLE_REFRESH_SECONDS);
+    }
+
+    #[tokio::test]
+    async fn the_sweep_deletes_idle_sessions() {
+        let (_dir, pool) = test_pool().await;
+        let user_id = insert_user(&pool, "henry").await.unwrap();
+        create(&pool, user_id, NOW).await.unwrap();
+        let before_idle = NOW + SESSION_IDLE_SECONDS - 1;
+        assert_eq!(delete_expired(&pool, before_idle).await.unwrap(), 0);
+        let at_idle = NOW + SESSION_IDLE_SECONDS;
+        assert_eq!(delete_expired(&pool, at_idle).await.unwrap(), 1);
     }
 
     #[tokio::test]

@@ -86,6 +86,18 @@
         <a class="button" href="/api/export?format=json" download>Download JSON</a>
       </p>
     </section>
+
+    <section id="account-view" hidden>
+      <h1>Change password</h1>
+      <p class="summary">Use at least 12 characters, and do not put your username in it. Changing it signs you out everywhere else.</p>
+      <form class="stack password-form" id="password-form" novalidate>
+        <label>Current password <input type="password" name="current" autocomplete="current-password"></label>
+        <label>New password <input type="password" name="new" autocomplete="new-password" minlength="12"></label>
+        <label>Repeat new password <input type="password" name="again" autocomplete="new-password"></label>
+        <p class="err" id="password-error" role="alert" hidden></p>
+        <div><button type="submit">Change password</button></div>
+      </form>
+    </section>
   </main>
 </div>
 
@@ -106,7 +118,7 @@
     <p class="err" id="setup-error" role="alert" hidden></p>
     <label>Setup token <input type="text" name="token" autocomplete="off" autocapitalize="characters" spellcheck="false" required></label>
     <label>Username <input type="text" name="name" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
-    <label>Password <input type="password" name="password" autocomplete="new-password" minlength="8" required></label>
+    <label>Password <input type="password" name="password" autocomplete="new-password" minlength="12" required></label>
     <button type="submit">Create admin</button>
   </form>
 </section>

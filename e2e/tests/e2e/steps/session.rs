@@ -242,6 +242,63 @@ async fn no_query_string(world: &mut BkdWorld) -> Result<()> {
     Ok(())
 }
 
+#[when("I open Change password")]
+async fn open_change_password(world: &mut BkdWorld) -> Result<()> {
+    world
+        .element_by(By::XPath("//*[@id='me']//a[text()='Change password']"))
+        .await?
+        .click()
+        .await?;
+    world.element("#account-view").await?;
+    Ok(())
+}
+
+#[when(expr = "I change my password from {string} to {string}")]
+async fn change_password(world: &mut BkdWorld, current: String, new: String) -> Result<()> {
+    submit_password_form(world, &current, &new, &new).await
+}
+
+#[when(expr = "I change my password from {string} to {string} but repeat {string}")]
+async fn change_password_with_typo(
+    world: &mut BkdWorld,
+    current: String,
+    new: String,
+    again: String,
+) -> Result<()> {
+    submit_password_form(world, &current, &new, &again).await
+}
+
+async fn submit_password_form(
+    world: &BkdWorld,
+    current: &str,
+    new: &str,
+    again: &str,
+) -> Result<()> {
+    world
+        .fill("#password-form input[name=current]", current)
+        .await?;
+    world.fill("#password-form input[name=new]", new).await?;
+    world
+        .fill("#password-form input[name=again]", again)
+        .await?;
+    world.click("#password-form button[type=submit]").await
+}
+
+/// The form empties only after the server accepted the change.
+#[then("the password form is cleared")]
+async fn password_form_is_cleared(world: &mut BkdWorld) -> Result<()> {
+    let driver = world.driver()?;
+    world
+        .browser()?
+        .eventually("the password form is empty", || async {
+            let field = driver
+                .find(By::Css("#password-form input[name=current]"))
+                .await?;
+            Ok(field.value().await?.unwrap_or_default().is_empty())
+        })
+        .await
+}
+
 #[then("the browser reports no policy violation")]
 async fn no_policy_violation(world: &mut BkdWorld) -> Result<()> {
     // The violation event fires asynchronously after the rejected submission.

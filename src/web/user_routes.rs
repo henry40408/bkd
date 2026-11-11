@@ -63,7 +63,7 @@ pub async fn create(
     Json(request): Json<NewUser>,
 ) -> Result<Response, ApiError> {
     let username = username::normalize(&request.username)?;
-    password::validate(&request.password)?;
+    password::validate(&request.password, &username)?;
     let password_hash = password::hash_async(request.password).await?;
     let account = NewAccount {
         username: &username,
@@ -122,7 +122,10 @@ pub async fn reset_password(
     Path(id): Path<i64>,
     Json(request): Json<PasswordRequest>,
 ) -> Result<StatusCode, ApiError> {
-    password::validate(&request.password)?;
+    let Some(username) = users::username_of(&state.pool, id).await? else {
+        return Err(ApiError::NotFound);
+    };
+    password::validate(&request.password, &username)?;
     let password_hash = password::hash_async(request.password).await?;
     let change = users::reset_password(&state.pool, admin.0.user_id, id, &password_hash).await?;
     finish(change, &admin, id, "password reset")

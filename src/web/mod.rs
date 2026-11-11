@@ -93,6 +93,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/setup", post(account::setup))
         .route("/login", post(account::login))
         .route("/logout", post(account::logout))
+        .route("/account/password", put(account::change_password))
         .route(
             "/bookmarks",
             get(bookmark_routes::list).post(bookmark_routes::create),
@@ -123,6 +124,10 @@ pub fn router(state: SharedState) -> Router {
         .route("/app.css", get(assets::stylesheet))
         .route("/app.js", get(assets::script))
         .nest("/api", api)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            guard::security_headers,
+        ))
         .with_state(state)
 }
 

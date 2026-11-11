@@ -25,8 +25,8 @@ Only SQLite is supported. SQL stays plain so a PostgreSQL port would mostly chan
 
 ## Authentication (`src/auth/`)
 
-- `password`: Argon2id with the crate defaults. New passwords need 8 to 256 bytes; login accepts any password up to 256 bytes, so an older, weaker password still works. Hashing runs on the blocking thread pool. For an unknown or disabled user, login must call `verify_against_dummy_async` so response time does not reveal which usernames exist. `warm_up` builds the dummy hash at startup.
-- `session`: the cookie holds 256 random bits; the database holds only their SHA-256. Sessions last 30 days. Every lookup joins `users`, so a disabled account loses access at once and `is_admin` is never cached. Disabling, deleting or resetting the password of a user must call `revoke_all_for_user`.
+- `password`: Argon2id with the crate defaults. New passwords need 12 characters (at most 256 bytes) and must not contain the username (compared in lowercase); login accepts any password up to 256 bytes, so an older, weaker password still works. Hashing runs on the blocking thread pool. For an unknown or disabled user, login must call `verify_against_dummy_async` so response time does not reveal which usernames exist. `warm_up` builds the dummy hash at startup.
+- `session`: the cookie holds 256 random bits; the database holds only their SHA-256. Sessions last 30 days and also end after 7 days without use (`last_used_at`, moved forward at most once an hour). Every lookup joins `users`, so a disabled account loses access at once and `is_admin` is never cached. Disabling, deleting or resetting the password of a user must call `revoke_all_for_user`.
 - `setup_token`: 50 random bits shown as `XXXXX-XXXXX` (Crockford base32). It lives only in memory and is compared as HMACs in constant time. Case, dashes and spaces are ignored, and `O`, `I`, `L` read as `0`, `1`, `1`.
 - `first_admin`: one `INSERT ... WHERE NOT EXISTS` inside `BEGIN IMMEDIATE`, so concurrent submissions create exactly one admin.
 - `rate_limit`: per-IP, in memory. A caller charges an attempt before checking the secret and refunds it only on success, so parallel requests cannot all pass the check and a success cannot erase earlier failures. Clients are grouped by IPv4 address or IPv6 /64; IPv4-mapped IPv6 addresses count as IPv4. When 10,000 addresses are tracked, new ones are refused until some windows end.
@@ -52,6 +52,7 @@ JSON under `/api`. Handlers are thin: they call `auth`, `bookmarks` and `users`.
 | `GET /api/state` | none | `{setup_required, user}`; the front end reads it to pick the first screen |
 | `POST /api/setup` | setup token | create the first admin and sign in |
 | `POST /api/login`, `POST /api/logout` | none | start and end a session |
+| `PUT /api/account/password` | session | `{current, new}`; wrong current password answers 403; shares the login rate limit; ends every session, then sets a fresh cookie for the caller |
 | `GET /api/bookmarks?q=&tag=&limit=&offset=` | session | newest first; `limit` defaults to 50, at most 200 |
 | `GET /api/bookmarks/random?q=&tag=` | session | one bookmark chosen at random (`ORDER BY RANDOM() LIMIT 1`) from those `q` and `tag` let through; 404 when none |
 | `POST /api/bookmarks/check` | session | `{ids}`, 1 to 200; 404 and nothing checked if any id is missing or not the caller's; checks them (HEAD, then GET when HEAD does not succeed) and answers with server-sent events: `result` `{id, link: {status, checked_at, detail}}` per link, stored as it arrives, then `done` |
@@ -81,7 +82,7 @@ JSON under `/api`. Handlers are thin: they call `auth`, `bookmarks` and `users`.
 
 - There is no public registration and no command-line recovery, so the system must never lose its last active admin. Demoting, disabling or deleting an admin runs in a `BEGIN IMMEDIATE` transaction that first checks another active admin remains; otherwise the API answers 409. Two admins removing each other at the same moment are serialized, so exactly one succeeds. A disabled admin does not count.
 - An admin may demote, disable or delete themselves while another active admin remains.
-- Disabling and password reset delete every session of the user in the same transaction. Enabling again does not bring old sessions back.
+- Disabling, password reset and a password change delete every session of the user in the same transaction. Enabling again does not bring old sessions back.
 - Hashing a password takes tens of milliseconds, and an admin may be demoted in that gap. Each `users::*` change therefore re-checks inside its transaction that the caller is still an active admin. Login does the same: `session::create_if_unchanged` inserts the session only if the account is still active and still has the verified hash, so a reset or disable that lands during verification cannot be followed by a session.
 - `AdminUser` reads the role from the database on every request, so a demoted admin is refused at once (403; 401 when not signed in).
 
@@ -96,6 +97,7 @@ JSON under `/api`. Handlers are thin: they call `auth`, `bookmarks` and `users`.
 - **Host header.** Writes (POST, PUT, DELETE) are refused with 403 when the `Origin` header does not equal `Host`. A proxy that rewrites `Host` breaks every write, so it must pass `Host` through unchanged.
 - **Session cookie.** `bkd_session`, or `__Host-bkd_session` when `--secure-cookies` is on, so a sibling subdomain cannot plant a cookie.
 - **Shutdown.** SIGTERM and Ctrl-C both stop the server. In-flight requests get 10 seconds to finish.
+- **Response headers.** Every response, API and static, carries `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy` `same-origin`, and a restrictive `Permissions-Policy`. `Strict-Transport-Security` is added only with `--secure-cookies`.
 - **Password work.** Argon2 runs at most as many times at once as there are CPU cores, so a burst of logins cannot exhaust memory.
 - **Malformed input.** A body or query that axum cannot parse gets axum's plain-text 4xx response, not the JSON error format.
 - **Responses** carry `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. Bodies over 64 KiB are refused (20 MiB for the import route).

@@ -1,9 +1,9 @@
 //! Request checks shared by all routes: who is calling, and whether the request may
 //! come from the page that sent it.
 
-use axum::extract::{FromRequestParts, Request};
+use axum::extract::{FromRequestParts, Request, State};
 use axum::http::request::Parts;
-use axum::http::{HeaderMap, HeaderValue, Method, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
@@ -90,6 +90,43 @@ pub async fn api_headers(request: Request, next: Next) -> Response {
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
     );
+    response
+}
+
+/// Headers every response carries, API and static files alike. HSTS is sent only when
+/// the operator says the site is served over HTTPS: on plain HTTP browsers ignore it.
+pub async fn security_headers(
+    State(state): State<SharedState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    let fixed = [
+        (header::X_FRAME_OPTIONS, "DENY"),
+        (header::REFERRER_POLICY, "no-referrer"),
+        (
+            HeaderName::from_static("cross-origin-opener-policy"),
+            "same-origin",
+        ),
+        (
+            HeaderName::from_static("cross-origin-resource-policy"),
+            "same-origin",
+        ),
+        (
+            HeaderName::from_static("permissions-policy"),
+            "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        ),
+    ];
+    for (name, value) in fixed {
+        headers.insert(name, HeaderValue::from_static(value));
+    }
+    if state.secure_cookies {
+        headers.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000"),
+        );
+    }
     response
 }
 

@@ -30,6 +30,14 @@ pub async fn find_for_login(pool: &SqlitePool, username: &str) -> Result<Option<
     }))
 }
 
+pub async fn username_of(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT username FROM users WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(|(username,)| username))
+}
+
 #[derive(Debug)]
 pub struct UserRecord {
     pub id: i64,
@@ -168,6 +176,34 @@ pub async fn reset_password(
     session::revoke_all_for_user(&mut *transaction, id).await?;
     transaction.commit().await?;
     Ok(Change::Done)
+}
+
+/// Replaces a user's own password and ends every session, but only if the stored hash
+/// is still `verified_hash`. The caller spent tens of milliseconds in Argon2 checking
+/// the current password; a reset or another change in that gap must win. Returns false
+/// when the hash changed or the account is gone.
+pub async fn change_own_password(
+    pool: &SqlitePool,
+    id: i64,
+    verified_hash: &str,
+    new_hash: &str,
+) -> Result<bool> {
+    let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let result = sqlx::query(
+        "UPDATE users SET password_hash = ?3
+         WHERE id = ?1 AND password_hash = ?2 AND disabled_at IS NULL",
+    )
+    .bind(id)
+    .bind(verified_hash)
+    .bind(new_hash)
+    .execute(&mut *transaction)
+    .await?;
+    if result.rows_affected() != 1 {
+        return Ok(false);
+    }
+    session::revoke_all_for_user(&mut *transaction, id).await?;
+    transaction.commit().await?;
+    Ok(true)
 }
 
 /// Deletes the account with its sessions, bookmarks and tags (foreign keys cascade).

@@ -462,6 +462,112 @@ async fn disabling_a_user_cuts_off_the_existing_session() {
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
 }
 
+async fn change_password(app: &TestApp, token: &str, current: &str, new: &str) -> Reply {
+    let body = json!({"current": current, "new": new});
+    app.send(Send::put("/api/account/password", body).cookie(token))
+        .await
+}
+
+#[tokio::test]
+async fn changing_the_password_ends_every_other_session_and_keeps_this_browser_signed_in() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let other = session_token(&app.login("henry", PASSWORD).await);
+
+    let reply = change_password(&app, &token, PASSWORD, "a brand new password").await;
+    assert_eq!(reply.status, StatusCode::NO_CONTENT);
+    let fresh = session_token(&reply);
+
+    for old in [&token, &other] {
+        let after = app.send(Send::get("/api/bookmarks").cookie(old)).await;
+        assert_eq!(after.status, StatusCode::UNAUTHORIZED);
+    }
+    let after = app.send(Send::get("/api/bookmarks").cookie(&fresh)).await;
+    assert_eq!(after.status, StatusCode::OK);
+    assert_eq!(
+        app.login("henry", PASSWORD).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    let login = app.login("henry", "a brand new password").await;
+    assert_eq!(login.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn changing_the_password_needs_the_current_one_and_a_valid_new_one() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+
+    let wrong = change_password(&app, &token, "not the password", "a brand new password").await;
+    assert_eq!(wrong.status, StatusCode::FORBIDDEN);
+    for bad in ["short", "henry is my name", PASSWORD] {
+        let reply = change_password(&app, &token, PASSWORD, bad).await;
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{bad:?}");
+    }
+    let anonymous = app
+        .send(Send::put(
+            "/api/account/password",
+            json!({"current": PASSWORD, "new": "a brand new password"}),
+        ))
+        .await;
+    assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
+
+    // Nothing changed: the old password and the old session still work.
+    assert_eq!(app.login("henry", PASSWORD).await.status, StatusCode::OK);
+    let after = app.send(Send::get("/api/bookmarks").cookie(&token)).await;
+    assert_eq!(after.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn guessing_the_current_password_is_rate_limited() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    for _ in 0..super::LOGIN_ATTEMPTS_PER_WINDOW {
+        let reply = change_password(&app, &token, "not the password", "a brand new password").await;
+        assert_eq!(reply.status, StatusCode::FORBIDDEN);
+    }
+    let reply = change_password(&app, &token, PASSWORD, "a brand new password").await;
+    assert_eq!(reply.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn every_response_carries_the_security_headers() {
+    let app = TestApp::running().await;
+    for uri in ["/", "/app.js", "/api/state", "/api/bookmarks"] {
+        let reply = app.send(Send::get(uri)).await;
+        assert_eq!(reply.headers[header::X_FRAME_OPTIONS], "DENY", "{uri}");
+        assert_eq!(reply.headers["cross-origin-opener-policy"], "same-origin");
+        assert_eq!(reply.headers["cross-origin-resource-policy"], "same-origin");
+        assert!(reply.headers.contains_key("permissions-policy"));
+        assert!(
+            !reply
+                .headers
+                .contains_key(header::STRICT_TRANSPORT_SECURITY)
+        );
+    }
+}
+
+#[tokio::test]
+async fn hsts_is_sent_only_when_cookies_are_secure() {
+    let (_dir, pool) = test_pool().await;
+    let state = AppState::new(Settings {
+        pool,
+        setup_token: None,
+        secure_cookies: true,
+        link_checker: Checker::allowing_loopback().unwrap(),
+    });
+    let request = Request::builder()
+        .uri("/")
+        .header(header::HOST, "bkd.test")
+        .body(Body::empty())
+        .unwrap();
+    let response = router(state).oneshot(request).await.unwrap();
+    assert!(
+        response
+            .headers()
+            .contains_key(header::STRICT_TRANSPORT_SECURITY)
+    );
+}
+
 // ------------------------------------------------------------ bookmarks
 
 #[tokio::test]

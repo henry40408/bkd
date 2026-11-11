@@ -392,10 +392,12 @@ function renderSide() {
   })));
 
   const manageUsersLink = el('a', { href: '#', onclick: (e) => { e.preventDefault(); showUsers(); } }, 'Manage users');
+  const accountLink = el('a', { href: '#', onclick: (e) => { e.preventDefault(); showAccount(); } }, 'Change password');
   const transferLink = el('a', { href: '#', onclick: (e) => { e.preventDefault(); showTransfer(); } }, 'Import and export');
   $('me').replaceChildren(...[
     el('span', {}, 'Signed in as ', el('strong', {}, state.user.username)),
     transferLink,
+    accountLink,
     state.user.is_admin ? manageUsersLink : null,
     el('button', { class: 'link', onclick: signOut }, 'Sign out'),
   ].filter(Boolean));
@@ -1058,10 +1060,27 @@ function showTransfer() {
   showView();
 }
 
+function showAccount() {
+  setMenu(false);
+  leaveSelectMode();
+  renderBulk();
+  state.view = 'account';
+  $('password-form').reset();
+  showError($('password-error'), '');
+  syncHash({ push: true });
+  showView();
+}
+
 function showView() {
   $('bookmarks-view').hidden = state.view !== 'list';
   $('users-view').hidden = state.view !== 'users';
   $('transfer-view').hidden = state.view !== 'transfer';
+  $('account-view').hidden = state.view !== 'account';
+  // Typed passwords must not wait in a hidden form, or come back with Back.
+  if (state.view !== 'account') {
+    $('password-form').reset();
+    showError($('password-error'), '');
+  }
   renderSide();
 }
 
@@ -1077,7 +1096,7 @@ function clearSearch() {
 /* ---------- address bar ---------- */
 
 // The view, the filter and the search live in the URL hash, so a reload, the back button and a
-// shared link bring them back: `#/users`, `#/transfer`, or `#/?q=rust&tag=web&status=broken`.
+// shared link bring them back: `#/users`, `#/transfer`, `#/account`, or `#/?q=rust&tag=web&status=broken`.
 function hashForState() {
   if (state.view !== 'list') return `#/${state.view}`;
   const params = new URLSearchParams();
@@ -1104,7 +1123,7 @@ function stateFromHash() {
   const params = new URLSearchParams(cut === -1 ? '' : rest.slice(cut + 1));
   const link = params.get('status');
   const tag = params.get('tag');
-  const view = name === 'transfer' || (name === 'users' && state.user.is_admin) ? name : 'list';
+  const view = name === 'transfer' || name === 'account' || (name === 'users' && state.user.is_admin) ? name : 'list';
   return {
     view,
     query: params.get('q') ?? '',
@@ -1140,10 +1159,10 @@ async function removeBookmark(b) {
 }
 
 function resetForms() {
-  for (const id of ['add-form', 'user-form', 'login-form', 'setup-form', 'import-form']) $(id).reset();
+  for (const id of ['add-form', 'user-form', 'login-form', 'setup-form', 'import-form', 'password-form']) $(id).reset();
   $('search').value = '';
   $('add').open = false;
-  for (const id of ['add-error', 'user-error', 'login-error', 'setup-error', 'import-error']) showError($(id), '');
+  for (const id of ['add-error', 'user-error', 'login-error', 'setup-error', 'import-error', 'password-error']) showError($(id), '');
 }
 
 function endSession(message) {
@@ -1298,6 +1317,20 @@ $('import-form').addEventListener('submit', once(async (e) => {
   e.target.reset();
   showImportResult(result.value);
   await refreshAll();
+}));
+
+$('password-form').addEventListener('submit', once(async (e) => {
+  e.preventDefault();
+  const error = $('password-error');
+  const data = new FormData(e.target);
+  const body = { current: data.get('current'), new: data.get('new') };
+  if (!body.current || !body.new) return showError(error, 'Enter your current and a new password.');
+  if (body.new !== data.get('again')) return showError(error, 'The new passwords do not match.');
+  showError(error, '');
+  const result = await attempt(() => api('PUT', '/account/password', body), (message) => showError(error, message));
+  if (!result) return;
+  e.target.reset();
+  toast('Password changed. You are signed out everywhere else.');
 }));
 
 $('login-form').addEventListener('submit', once(async (e) => {

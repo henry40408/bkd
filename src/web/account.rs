@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::SharedState;
 use super::cookie;
 use super::error::ApiError;
-use super::guard::user_from_headers;
+use super::guard::{CurrentUser, user_from_headers};
 use crate::auth::session::{self, SessionUser};
 use crate::auth::{first_admin, password, unix_now, username};
 use crate::users;
@@ -84,7 +84,7 @@ pub async fn setup(
     state.setup_limiter.refund(ip);
 
     let username = username::normalize(&request.username)?;
-    password::validate(&request.password)?;
+    password::validate(&request.password, &username)?;
     let password_hash = password::hash_async(request.password).await?;
     let created = first_admin::create(&state.pool, &username, &password_hash, unix_now()).await?;
 
@@ -163,6 +163,59 @@ async fn start_session(
 fn session_response(state: &SharedState, token: &str, status: StatusCode) -> Response {
     let cookie = cookie::set(token, state.secure_cookies);
     (status, [(header::SET_COOKIE, cookie)]).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct ChangePasswordRequest {
+    current: String,
+    new: String,
+}
+
+/// Changes the caller's own password. Every session ends, this one included, and the
+/// response carries a fresh cookie so the caller stays signed in on this browser only.
+pub async fn change_password(
+    user: CurrentUser,
+    State(state): State<SharedState>,
+    ConnectInfo(client): ConnectInfo<SocketAddr>,
+    Json(request): Json<ChangePasswordRequest>,
+) -> Result<Response, ApiError> {
+    let ip = client.ip();
+    // A stolen session must not be a free oracle for the current password.
+    state
+        .login_limiter
+        .try_acquire(ip, Instant::now())
+        .map_err(ApiError::TooManyRequests)?;
+
+    let user = user.0;
+    password::validate(&request.new, &user.username)?;
+    if request.new == request.current {
+        return Err(ApiError::BadRequest(
+            "new password must differ from the current one".into(),
+        ));
+    }
+    let Some(record) = users::find_for_login(&state.pool, &user.username).await? else {
+        return Err(ApiError::Unauthorized);
+    };
+    let stored_hash = record.password_hash;
+    if !password::verify_async(request.current, stored_hash.clone()).await? {
+        tracing::warn!(%ip, user_id = user.user_id, "password change refused: wrong current password");
+        return Err(ApiError::Forbidden("current password is wrong"));
+    }
+    let new_hash = password::hash_async(request.new).await?;
+    if !users::change_own_password(&state.pool, user.user_id, &stored_hash, &new_hash).await? {
+        return Err(ApiError::Conflict("password changed meanwhile, try again"));
+    }
+    state.login_limiter.refund(ip);
+    tracing::info!(user_id = user.user_id, "password changed");
+    // Not `session::create`: a reset that lands after the change must not be followed by a session.
+    let token =
+        session::create_if_unchanged(&state.pool, user.user_id, &new_hash, unix_now()).await?;
+    let Some(token) = token else {
+        return Err(ApiError::Conflict(
+            "password changed meanwhile, sign in again",
+        ));
+    };
+    Ok(session_response(&state, &token, StatusCode::NO_CONTENT))
 }
 
 pub async fn logout(

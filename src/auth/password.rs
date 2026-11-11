@@ -10,7 +10,7 @@ use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use tokio::sync::Semaphore;
 
-const MIN_LENGTH: usize = 8;
+const MIN_LENGTH: usize = 12;
 // Argon2 cost grows with input size, so an unbounded password is a cheap way to burn CPU.
 const MAX_BYTES: usize = 256;
 
@@ -18,6 +18,7 @@ const MAX_BYTES: usize = 256;
 pub enum PasswordError {
     TooShort,
     TooLong,
+    ContainsUsername,
 }
 
 impl fmt::Display for PasswordError {
@@ -25,20 +26,24 @@ impl fmt::Display for PasswordError {
         match self {
             Self::TooShort => write!(f, "password must be at least {MIN_LENGTH} characters"),
             Self::TooLong => write!(f, "password must be at most {MAX_BYTES} bytes"),
+            Self::ContainsUsername => write!(f, "password must not contain the username"),
         }
     }
 }
 
 impl std::error::Error for PasswordError {}
 
-/// Checks a new password. Login does not call this: an old password that no longer
-/// meets the rules must still work.
-pub fn validate(password: &str) -> Result<(), PasswordError> {
+/// Checks a new password for the account `username` (already normalized). Login does
+/// not call this: an old password that no longer meets the rules must still work.
+pub fn validate(password: &str, username: &str) -> Result<(), PasswordError> {
     if password.len() > MAX_BYTES {
         return Err(PasswordError::TooLong);
     }
     if password.chars().count() < MIN_LENGTH {
         return Err(PasswordError::TooShort);
+    }
+    if password.to_lowercase().contains(username) {
+        return Err(PasswordError::ContainsUsername);
     }
     Ok(())
 }
@@ -146,17 +151,28 @@ mod tests {
         let stored = hash("correct horse").unwrap();
         assert!(!verify(&"a".repeat(MAX_BYTES + 1), &stored));
         assert_eq!(
-            validate(&"a".repeat(MAX_BYTES + 1)),
+            validate(&"a".repeat(MAX_BYTES + 1), "alice"),
             Err(PasswordError::TooLong)
         );
     }
 
     #[test]
     fn short_password_is_refused() {
-        assert_eq!(validate("1234567"), Err(PasswordError::TooShort));
-        assert!(validate("12345678").is_ok());
+        assert_eq!(
+            validate("12345678901", "alice"),
+            Err(PasswordError::TooShort)
+        );
+        assert!(validate("123456789012", "alice").is_ok());
         // Counted in characters, not bytes.
-        assert!(validate("密碼密碼密碼密碼").is_ok());
+        assert!(validate("密碼密碼密碼密碼密碼密碼", "alice").is_ok());
+    }
+
+    #[test]
+    fn password_with_the_username_is_refused() {
+        for bad in ["alice-is-the-best", "my-ALICE-password"] {
+            assert_eq!(validate(bad, "alice"), Err(PasswordError::ContainsUsername));
+        }
+        assert!(validate("a different phrase", "alice").is_ok());
     }
 
     #[test]
