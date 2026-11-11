@@ -13,9 +13,33 @@ A single-binary, multi-user bookmark manager with a web front end and a JSON API
 
 ## Run
 
+### Docker
+
+Images for `linux/amd64` and `linux/arm64` are published to GitHub Container Registry. A release publishes the version tags (`1.2.3`, `1.2`) and `latest`; every merge to `main` publishes `main`, the newest unreleased build. The image runs as a non-root user (uid 65532) and keeps the database in the `/data` volume.
+
+```sh
+docker run -d \
+  --name bkd \
+  -p 8080:8080 \
+  -v bkd_data:/data \
+  ghcr.io/henry40408/bkd:latest
+```
+
+The image sets `BKD_DB=/data/bkd.sqlite3` and `BKD_ADDR=0.0.0.0:8080`. Override them, or set `BKD_SECURE_COOKIES=true` when a proxy serves the site over HTTPS, with `-e`. A bind mount must be writable by uid 65532.
+
+On the first start, with an empty database, bkd logs the one-time setup token. Read it with `docker logs bkd`.
+
+To sign in through a reverse proxy such as Authelia, set `BKD_FORWARD_AUTH_TRUSTED_PROXIES` to the proxy's address or CIDR range. `BKD_FORWARD_AUTH_USER_HEADER`, `BKD_FORWARD_AUTH_GROUPS_HEADER` and `BKD_FORWARD_AUTH_ADMIN_GROUP` tune it. See "Sign in through a reverse proxy" below.
+
+To build the image yourself, run `docker build -t bkd .`.
+
+### From source
+
 ```sh
 cargo run -- --db bkd.sqlite3 --addr 127.0.0.1:8080
 ```
+
+### Setup and settings
 
 On the first start, with an empty database, bkd logs a one-time setup token like `WDP4S-V8PGD`. Whoever can read the log can create the first admin, so keep the log private. Open the site and enter it, with the first admin's username and password, on the setup page (or send them to `POST /api/setup`). Afterwards, admins manage accounts under "Manage users" (create, promote, demote, disable, reset password, delete); bkd never lets the last active admin be removed. Everyone can change their own password under "Change password": new passwords need at least 12 characters and must not contain the username, and a change signs the account out everywhere else. A session also ends after 7 days without use. "Account" also lists the browsers signed in to your account, where you can end any of them. Admin changes to accounts (create, promote, demote, disable, reset password, delete) ask for your password again if you have not typed it in the last 5 minutes.
 
@@ -99,26 +123,6 @@ The server only contacts public addresses, since it makes the requests on behalf
 Under "Import and export" in the sidebar, choose the bookmarks file your browser exported (Chrome, Firefox, Safari, Pocket and Raindrop all write the same `.html` format). Folders become tags, the date saved is kept when the file has one (Safari's does not), and a link you already have is skipped, so importing the same file twice is safe. Links that are not web links (`javascript:`, `place:`) are skipped and listed in the result. The same screen downloads your bookmarks as HTML (for a browser or another service) or JSON (a backup).
 
 Over the API: send the file to `POST /api/import` with `Content-Type: text/html` and your session cookie, and read `GET /api/export?format=html|json`.
-
-## Docker
-
-Images for `linux/amd64` and `linux/arm64` are published to GitHub Container Registry. A release publishes the version tags (`1.2.3`, `1.2`) and `latest`; every merge to `main` publishes `main`, the newest unreleased build. The image runs as a non-root user (uid 65532) and keeps the database in the `/data` volume.
-
-```sh
-docker run -d \
-  --name bkd \
-  -p 8080:8080 \
-  -v bkd_data:/data \
-  ghcr.io/henry40408/bkd:latest
-```
-
-The image sets `BKD_DB=/data/bkd.sqlite3` and `BKD_ADDR=0.0.0.0:8080`. Override them, or set `BKD_SECURE_COOKIES=true` when a proxy serves the site over HTTPS, with `-e`. A bind mount must be writable by uid 65532.
-
-On the first start, with an empty database, bkd logs the one-time setup token. Read it with `docker logs bkd`.
-
-To sign in through a reverse proxy such as Authelia, set `BKD_FORWARD_AUTH_TRUSTED_PROXIES` to the proxy's address or CIDR range. `BKD_FORWARD_AUTH_USER_HEADER`, `BKD_FORWARD_AUTH_GROUPS_HEADER` and `BKD_FORWARD_AUTH_ADMIN_GROUP` tune it. See "Sign in through a reverse proxy" above.
-
-To build the image yourself, run `docker build -t bkd .`.
 
 ## Develop
 
