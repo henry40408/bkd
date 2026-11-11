@@ -14,7 +14,7 @@ const MAX_URL_CHARS: usize = 2048;
 const MAX_TITLE_CHARS: usize = 300;
 const MAX_NOTE_CHARS: usize = 5000;
 const MAX_TAG_CHARS: usize = 50;
-const MAX_TAGS_PER_BOOKMARK: usize = 20;
+pub const MAX_TAGS_PER_BOOKMARK: usize = 20;
 
 // Joins tags inside SQL. Tags are rejected if they contain control characters, so
 // this byte can never appear in one.
@@ -179,7 +179,7 @@ pub fn normalize_tag(raw: &str) -> Result<Option<String>, ValidationError> {
     Ok(Some(tag))
 }
 
-fn normalize_tags(raw_tags: &[String]) -> Result<Vec<String>, ValidationError> {
+pub fn normalize_tags(raw_tags: &[String]) -> Result<Vec<String>, ValidationError> {
     let mut seen = HashSet::new();
     let mut tags = Vec::new();
     for raw in raw_tags {

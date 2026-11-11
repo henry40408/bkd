@@ -1,5 +1,6 @@
 mod auth;
 mod bookmarks;
+mod bulk;
 mod db;
 mod import;
 mod netscape;

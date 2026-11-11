@@ -53,6 +53,7 @@ JSON under `/api`. Handlers are thin: they call `auth`, `bookmarks` and `users`.
 | `POST /api/login`, `POST /api/logout` | none | start and end a session |
 | `GET /api/bookmarks?q=&tag=&limit=&offset=` | session | newest first; `limit` defaults to 50, at most 200 |
 | `GET /api/bookmarks/random?q=&tag=` | session | one bookmark chosen at random (`ORDER BY RANDOM() LIMIT 1`) from those `q` and `tag` let through; 404 when none |
+| `POST /api/bookmarks/bulk` | session | `{ids, action}` with `delete`, `add_tags` or `remove_tags` (+ `tags`); 1 to 200 ids, one transaction; 404 and no change if any id is missing or not the caller's; 400 if a bookmark would exceed 20 tags; answers `{changed}` (bookmarks actually changed) |
 | `POST /api/bookmarks`, `PUT`/`DELETE /api/bookmarks/{id}` | session | create, replace, delete |
 | `GET /api/tags` | session | the user's tags with counts |
 | `POST /api/import` | session | body is a Netscape bookmark file sent as `text/html`; returns `{added, duplicates, invalid, invalid_examples}` |
@@ -84,6 +85,7 @@ JSON under `/api`. Handlers are thin: they call `auth`, `bookmarks` and `users`.
 
 - **Ownership.** Every bookmark query carries the session's `user_id`. A bookmark that belongs to someone else answers 404, the same as a missing one.
 - **Validation** (`bookmarks.rs`). URLs must be `http://` or `https://` because the front end renders them as links, and a `javascript:` URL would run script. Tags are trimmed, lowercased and deduplicated. Only a `ValidBookmark` can be stored.
+- **Bulk actions** (`bulk.rs`). Ownership of every id is checked inside the transaction (`count(*)` of the caller's rows must equal the number of ids), so another user's id behaves like a missing one and nothing leaks or half-applies. Tag rules are the ones in `bookmarks.rs`; the 20-tag limit is checked after the inserts and rolls the batch back. The front end only selects rows it has loaded (`state.selected`), trims the selection after every refresh, and ends select mode after an action.
 - **Search** (`search.rs`). `LIKE` with `ESCAPE`, so `%`, `_` and `\` in the query are literal. `q` is parsed into terms (`"phrase"`, `-exclude`, `title:`/`url:`/`note:`/`tag:` prefixes, max 8 terms of 100 chars); every term must match. A plain term matches title, URL, note or a tag; a prefixed term matches that field only, and `tag:` is an exact, case-insensitive tag match. `LIKE` ignores case for ASCII only. Dynamic SQL contains only placeholders; user text is always bound. The front end parses the query again (`parseQuery` in `app.js`) to highlight per field; `tests/search_syntax.json` holds the cases both parsers must agree on, checked by a Rust unit test and an e2e scenario.
 - **CSRF.** Three layers: `SameSite=Strict` on the cookie, JSON-only bodies (a form post gets 415), and a check that a state-changing request's `Origin`, if present, equals `Host`. Requests without `Origin` (command-line clients) pass.
 - **Rate limits.** Login: 10 attempts per minute per IP. Setup: 5. Successful attempts are refunded; failures are not.

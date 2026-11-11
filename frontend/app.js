@@ -18,7 +18,15 @@ const state = {
   confirming: null,
   confirmingUser: null,
   resettingUser: null,
+  // Select mode: `selected` holds ids of loaded bookmarks only; `anchor` is where a Shift-click range starts.
+  selecting: false,
+  selected: new Set(),
+  anchor: null,
+  bulkPanel: null,
+  bulkError: '',
+  bulkBusy: false,
 };
+const MAX_TAG_CHARS = 50;
 
 const $ = (id) => document.getElementById(id);
 
@@ -262,6 +270,7 @@ async function loadBookmarks({ mode = 'first' } = {}) {
   const page = result.value.bookmarks.slice(0, wanted);
   state.bookmarks = append ? state.bookmarks.concat(page) : page;
   state.hasMore = result.value.bookmarks.length > wanted;
+  pruneSelection();
   renderList();
 }
 
@@ -339,7 +348,15 @@ function itemView(b) {
     ...termsFor(terms, 'any'),
     ...terms.filter((term) => !term.negated && term.field === 'tag' && term.text.trim().toLowerCase() === tag).map((term) => term.text.trim()),
   ];
-  return el('li', { class: 'item' },
+  const isChosen = state.selected.has(b.id);
+  const box = state.selecting ? el('label', { class: 'pick-box' },
+    el('input', {
+      type: 'checkbox', 'data-key': `row-${b.id}`, 'aria-label': `Select ${b.title}`, checked: isChosen,
+      // `click`, not `change`: only a click event tells whether Shift was held.
+      onclick: (e) => toggleRow(b, e.target.checked, e.shiftKey),
+    })) : null;
+  return el('li', { class: `item${isChosen ? ' chosen' : ''}`, 'data-id': b.id },
+    box,
     el('span', { class: 'domain' }, highlight(domainOf(b.url), termsFor(terms, 'url'))),
     el('div', {},
       el('a', { class: 'title', href: normalizeUrl(b.url) || '#', target: '_blank', rel: 'noopener noreferrer' }, highlight(b.title, termsFor(terms, 'title'))),
@@ -384,7 +401,12 @@ function emptyMessage() {
 }
 
 function renderList() {
+  const focusedKey = $('list').contains(document.activeElement) ? document.activeElement.dataset.key : null;
+  $('list').className = `list${state.selecting ? ' selecting' : ''}`;
   $('list').replaceChildren(...state.bookmarks.map(itemView));
+  // Without this the checkbox the user was on disappears and focus falls back to the page.
+  if (focusedKey) $('list').querySelector(`[data-key="${focusedKey}"]`)?.focus({ preventScroll: true });
+  renderBulk();
   $('empty').replaceChildren(...emptyMessage());
   $('empty').hidden = state.bookmarks.length > 0;
   $('more').hidden = !state.hasMore;
@@ -451,6 +473,236 @@ function keepFocus(container) {
   if (!document.activeElement || document.activeElement === document.body) {
     $('main').focus({ preventScroll: true });
   }
+}
+
+/* ---------- bulk actions ---------- */
+
+const bookmarksOf = (count) => `${count} bookmark${count === 1 ? '' : 's'}`;
+
+// The server accepts at most this many ids per request.
+const MAX_BULK_IDS = 200;
+
+function clearSelection() {
+  state.selected.clear();
+  state.anchor = null;
+  state.bulkPanel = null;
+  state.bulkError = '';
+  // The ticks and the bar must not outlive the selection while a new list is loading.
+  syncSelection();
+}
+
+// Select mode belongs to the bookmark list, so whatever replaces the list also ends the mode.
+function leaveSelectMode() {
+  state.selecting = false;
+  clearSelection();
+}
+
+// A refresh may no longer contain a ticked bookmark; acting on it would touch a row the user cannot see.
+function pruneSelection() {
+  const loaded = new Set(state.bookmarks.map((b) => b.id));
+  for (const id of state.selected) if (!loaded.has(id)) state.selected.delete(id);
+}
+
+function setSelecting(on) {
+  closePick();
+  state.selecting = on;
+  clearSelection();
+  if (on) Object.assign(state, { editing: null, confirming: null });
+  renderList();
+  $('select-toggle').focus({ preventScroll: true });
+}
+
+function rangeIds(fromId, toId) {
+  const ids = state.bookmarks.map((b) => b.id);
+  const from = ids.indexOf(fromId);
+  const to = ids.indexOf(toId);
+  if (from < 0 || to < 0) return [toId];
+  return ids.slice(Math.min(from, to), Math.max(from, to) + 1);
+}
+
+function toggleRow(b, checked, shiftKey) {
+  if (state.bulkBusy) return syncSelection();
+  const ids = shiftKey && state.anchor != null ? rangeIds(state.anchor, b.id) : [b.id];
+  for (const id of ids) {
+    if (checked) state.selected.add(id); else state.selected.delete(id);
+  }
+  state.anchor = b.id;
+  syncSelection();
+}
+
+// "All" means the loaded rows, but never more than one request can carry.
+const selectable = () => state.bookmarks.slice(0, MAX_BULK_IDS);
+
+function toggleAll() {
+  if (state.bulkBusy) return;
+  const allChosen = selectable().every((b) => state.selected.has(b.id));
+  if (allChosen) state.selected.clear(); else selectable().forEach((b) => state.selected.add(b.id));
+  state.anchor = null;
+  syncSelection();
+}
+
+// Updates the rows in place; rebuilding them would drop the focus from the checkbox the user is on.
+function syncSelection() {
+  for (const row of $('list').children) {
+    if (!row.dataset.id) continue;
+    const isChosen = state.selected.has(Number(row.dataset.id));
+    row.classList.toggle('chosen', isChosen);
+    const box = row.querySelector('.pick-box input');
+    if (box) box.checked = isChosen;
+  }
+  renderBulk();
+}
+
+function openBulkPanel(name) {
+  if (state.bulkPanel === name) return closeBulkPanel();
+  state.bulkPanel = name;
+  state.bulkError = '';
+  renderBulk();
+  $('bulk').querySelector('[data-focus]')?.focus({ preventScroll: true });
+}
+
+function closeBulkPanel() {
+  const opener = state.bulkPanel;
+  state.bulkPanel = null;
+  state.bulkError = '';
+  renderBulk();
+  $('bulk').querySelector(`[data-key="open-${opener}"]`)?.focus({ preventScroll: true });
+}
+
+function showBulkError(message) {
+  state.bulkError = message;
+  renderBulk();
+  $('bulk').querySelector('[data-focus]')?.focus({ preventScroll: true });
+}
+
+function chosenTagCounts() {
+  const counts = new Map();
+  for (const b of state.bookmarks) {
+    if (state.selected.has(b.id)) for (const t of b.tags) counts.set(t, (counts.get(t) || 0) + 1);
+  }
+  return counts;
+}
+
+function deletePanel(count) {
+  return el('div', { class: 'bulk-panel', id: 'bulk-panel' },
+    el('span', { class: 'ask' }, `Delete ${bookmarksOf(count)}? This cannot be undone.`),
+    state.bulkError ? el('span', { class: 'err', role: 'alert' }, state.bulkError) : null,
+    el('button', { type: 'button', class: 'quiet danger', 'data-key': 'confirm-delete', disabled: state.bulkBusy, onclick: once(runBulkDelete) }, `Delete ${count}`),
+    el('button', { type: 'button', class: 'quiet', 'data-key': 'keep', 'data-focus': true, onclick: closeBulkPanel }, 'Keep'));
+}
+
+function tagsPanel(count, typed) {
+  const adding = state.bulkPanel === 'add';
+  const suggestions = adding
+    ? state.tags.map(({ tag }) => el('option', { value: tag }))
+    : [...chosenTagCounts()].map(([tag, n]) => el('option', { value: tag }, `${n} of ${count}`));
+  return el('form', { class: 'bulk-panel', id: 'bulk-panel', 'data-panel': state.bulkPanel, novalidate: true, onsubmit: once(runBulkTags) },
+    el('input', {
+      type: 'text', name: 'tags', value: typed, list: 'bulk-tags', autocomplete: 'off', 'data-key': 'bulk-tags', 'data-focus': true,
+      placeholder: 'Tags, separated by commas', 'aria-label': adding ? 'Tags to add' : 'Tags to remove',
+    }),
+    el('datalist', { id: 'bulk-tags' }, suggestions),
+    state.bulkError ? el('span', { class: 'err', role: 'alert' }, state.bulkError) : null,
+    el('button', { type: 'submit', disabled: state.bulkBusy }, adding ? `Add to ${bookmarksOf(count)}` : `Remove from ${bookmarksOf(count)}`),
+    el('button', { type: 'button', class: 'quiet', onclick: closeBulkPanel }, 'Cancel'));
+}
+
+function bulkPanel(count, typed) {
+  if (state.bulkPanel === 'delete') return deletePanel(count);
+  if (state.bulkPanel === 'add' || state.bulkPanel === 'remove') return tagsPanel(count, typed);
+  return null;
+}
+
+function renderBulk() {
+  const toggle = $('select-toggle');
+  toggle.textContent = state.selecting ? 'Done' : 'Select';
+  toggle.classList.toggle('on', state.selecting);
+  const bar = $('bulk');
+  bar.hidden = !state.selecting;
+  if (!state.selecting) {
+    bar.replaceChildren();
+    $('bulk-live').textContent = '';
+    return;
+  }
+  const count = state.selected.size;
+  // A panel for zero bookmarks would act on nothing.
+  if (count === 0) Object.assign(state, { bulkPanel: null, bulkError: '' });
+  const focusedKey = bar.contains(document.activeElement) ? document.activeElement.dataset.key : null;
+  const old = bar.querySelector('form.bulk-panel');
+  const typed = old?.dataset.panel === state.bulkPanel ? old.elements.tags.value : '';
+  const allChosen = selectable().length > 0 && selectable().every((b) => state.selected.has(b.id));
+  const allLabel = state.bookmarks.length > MAX_BULK_IDS ? `Select first ${MAX_BULK_IDS}` : `Select all ${state.bookmarks.length} shown`;
+  const opener = (name, label, extra = '') => el('button', {
+    type: 'button', class: `quiet${extra}`, disabled: count === 0 || state.bulkBusy, 'data-key': `open-${name}`,
+    'aria-expanded': String(state.bulkPanel === name), 'aria-controls': state.bulkPanel === name ? 'bulk-panel' : null, onclick: () => openBulkPanel(name),
+  }, label);
+  bar.replaceChildren(...[
+    el('div', { class: 'bulk-row' },
+      el('span', { class: 'bulk-count' }, count ? `${count} selected` : 'Select bookmarks'),
+      el('button', { type: 'button', class: 'quiet', 'data-key': 'select-all', disabled: state.bookmarks.length === 0, onclick: toggleAll },
+        allChosen ? 'Clear selection' : allLabel),
+      el('div', { class: 'bulk-actions' }, opener('add', 'Add tag'), opener('remove', 'Remove tag'), opener('delete', 'Delete', ' danger'))),
+    bulkPanel(count, typed),
+    state.bulkPanel ? null : el('p', { class: 'hint' }, 'Shift-click to tick a range. Esc to leave select mode.'),
+  ].filter(Boolean));
+  $('bulk-live').textContent = count ? `${count} selected` : '';
+  if (!focusedKey) return;
+  // The button may now be disabled (nothing ticked); then the next best place is "select all".
+  const target = bar.querySelector(`[data-key="${focusedKey}"]:not(:disabled)`) ?? bar.querySelector('[data-key="select-all"]');
+  target?.focus({ preventScroll: true });
+}
+
+// One request, one transaction on the server: it changes every selected bookmark or none.
+async function sendBulk(body) {
+  const request = { ids: [...state.selected], ...body };
+  if (request.ids.length > MAX_BULK_IDS) return showBulkError(`You can change at most ${MAX_BULK_IDS} bookmarks at once. Untick some.`);
+  let stale = false;
+  // While the request runs the buttons are disabled; a second click would send the same batch again.
+  state.bulkBusy = true;
+  renderBulk();
+  const result = await attempt(() => api('POST', '/bookmarks/bulk', request).catch((error) => {
+    if (!(error instanceof ApiError && error.status === 404)) throw error;
+    stale = true;
+    throw new ApiError(404, 'Some of the selected bookmarks no longer exist. The list was refreshed.');
+  }), (message) => { state.bulkBusy = false; showBulkError(message); });
+  state.bulkBusy = false;
+  if (stale) await loadBookmarks({ mode: 'keep' });
+  return result;
+}
+
+// The ticks have done their job; staying in select mode would invite a second, accidental action.
+async function finishBulk(message) {
+  leaveSelectMode();
+  renderList();
+  $('select-toggle').focus({ preventScroll: true });
+  toast(message);
+  await refreshAll();
+}
+
+async function runBulkDelete() {
+  const result = await sendBulk({ action: 'delete' });
+  if (result) await finishBulk(`Deleted ${bookmarksOf(result.value.changed)}`);
+}
+
+async function runBulkTags(e) {
+  const tags = parseTags(new FormData(e.target).get('tags'));
+  if (!tags.length) return showBulkError('Type a tag first.');
+  if (tags.some((t) => [...t].length > MAX_TAG_CHARS)) return showBulkError(`A tag can have at most ${MAX_TAG_CHARS} characters.`);
+  const adding = state.bulkPanel === 'add';
+  const result = await sendBulk({ action: adding ? 'add_tags' : 'remove_tags', tags });
+  if (!result) return;
+  const { changed } = result.value;
+  const names = tags.map((t) => `“${t}”`).join(', ');
+  if (!adding && changed === 0) return showBulkError('None of the selected bookmarks has that tag.');
+  if (adding && changed === 0) return finishBulk(`Every selected bookmark already has ${names}`);
+  await finishBulk(adding ? `Added ${names} to ${bookmarksOf(changed)}` : `Removed ${names} from ${bookmarksOf(changed)}`);
+}
+
+// Esc backs out one step at a time: the open panel first, then select mode.
+function escapeSelectMode(e) {
+  if (!state.selecting || e.target === $('search')) return;
+  if (state.bulkPanel) return closeBulkPanel();
+  setSelecting(false);
 }
 
 /* ---------- users (admin) ---------- */
@@ -581,12 +833,16 @@ function setFilter(key) {
   state.tag = key;
   state.editing = null;
   state.confirming = null;
+  // A different list is coming; what was ticked will not be on screen.
+  clearSelection();
   showView();
   loadBookmarks();
 }
 
 function showUsers() {
   setMenu(false);
+  leaveSelectMode();
+  renderBulk();
   state.view = 'users';
   state.confirmingUser = null;
   state.resettingUser = null;
@@ -596,6 +852,8 @@ function showUsers() {
 
 function showTransfer() {
   setMenu(false);
+  leaveSelectMode();
+  renderBulk();
   state.view = 'transfer';
   showError($('import-error'), '');
   $('import-result').hidden = true;
@@ -611,6 +869,7 @@ function showView() {
 
 function clearSearch() {
   closePick();
+  clearSelection();
   state.query = '';
   $('search').value = '';
   loadBookmarks();
@@ -640,6 +899,8 @@ function endSession(message) {
     user: null, view: 'list', tag: 'all', query: '', bookmarks: [], hasMore: false, tags: [], users: [],
     editing: null, confirming: null, confirmingUser: null, resettingUser: null,
   });
+  leaveSelectMode();
+  renderBulk();
   resetForms();
   showScreen('login');
   if (message) showError($('login-error'), message);
@@ -680,7 +941,13 @@ async function start() {
 
 $('menu-button').addEventListener('click', () => setMenu($('menu-button').getAttribute('aria-expanded') !== 'true'));
 $('backdrop').addEventListener('click', () => setMenu(false));
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMenu(false); });
+document.addEventListener('keydown', (e) => {
+  // Esc also cancels an IME composition; that must not close the panel.
+  if (e.key !== 'Escape' || e.isComposing) return;
+  // With the drawer open the page behind it is inert, so Esc only closes the drawer.
+  if ($('sidebar').classList.contains('open')) return setMenu(false);
+  escapeSelectMode(e);
+});
 // The drawer exists only in the narrow layout; widening the window must not leave the page inert.
 window.matchMedia('(max-width: 760px)').addEventListener('change', (e) => { if (!e.matches) setMenu(false); });
 $('search-form').addEventListener('submit', (e) => e.preventDefault());
@@ -693,6 +960,7 @@ $('search').addEventListener('input', (e) => {
   if (unchanged) return;
   // Rebuilding the list would discard unsaved edits, so close any open edit or confirmation first.
   closePick();
+  clearSelection();
   Object.assign(state, { editing: null, confirming: null, hasMore: false });
   $('more').hidden = true;
   clearTimeout(searchTimer);
@@ -701,6 +969,7 @@ $('search').addEventListener('input', (e) => {
 
 $('more').addEventListener('click', () => loadBookmarks({ mode: 'append' }));
 $('random').addEventListener('click', once(pickRandom));
+$('select-toggle').addEventListener('click', () => setSelecting(!state.selecting));
 
 $('add-form').addEventListener('submit', once(async (e) => {
   e.preventDefault();
@@ -716,6 +985,7 @@ $('add-form').addEventListener('submit', once(async (e) => {
   showError($('add-error'), '');
   $('add').open = false;
   Object.assign(state, { tag: 'all', query: '', editing: null, confirming: null });
+  leaveSelectMode();
   $('search').value = '';
   toast(`Saved “${title}”`);
   showView();

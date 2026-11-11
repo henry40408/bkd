@@ -35,6 +35,10 @@ Prefixes combine with the rest: `-tag:old`, `title:"rust book"`. Anything else i
 
 The "Random" button next to the search box shows one bookmark picked from what the search and the tag filter show right now (with neither, from all of yours). "Another" picks again; changing the search or the tag, or adding, editing or deleting a bookmark, closes the pick. Over the API: `GET /api/bookmarks/random?q=&tag=` (404 when nothing matches).
 
+## Bulk actions
+
+"Select" next to the search box turns on checkboxes. Tick the bookmarks you want (Shift-click ticks a range, "Select all" ticks every loaded row), then add a tag to all of them, remove a tag from all of them, or delete them. Tags are separated by commas, as in the add form. Delete asks first and cannot be undone. After an action, select mode ends. Over the API: `POST /api/bookmarks/bulk` with `{"ids": [...], "action": "delete" | "add_tags" | "remove_tags", "tags": [...]}` (up to 200 ids; one transaction, so it changes all of them or none; 404 if any id is missing or not yours). It answers `{"changed": n}`.
+
 ## Import and export
 
 Under "Import and export" in the sidebar, choose the bookmarks file your browser exported (Chrome, Firefox, Safari, Pocket and Raindrop all write the same `.html` format). Folders become tags, the date saved is kept when the file has one (Safari's does not), and a link you already have is skipped, so importing the same file twice is safe. Links that are not web links (`javascript:`, `place:`) are skipped and listed in the result. The same screen downloads your bookmarks as HTML (for a browser or another service) or JSON (a backup).

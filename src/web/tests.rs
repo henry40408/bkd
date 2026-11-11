@@ -467,6 +467,10 @@ async fn bookmark_routes_need_a_session() {
         Send::put("/api/bookmarks/1", bookmark("https://a.b", "t", &[])),
         Send::delete("/api/bookmarks/1"),
         Send::get("/api/tags"),
+        Send::post(
+            "/api/bookmarks/bulk",
+            json!({"ids": [1], "action": "delete"}),
+        ),
     ] {
         assert_eq!(app.send(request).await.status, StatusCode::UNAUTHORIZED);
     }
@@ -639,6 +643,174 @@ async fn random_does_not_always_pick_the_same_bookmark() {
     }
     // 40 draws from 10 would all agree with probability 10^-39.
     assert!(seen.len() > 1);
+}
+
+async fn bulk(app: &TestApp, token: &str, body: Value) -> Reply {
+    app.send(Send::post("/api/bookmarks/bulk", body).cookie(token))
+        .await
+}
+
+fn tags_of(list: &Reply, title: &str) -> Vec<String> {
+    list.body["bookmarks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["title"] == title)
+        .map(|b| serde_json::from_value(b["tags"].clone()).unwrap())
+        .unwrap()
+}
+
+#[tokio::test]
+async fn bulk_add_and_remove_tags_report_how_many_bookmarks_changed() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let a = create_bookmark(&app, &token, "a", &["rust"]).await;
+    let b = create_bookmark(&app, &token, "b", &[]).await;
+    let c = create_bookmark(&app, &token, "c", &["keep"]).await;
+    let ids = json!([a["id"], b["id"], a["id"]]);
+
+    let added = bulk(
+        &app,
+        &token,
+        json!({"ids": ids, "action": "add_tags", "tags": [" Rust ", "New"]}),
+    )
+    .await;
+    assert_eq!(added.status, StatusCode::OK);
+    // "a" already had rust but gains "new", so both are changed.
+    assert_eq!(added.body, json!({"changed": 2}));
+    let list = app.send(Send::get("/api/bookmarks").cookie(&token)).await;
+    assert_eq!(tags_of(&list, "a"), ["new", "rust"]);
+    assert_eq!(tags_of(&list, "b"), ["new", "rust"]);
+    assert_eq!(tags_of(&list, "c"), ["keep"]);
+
+    let again = bulk(
+        &app,
+        &token,
+        json!({"ids": [a["id"]], "action": "add_tags", "tags": ["rust"]}),
+    )
+    .await;
+    assert_eq!(again.body, json!({"changed": 0}));
+
+    let removed = bulk(
+        &app,
+        &token,
+        json!({"ids": [a["id"], b["id"], c["id"]], "action": "remove_tags", "tags": ["rust"]}),
+    )
+    .await;
+    assert_eq!(removed.body, json!({"changed": 2}));
+    let list = app.send(Send::get("/api/bookmarks").cookie(&token)).await;
+    assert_eq!(tags_of(&list, "a"), ["new"]);
+    assert_eq!(tags_of(&list, "c"), ["keep"]);
+}
+
+#[tokio::test]
+async fn bulk_delete_removes_the_bookmarks_and_their_tags() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let a = create_bookmark(&app, &token, "a", &["x"]).await;
+    let b = create_bookmark(&app, &token, "b", &["y"]).await;
+    create_bookmark(&app, &token, "c", &["z"]).await;
+
+    let reply = bulk(
+        &app,
+        &token,
+        json!({"ids": [a["id"], b["id"]], "action": "delete"}),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(reply.body, json!({"changed": 2}));
+    let list = app.send(Send::get("/api/bookmarks").cookie(&token)).await;
+    assert_eq!(titles(&list), ["c"]);
+    let tags = app.send(Send::get("/api/tags").cookie(&token)).await;
+    assert_eq!(tags.body["tags"], json!([{"tag": "z", "count": 1}]));
+}
+
+#[tokio::test]
+async fn a_bulk_request_with_an_unknown_or_foreign_id_changes_nothing() {
+    let app = TestApp::running().await;
+    let henry = app.sign_in_as("henry").await;
+    let mei = app.sign_in_as("mei").await;
+    let mine = create_bookmark(&app, &henry, "mine", &[]).await;
+    let theirs = create_bookmark(&app, &mei, "theirs", &[]).await;
+
+    for action in [
+        json!({"action": "delete"}),
+        json!({"action": "add_tags", "tags": ["x"]}),
+        json!({"action": "remove_tags", "tags": ["x"]}),
+    ] {
+        let mut body = action;
+        body["ids"] = json!([mine["id"], theirs["id"]]);
+        assert_eq!(
+            bulk(&app, &henry, body.clone()).await.status,
+            StatusCode::NOT_FOUND
+        );
+        body["ids"] = json!([mine["id"], 99999]);
+        assert_eq!(bulk(&app, &henry, body).await.status, StatusCode::NOT_FOUND);
+    }
+    let henrys = app.send(Send::get("/api/bookmarks").cookie(&henry)).await;
+    assert_eq!(titles(&henrys), ["mine"]);
+    assert_eq!(tags_of(&henrys, "mine"), Vec::<String>::new());
+    let meis = app.send(Send::get("/api/bookmarks").cookie(&mei)).await;
+    assert_eq!(titles(&meis), ["theirs"]);
+}
+
+#[tokio::test]
+async fn bulk_rejects_bad_requests_with_a_reason() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let a = create_bookmark(&app, &token, "a", &[]).await;
+    let too_many: Vec<i64> = (1..=201).collect();
+    let long_tag = "x".repeat(51);
+
+    for body in [
+        json!({"ids": [], "action": "delete"}),
+        json!({"ids": too_many, "action": "delete"}),
+        json!({"ids": [a["id"]], "action": "add_tags", "tags": []}),
+        json!({"ids": [a["id"]], "action": "add_tags", "tags": [" "]}),
+        json!({"ids": [a["id"]], "action": "remove_tags", "tags": [long_tag]}),
+    ] {
+        let reply = bulk(&app, &token, body.clone()).await;
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(reply.body["error"].is_string());
+    }
+    let unknown = bulk(&app, &token, json!({"ids": [a["id"]], "action": "explode"})).await;
+    assert!(unknown.status.is_client_error());
+    let missing_tags = bulk(
+        &app,
+        &token,
+        json!({"ids": [a["id"]], "action": "add_tags"}),
+    )
+    .await;
+    assert!(missing_tags.status.is_client_error());
+    let exactly_max: Vec<i64> = (1..=200).collect();
+    let at_limit = bulk(
+        &app,
+        &token,
+        json!({"ids": exactly_max, "action": "delete"}),
+    )
+    .await;
+    assert_eq!(at_limit.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn bulk_add_that_would_exceed_the_tag_limit_changes_nothing() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let full_tags: Vec<String> = (0..20).map(|n| format!("t{n}")).collect();
+    let full_refs: Vec<&str> = full_tags.iter().map(String::as_str).collect();
+    let full = create_bookmark(&app, &token, "full", &full_refs).await;
+    let empty = create_bookmark(&app, &token, "empty", &[]).await;
+
+    let reply = bulk(
+        &app,
+        &token,
+        json!({"ids": [empty["id"], full["id"]], "action": "add_tags", "tags": ["one-more"]}),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    let list = app.send(Send::get("/api/bookmarks").cookie(&token)).await;
+    assert_eq!(tags_of(&list, "empty"), Vec::<String>::new());
+    assert_eq!(tags_of(&list, "full").len(), 20);
 }
 
 #[tokio::test]
