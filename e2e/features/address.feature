@@ -44,3 +44,25 @@ Feature: The address bar keeps the view
     Then the address hash is ""
     And the search box holds ""
     And the list shows "Other"
+
+  Scenario: Clicking the bkd brand clears the hash and shows the default list
+    When I open the site
+    And I choose the tag "stripes"
+    And I search for "zeb"
+    Then the address hash is "/?q=zeb&tag=stripes"
+    When I mark the page
+    And I click the bkd brand
+    Then the page was not reloaded
+    Then the address hash is ""
+    And the search box holds ""
+    And the list shows "Other"
+
+  Scenario: Clicking the bkd brand leaves the Account page
+    When I open the site
+    And I open Account
+    Then the address hash is "/account"
+    When I mark the page
+    And I click the bkd brand
+    Then the page was not reloaded
+    Then the address hash is ""
+    And the list shows "Zebra"

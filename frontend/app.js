@@ -1327,6 +1327,15 @@ document.addEventListener('keydown', (e) => {
 window.matchMedia('(max-width: 760px)').addEventListener('change', (e) => { if (!e.matches) setMenu(false); });
 $('search-form').addEventListener('submit', (e) => e.preventDefault());
 window.addEventListener('popstate', () => { if (state.user) restoreFromHash(); });
+// The brand links to "/". Following it from "/#/..." would be a full page load, so reset the state
+// in place instead; a modified click still opens the link in a new tab.
+document.querySelectorAll('.brand a').forEach((link) => link.addEventListener('click', (e) => {
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+  e.preventDefault();
+  if (!state.user) return;
+  if (location.hash) history.pushState(null, '', location.pathname + location.search);
+  restoreFromHash();
+}));
 
 let searchTimer;
 $('search').addEventListener('input', (e) => {

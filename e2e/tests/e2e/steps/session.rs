@@ -253,6 +253,30 @@ async fn open_account(world: &mut BkdWorld) -> Result<()> {
     Ok(())
 }
 
+#[when("I mark the page")]
+async fn mark_page(world: &mut BkdWorld) -> Result<()> {
+    world
+        .driver()?
+        .execute("window.pageMarker = true", vec![])
+        .await?;
+    Ok(())
+}
+
+#[then("the page was not reloaded")]
+async fn page_not_reloaded(world: &mut BkdWorld) -> Result<()> {
+    let marker = world
+        .driver()?
+        .execute("return window.pageMarker === true", vec![])
+        .await?;
+    ensure!(marker.json().as_bool() == Some(true), "the page reloaded");
+    Ok(())
+}
+
+#[when("I click the bkd brand")]
+async fn click_brand(world: &mut BkdWorld) -> Result<()> {
+    world.click("#sidebar .brand a").await
+}
+
 #[when(expr = "I change my password from {string} to {string}")]
 async fn change_password(world: &mut BkdWorld, current: String, new: String) -> Result<()> {
     submit_password_form(world, &current, &new, &new).await

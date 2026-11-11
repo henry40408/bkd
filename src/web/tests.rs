@@ -1541,6 +1541,17 @@ async fn the_page_has_no_inline_script_or_style_that_the_policy_would_block() {
 }
 
 #[tokio::test]
+async fn the_brand_links_home() {
+    let app = TestApp::running().await;
+    let (_, _, html) = fetch_page(&app, "/").await;
+    assert_eq!(
+        html.matches(r#"<p class="brand"><a href="/">bkd</a></p>"#)
+            .count(),
+        2
+    );
+}
+
+#[tokio::test]
 async fn unknown_paths_are_not_found() {
     let app = TestApp::running().await;
     let (status, _, _) = fetch_page(&app, "/nope").await;
