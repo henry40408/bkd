@@ -1,10 +1,16 @@
-//! First-run setup, sign-in and sign-out.
+//! First-run setup, sign-in, sign-out, the address bar and the account's own pages.
 
 use anyhow::{Context, Result, ensure};
 use bkd_e2e::api::{PASSWORD, SESSION_COOKIE};
 use bkd_e2e::world::BkdWorld;
 use cucumber::{given, then, when};
 use thirtyfour::prelude::*;
+
+const LOGIN_FORM: &str = "form[action='/login']";
+const SETUP_FORM: &str = "form[action='/setup']";
+const CONFIRM_FORM: &str = "form[action='/confirm']";
+const PASSWORD_FORM: &str = ".password-form";
+const SEARCH_BOX: &str = "[role=search] input[name=q]";
 
 #[given(expr = "the admin {string} exists")]
 async fn admin_exists(world: &mut BkdWorld, username: String) -> Result<()> {
@@ -34,11 +40,7 @@ async fn open_the_site(world: &mut BkdWorld) -> Result<()> {
 
 #[when(expr = "I open the site at {string}")]
 async fn open_the_site_at(world: &mut BkdWorld, path: String) -> Result<()> {
-    world.goto(&path).await?;
-    // The sign-in step already loaded the page, and a new fragment alone does not reload it.
-    // This is a link opened cold, so the page must start again.
-    world.driver()?.refresh().await?;
-    Ok(())
+    world.goto(&path).await
 }
 
 #[when("I reload the page")]
@@ -53,50 +55,46 @@ async fn go_back(world: &mut BkdWorld) -> Result<()> {
     Ok(())
 }
 
-/// The page writes the hash after a click or a keystroke, so the check waits for it.
-#[then(expr = "the address hash is {string}")]
-async fn address_hash_is(world: &mut BkdWorld, expected: String) -> Result<()> {
-    let mut actual = String::new();
-    for _ in 0..30 {
-        let url = world.driver()?.current_url().await?;
-        actual = url.fragment().unwrap_or_default().to_owned();
-        if actual == expected {
-            return Ok(());
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    anyhow::bail!("the address hash is {actual:?}")
+/// The script changes the address after a click, so the check waits for it.
+#[then(expr = "the address is {string}")]
+async fn address_is(world: &mut BkdWorld, expected: String) -> Result<()> {
+    let driver = world.driver()?;
+    let last_seen = std::cell::RefCell::new(String::new());
+    world
+        .browser()?
+        .eventually(&format!("the address is {expected:?}"), || async {
+            let url = driver.current_url().await?;
+            let mut address = url.path().to_owned();
+            if let Some(query) = url.query() {
+                address = format!("{address}?{query}");
+            }
+            let matches = address == expected;
+            *last_seen.borrow_mut() = address;
+            Ok(matches)
+        })
+        .await
+        .map_err(|error| error.context(format!("the address was {:?}", last_seen.borrow())))
 }
 
 #[then(expr = "the search box holds {string}")]
 async fn search_box_holds(world: &mut BkdWorld, expected: String) -> Result<()> {
-    let mut actual = String::new();
-    for _ in 0..30 {
-        actual = world
-            .element("#search")
-            .await?
-            .value()
-            .await?
-            .unwrap_or_default();
-        if actual == expected {
-            return Ok(());
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    anyhow::bail!("the search box holds {actual:?}")
+    let field = world.element(SEARCH_BOX).await?;
+    let actual = field.value().await?.unwrap_or_default();
+    ensure!(actual == expected, "the search box holds {actual:?}");
+    Ok(())
 }
 
 #[then("I see the setup page")]
 #[then("I still see the setup page")]
 async fn setup_page(world: &mut BkdWorld) -> Result<()> {
-    world.element("#setup-form").await?;
+    world.element(SETUP_FORM).await?;
     Ok(())
 }
 
 #[then("I see the sign-in page")]
 #[then("I still see the sign-in page")]
 async fn sign_in_page(world: &mut BkdWorld) -> Result<()> {
-    world.element("#login-form").await?;
+    world.element(LOGIN_FORM).await?;
     Ok(())
 }
 
@@ -118,17 +116,25 @@ async fn try_create_first_admin(
 }
 
 async fn submit_setup_form(world: &BkdWorld, token: &str, username: &str) -> Result<()> {
-    world.fill("#setup-form input[name=token]", token).await?;
-    world.fill("#setup-form input[name=name]", username).await?;
     world
-        .fill("#setup-form input[name=password]", PASSWORD)
+        .fill(&format!("{SETUP_FORM} input[name=token]"), token)
         .await?;
-    world.click("#setup-form button[type=submit]").await
+    world
+        .fill(&format!("{SETUP_FORM} input[name=username]"), username)
+        .await?;
+    world
+        .fill(&format!("{SETUP_FORM} input[name=password]"), PASSWORD)
+        .await?;
+    world
+        .click(&format!("{SETUP_FORM} button[type=submit]"))
+        .await
 }
 
 #[when(expr = "I sign in as {string} with the right password")]
 async fn sign_in_right_password(world: &mut BkdWorld, username: String) -> Result<()> {
     submit_login_form(world, &username, PASSWORD).await?;
+    // Navigating away before the sign-in lands would cancel it.
+    super::text_contains(world, ".me strong", &username).await?;
     world.me = Some(username);
     Ok(())
 }
@@ -145,60 +151,66 @@ async fn sign_in_in_browser(world: &mut BkdWorld, username: String) -> Result<()
     world.driver()?.delete_all_cookies().await?;
     world.goto("/").await?;
     submit_login_form(world, &username, PASSWORD).await?;
+    // Navigating away before the sign-in lands would cancel it.
+    super::text_contains(world, ".me strong", &username).await?;
     world.me = Some(username);
     Ok(())
 }
 
 async fn submit_login_form(world: &BkdWorld, username: &str, password: &str) -> Result<()> {
-    world.fill("#login-form input[name=name]", username).await?;
     world
-        .fill("#login-form input[name=password]", password)
+        .fill(&format!("{LOGIN_FORM} input[name=username]"), username)
         .await?;
-    world.click("#login-form button[type=submit]").await
+    world
+        .fill(&format!("{LOGIN_FORM} input[name=password]"), password)
+        .await?;
+    world
+        .click(&format!("{LOGIN_FORM} button[type=submit]"))
+        .await
 }
 
 #[when(expr = "I press Enter twice to sign in as {string}")]
 async fn submit_sign_in_twice(world: &mut BkdWorld, username: String) -> Result<()> {
+    let password_field = format!("{LOGIN_FORM} input[name=password]");
     world
-        .fill("#login-form input[name=name]", &username)
+        .fill(&format!("{LOGIN_FORM} input[name=username]"), &username)
         .await?;
-    world
-        .fill("#login-form input[name=password]", PASSWORD)
-        .await?;
-    super::press_enter_twice(world, "#login-form input[name=password]").await?;
+    world.fill(&password_field, PASSWORD).await?;
+    super::press_enter_twice(world, &password_field).await?;
     world.me = Some(username);
     Ok(())
 }
 
-/// What expiry or a server-side sign-out looks like to the page: its next call gets a 401.
-#[when("my session cookie disappears")]
-async fn session_cookie_disappears(world: &mut BkdWorld) -> Result<()> {
-    world.driver()?.delete_cookie(SESSION_COOKIE).await?;
+/// What expiry or a server-side sign-out looks like to the page: the cookie is still sent,
+/// but names no session. A missing cookie would look like a first visit instead.
+#[when("my session stops working")]
+async fn session_stops_working(world: &mut BkdWorld) -> Result<()> {
+    let mut cookie = Cookie::new(SESSION_COOKIE, "ended");
+    cookie.set_path("/");
+    world.driver()?.add_cookie(cookie).await?;
     Ok(())
 }
 
 #[when("I sign out")]
 async fn sign_out(world: &mut BkdWorld) -> Result<()> {
-    world.click("#me button").await
+    world.click(".me button").await
 }
 
 #[then(expr = "I am signed in as {string}")]
 async fn signed_in_as(world: &mut BkdWorld, username: String) -> Result<()> {
-    super::text_contains(world, "#me strong", &username).await
+    super::text_contains(world, ".me strong", &username).await
 }
 
 #[then("I can open Manage users")]
 async fn can_open_manage_users(world: &mut BkdWorld) -> Result<()> {
-    world
-        .element_by(By::XPath(super::MANAGE_USERS_LINK))
-        .await?;
+    world.element(super::MANAGE_USERS_LINK).await?;
     Ok(())
 }
 
 #[then(expr = "I see the error {string}")]
 async fn sees_error(world: &mut BkdWorld, expected: String) -> Result<()> {
     let driver = world.driver()?;
-    world
+    let outcome = world
         .browser()?
         .eventually(&format!("an error says {expected:?}"), || async {
             for alert in driver.find_all(By::Css("[role=alert]")).await? {
@@ -214,24 +226,23 @@ async fn sees_error(world: &mut BkdWorld, expected: String) -> Result<()> {
             }
             Ok(false)
         })
-        .await
-}
-
-#[then("no toast is shown")]
-async fn no_toast(world: &mut BkdWorld) -> Result<()> {
-    // A toast is written after the next paint, so look for a while, not once.
-    for _ in 0..5 {
-        let text = world.driver()?.find(By::Id("toast")).await?.text().await?;
-        ensure!(text.is_empty(), "a toast says {text:?}");
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        .await;
+    if outcome.is_err() {
+        let body = driver.find(By::Css("body")).await?.text().await?;
+        let url = driver.current_url().await?;
+        return outcome.with_context(|| format!("{url} shows: {body}"));
     }
-    Ok(())
+    outcome
 }
 
-#[then(expr = "the sign-in error says exactly {string}")]
-async fn sign_in_error_says_exactly(world: &mut BkdWorld, expected: String) -> Result<()> {
-    let text = world.element("#login-error").await?.text().await?;
-    ensure!(text.trim() == expected, "the sign-in error says {text:?}");
+#[then(expr = "the sign-in page says exactly {string}")]
+async fn sign_in_page_says_exactly(world: &mut BkdWorld, expected: String) -> Result<()> {
+    let text = world
+        .element(&format!("{LOGIN_FORM} .notice"))
+        .await?
+        .text()
+        .await?;
+    ensure!(text.trim() == expected, "the sign-in page says {text:?}");
     Ok(())
 }
 
@@ -244,12 +255,8 @@ async fn no_query_string(world: &mut BkdWorld) -> Result<()> {
 
 #[when("I open Account")]
 async fn open_account(world: &mut BkdWorld) -> Result<()> {
-    world
-        .element_by(By::XPath("//*[@id='me']//a[text()='Account']"))
-        .await?
-        .click()
-        .await?;
-    world.element("#account-view").await?;
+    world.click(".me a[href='/account']").await?;
+    world.element(PASSWORD_FORM).await?;
     Ok(())
 }
 
@@ -298,45 +305,14 @@ async fn submit_password_form(
     new: &str,
     again: &str,
 ) -> Result<()> {
+    for (name, value) in [("current", current), ("new", new), ("again", again)] {
+        world
+            .fill(&format!("{PASSWORD_FORM} input[name={name}]"), value)
+            .await?;
+    }
     world
-        .fill("#password-form input[name=current]", current)
-        .await?;
-    world.fill("#password-form input[name=new]", new).await?;
-    world
-        .fill("#password-form input[name=again]", again)
-        .await?;
-    world.click("#password-form button[type=submit]").await
-}
-
-/// The form empties only after the server accepted the change.
-#[then("the password form is cleared")]
-async fn password_form_is_cleared(world: &mut BkdWorld) -> Result<()> {
-    let driver = world.driver()?;
-    world
-        .browser()?
-        .eventually("the password form is empty", || async {
-            let field = driver
-                .find(By::Css("#password-form input[name=current]"))
-                .await?;
-            Ok(field.value().await?.unwrap_or_default().is_empty())
-        })
+        .click(&format!("{PASSWORD_FORM} button[type=submit]"))
         .await
-}
-
-#[then("the browser reports no policy violation")]
-async fn no_policy_violation(world: &mut BkdWorld) -> Result<()> {
-    // The violation event fires asynchronously after the rejected submission.
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    let seen = world
-        .driver()?
-        .execute("return window.cspViolations", vec![])
-        .await?;
-    let violations = seen
-        .json()
-        .as_array()
-        .context("the violation watcher is gone: the page reloaded")?;
-    ensure!(violations.is_empty(), "the browser reported {violations:?}");
-    Ok(())
 }
 
 #[given("I am also signed in on another browser")]
@@ -353,7 +329,7 @@ async fn browser_list_has_rows(world: &mut BkdWorld, expected: usize) -> Result<
     world
         .browser()?
         .eventually(&format!("the list has {expected} rows"), || async {
-            let rows = driver.find_all(By::Css("#session-list .user-row")).await?;
+            let rows = driver.find_all(By::Css(".session-list .user-row")).await?;
             Ok(rows.len() == expected)
         })
         .await
@@ -361,12 +337,14 @@ async fn browser_list_has_rows(world: &mut BkdWorld, expected: usize) -> Result<
 
 #[when("I sign out the other browser")]
 async fn sign_out_other_browser(world: &mut BkdWorld) -> Result<()> {
-    world.click("#session-list button").await
+    world.click(".session-list button").await
 }
 
 #[when("I sign out all other browsers")]
 async fn sign_out_all_other_browsers(world: &mut BkdWorld) -> Result<()> {
-    world.click("#sessions-others").await
+    world
+        .click("form[action='/account/sessions/revoke-others'] button")
+        .await
 }
 
 /// The server asks for the password again once the last one is five minutes old. Waiting
@@ -389,31 +367,37 @@ async fn confirmation_is_old(world: &mut BkdWorld) -> Result<()> {
 
 #[then("I am asked to confirm my password")]
 async fn asked_to_confirm(world: &mut BkdWorld) -> Result<()> {
-    world.element("#confirm-dialog[open]").await?;
+    world.element(CONFIRM_FORM).await?;
     Ok(())
 }
 
 #[when(expr = "I confirm my password with {string}")]
 async fn confirm_password(world: &mut BkdWorld, password: String) -> Result<()> {
     world
-        .fill("#confirm-form input[name=password]", &password)
+        .fill(&format!("{CONFIRM_FORM} input[name=password]"), &password)
         .await?;
-    world.click("#confirm-form button[type=submit]").await
+    world
+        .click(&format!("{CONFIRM_FORM} button[type=submit]"))
+        .await
 }
 
 #[when("I cancel the confirmation")]
 async fn cancel_confirmation(world: &mut BkdWorld) -> Result<()> {
-    world.click("#confirm-cancel").await
+    world.click(&format!("{CONFIRM_FORM} a.quiet-link")).await
 }
 
-#[then("the confirmation dialog is closed")]
-async fn confirmation_is_closed(world: &mut BkdWorld) -> Result<()> {
-    let driver = world.driver()?;
-    world
-        .browser()?
-        .eventually("the dialog is closed", || async {
-            let open = driver.find_all(By::Css("#confirm-dialog[open]")).await?;
-            Ok(open.is_empty())
-        })
-        .await
+#[then("the browser reports no policy violation")]
+async fn no_policy_violation(world: &mut BkdWorld) -> Result<()> {
+    // The violation event fires asynchronously after a rejected submission.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let seen = world
+        .driver()?
+        .execute("return window.cspViolations", vec![])
+        .await?;
+    let violations = seen
+        .json()
+        .as_array()
+        .context("the violation watcher is gone: the page reloaded")?;
+    ensure!(violations.is_empty(), "the browser reported {violations:?}");
+    Ok(())
 }

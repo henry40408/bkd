@@ -82,6 +82,14 @@ impl From<sqlx::Error> for PageError {
     }
 }
 
+/// The answer for an address no page has. The JSON API keeps the plain 404 it had before.
+pub async fn not_found_page(uri: axum::http::Uri) -> Response {
+    if uri.path() == "/api" || uri.path().starts_with("/api/") {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    PageError::not_found().into_response()
+}
+
 fn error_page(status: StatusCode, message: &str) -> Response {
     let content = html! {
         div.card {

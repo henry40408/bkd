@@ -68,6 +68,7 @@ pub fn router() -> Router<SharedState> {
             "/transfer/import",
             post(account_pages::import_submit).layer(account_pages::import_body_limit()),
         )
+        .fallback(support::not_found_page)
         .layer(middleware::from_fn(support::form_origin_required))
         .layer(middleware::from_fn(support::page_headers))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))

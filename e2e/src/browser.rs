@@ -86,6 +86,19 @@ impl Browser {
         Ok(())
     }
 
+    /// Switches page scripts on or off for the pages the browser opens from now on, to
+    /// see what the server-rendered pages do on their own.
+    pub async fn set_scripts_enabled(&self, enabled: bool) -> Result<()> {
+        self.driver
+            .cdp()
+            .send_raw(
+                "Emulation.setScriptExecutionDisabled",
+                serde_json::json!({ "value": !enabled }),
+            )
+            .await?;
+        Ok(())
+    }
+
     /// Signs the browser in without going through the login form.
     pub async fn adopt_session(&self, base_url: &str, token: &str) -> Result<()> {
         // A cookie can only be set for the page the browser is on.
