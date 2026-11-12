@@ -258,7 +258,8 @@ a.button.quiet-button.on { background: var(--ink); color: var(--paper); border-c
 button.danger-button { background: var(--danger); color: #fff; }
 .pager { display: flex; justify-content: space-between; gap: var(--s3); margin-top: var(--s5); }
 .bulk-form { margin: 0; }
-.bulk-panel button.quiet { border: 1px solid var(--rule); }
+.bulk-panel button { padding: var(--s2) var(--s3); border: 1px solid transparent; }
+.bulk-panel button.quiet { border-color: var(--rule); }
 .user-actions form, .user-row form { margin: 0; display: inline; }
 .user-row form button.quiet { padding: var(--s1) var(--s2); }
 .pick-box { cursor: pointer; }
