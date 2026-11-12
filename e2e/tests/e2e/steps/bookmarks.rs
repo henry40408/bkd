@@ -189,11 +189,19 @@ async fn am_asked(world: &mut BkdWorld, question: String) -> Result<()> {
 
 #[when(expr = "I search for {string}")]
 async fn search_for(world: &mut BkdWorld, query: String) -> Result<()> {
+    // The page may still be swapping in the previous answer, which makes the bar go stale.
+    let world = &*world;
     world
-        .fill(&format!("{SEARCH_BAR} input[name=q]"), &query)
-        .await?;
-    world
-        .click(&format!("{SEARCH_BAR} button[type=submit]"))
+        .browser()?
+        .eventually("the search bar takes the search", || async {
+            world
+                .fill(&format!("{SEARCH_BAR} input[name=q]"), &query)
+                .await?;
+            world
+                .click(&format!("{SEARCH_BAR} button[type=submit]"))
+                .await?;
+            Ok(true)
+        })
         .await
 }
 
