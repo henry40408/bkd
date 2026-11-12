@@ -4,7 +4,6 @@
 use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 
-const INDEX_HTML: &str = include_str!("../../frontend/index.html");
 const APP_CSS: &str = include_str!("../../frontend/app.css");
 const APP_JS: &str = include_str!("../../frontend/app.js");
 
@@ -12,10 +11,6 @@ const APP_JS: &str = include_str!("../../frontend/app.js");
 // so a stray `<script>` injected through bookmark text would still not execute.
 const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; script-src 'self'; style-src 'self'; \
      connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
-
-pub async fn index() -> Response {
-    asset("text/html; charset=utf-8", INDEX_HTML)
-}
 
 pub async fn stylesheet() -> Response {
     asset("text/css; charset=utf-8", APP_CSS)

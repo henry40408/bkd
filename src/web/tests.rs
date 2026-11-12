@@ -1513,7 +1513,7 @@ async fn fetch_page(app: &TestApp, uri: &str) -> (StatusCode, HeaderMap, String)
 async fn the_front_end_is_served_with_a_strict_content_security_policy() {
     let app = TestApp::running().await;
     for (uri, content_type) in [
-        ("/", "text/html"),
+        ("/login", "text/html"),
         ("/app.css", "text/css"),
         ("/app.js", "text/javascript"),
     ] {
@@ -1532,8 +1532,8 @@ async fn the_front_end_is_served_with_a_strict_content_security_policy() {
 #[tokio::test]
 async fn the_page_has_no_inline_script_or_style_that_the_policy_would_block() {
     let app = TestApp::running().await;
-    let (_, _, html) = fetch_page(&app, "/").await;
-    assert!(html.contains(r#"<script src="/app.js"></script>"#));
+    let (_, _, html) = fetch_page(&app, "/login").await;
+    assert!(html.contains(r#"<script src="/app.js" defer></script>"#));
     assert!(!html.contains("<style"));
     assert!(!html.contains(" style="));
     assert!(!html.contains("onclick="));
@@ -1543,9 +1543,13 @@ async fn the_page_has_no_inline_script_or_style_that_the_policy_would_block() {
 #[tokio::test]
 async fn the_brand_links_home() {
     let app = TestApp::running().await;
-    let (_, _, html) = fetch_page(&app, "/").await;
+    let token = app.sign_in_as("henry").await;
+    let reply = app.send(Send::get("/").cookie(&token)).await;
+    assert_eq!(reply.status, StatusCode::OK);
     assert_eq!(
-        html.matches(r#"<p class="brand"><a href="/">bkd</a></p>"#)
+        reply
+            .text
+            .matches(r#"<p class="brand"><a href="/">bkd</a></p>"#)
             .count(),
         2
     );
@@ -2223,4 +2227,301 @@ async fn an_account_made_by_the_proxy_cannot_sign_in_with_a_password() {
         let reply = app.login("mei", password).await;
         assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{password:?}");
     }
+}
+
+// -------------------------------------------------------------- server-rendered pages
+
+fn form_post(uri: &str, body: &str) -> Send {
+    Send::new(Method::POST, uri)
+        .raw("application/x-www-form-urlencoded", body)
+        .origin("http://bkd.test")
+}
+
+fn location(reply: &Reply) -> &str {
+    reply.headers[header::LOCATION].to_str().unwrap()
+}
+
+fn password_field() -> String {
+    format!("password={}", PASSWORD.replace(' ', "+"))
+}
+
+async fn sign_in_as_admin(app: &TestApp) -> String {
+    app.add_user("root", true).await;
+    session_token(&app.login("root", PASSWORD).await)
+}
+
+async fn save_through_the_form(app: &TestApp, token: &str, fields: &str) -> Reply {
+    app.send(form_post("/bookmarks", fields).cookie(token))
+        .await
+}
+
+#[tokio::test]
+async fn the_list_sends_anonymous_visitors_to_sign_in() {
+    let app = TestApp::running().await;
+    let reply = app.send(Send::get("/")).await;
+    assert_eq!(reply.status, StatusCode::SEE_OTHER);
+    assert_eq!(location(&reply), "/login");
+}
+
+#[tokio::test]
+async fn signing_in_through_the_form_sets_the_cookie_and_goes_to_the_list() {
+    let app = TestApp::running().await;
+    app.add_user("henry", false).await;
+    let body = format!("username=henry&{}", password_field());
+    let reply = app.send(form_post("/login", &body)).await;
+    assert_eq!(reply.status, StatusCode::SEE_OTHER);
+    assert_eq!(location(&reply), "/");
+    assert!(reply.headers.contains_key(header::SET_COOKIE));
+}
+
+#[tokio::test]
+async fn a_wrong_password_shows_the_form_again_with_the_reason() {
+    let app = TestApp::running().await;
+    app.add_user("henry", false).await;
+    let reply = app
+        .send(form_post("/login", "username=henry&password=nope"))
+        .await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    assert!(reply.text.contains(r#"role="alert""#));
+    assert!(reply.text.contains(r#"value="henry""#));
+    assert!(!reply.headers.contains_key(header::SET_COOKIE));
+}
+
+#[tokio::test]
+async fn a_form_post_without_a_matching_origin_is_refused() {
+    let app = TestApp::running().await;
+    app.add_user("henry", false).await;
+    let fields = format!("username=henry&{}", password_field());
+    for origin in [None, Some("null"), Some("http://evil.test")] {
+        let mut request = Send::new(Method::POST, "/login")
+            .raw("application/x-www-form-urlencoded", fields.clone());
+        if let Some(origin) = origin {
+            request = request.origin(origin);
+        }
+        let reply = app.send(request).await;
+        assert_eq!(reply.status, StatusCode::FORBIDDEN, "{origin:?}");
+        assert!(!reply.headers.contains_key(header::SET_COOKIE));
+    }
+}
+
+#[tokio::test]
+async fn pages_allow_only_this_site_to_post_and_carry_no_inline_code() {
+    let app = TestApp::running().await;
+    let reply = app.send(Send::get("/login")).await;
+    assert_eq!(reply.headers[header::REFERRER_POLICY], "same-origin");
+    let policy = reply.headers[header::CONTENT_SECURITY_POLICY]
+        .to_str()
+        .unwrap();
+    assert!(policy.contains("form-action 'self'"));
+    assert!(!policy.contains("unsafe-inline"));
+    assert!(!reply.text.contains("<style"));
+    assert!(!reply.text.contains(" style="));
+    assert!(!reply.text.contains("onclick="));
+}
+
+#[tokio::test]
+async fn a_bookmark_saved_through_the_form_is_listed_and_search_marks_the_match() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let saved = save_through_the_form(
+        &app,
+        &token,
+        "url=https%3A%2F%2Fexample.com%2Fa&title=Learning+Rust&note=&tags=rust%2C+reading",
+    )
+    .await;
+    assert_eq!(saved.status, StatusCode::SEE_OTHER);
+
+    let list = app.send(Send::get("/").cookie(&token)).await;
+    assert!(list.text.contains("Learning Rust"));
+    assert!(list.text.contains("example.com"));
+    assert!(!list.text.contains("<mark>"));
+
+    let found = app.send(Send::get("/?q=rust").cookie(&token)).await;
+    assert!(found.text.contains("Learning <mark>Rust</mark>"));
+    let missing = app.send(Send::get("/?q=zebra").cookie(&token)).await;
+    assert!(!missing.text.contains("Learning"));
+}
+
+#[tokio::test]
+async fn bookmark_text_is_escaped_on_the_page() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    save_through_the_form(
+        &app,
+        &token,
+        "url=https%3A%2F%2Fexample.com&title=%3Cscript%3Ealert(1)%3C%2Fscript%3E&note=%22%3E%3Cimg%3E&tags=",
+    )
+    .await;
+    let list = app.send(Send::get("/").cookie(&token)).await;
+    assert!(!list.text.contains("<script>alert"));
+    assert!(!list.text.contains("<img>"));
+    assert!(list.text.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+}
+
+#[tokio::test]
+async fn a_refused_bookmark_form_is_shown_again_with_what_was_typed() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let reply = save_through_the_form(&app, &token, "url=not+a+url&title=Mine&note=&tags=").await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    assert!(reply.text.contains(r#"role="alert""#));
+    assert!(reply.text.contains(r#"value="Mine""#));
+}
+
+#[tokio::test]
+async fn a_bookmark_can_be_edited_and_deleted_without_a_script() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    save_through_the_form(
+        &app,
+        &token,
+        "url=https%3A%2F%2Fexample.com&title=Old&note=&tags=",
+    )
+    .await;
+    let list = app.send(Send::get("/").cookie(&token)).await;
+    assert!(list.text.contains("/bookmarks/1/edit"));
+
+    let form = app
+        .send(Send::get("/bookmarks/1/edit").cookie(&token))
+        .await;
+    assert!(form.text.contains(r#"value="Old""#));
+    let edit = form_post(
+        "/bookmarks/1/edit",
+        "url=https%3A%2F%2Fexample.com&title=New&note=&tags=",
+    );
+    let saved = app.send(edit.cookie(&token)).await;
+    assert_eq!(saved.status, StatusCode::SEE_OTHER);
+    let list = app.send(Send::get("/").cookie(&token)).await;
+    assert!(list.text.contains("New"));
+
+    let confirm = app
+        .send(Send::get("/bookmarks/1/delete").cookie(&token))
+        .await;
+    assert_eq!(confirm.status, StatusCode::OK);
+    assert!(confirm.text.contains("Delete this bookmark?"));
+    let deleted = app
+        .send(form_post("/bookmarks/delete", "id=1").cookie(&token))
+        .await;
+    assert_eq!(deleted.status, StatusCode::SEE_OTHER);
+    let list = app.send(Send::get("/").cookie(&token)).await;
+    assert!(!list.text.contains("New"));
+}
+
+#[tokio::test]
+async fn select_mode_offers_checkboxes_and_the_bulk_form_adds_tags() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    save_through_the_form(
+        &app,
+        &token,
+        "url=https%3A%2F%2Fa.test&title=Aaa&note=&tags=",
+    )
+    .await;
+    save_through_the_form(
+        &app,
+        &token,
+        "url=https%3A%2F%2Fb.test&title=Bbb&note=&tags=",
+    )
+    .await;
+
+    let plain = app.send(Send::get("/").cookie(&token)).await;
+    assert!(!plain.text.contains(r#"name="id-1""#));
+    let selecting = app.send(Send::get("/?select=1").cookie(&token)).await;
+    assert!(selecting.text.contains(r#"name="id-1""#));
+    assert!(selecting.text.contains(r#"name="id-2""#));
+
+    let context = "q=&tag=&status=&page=1";
+    let nothing = form_post(
+        "/bookmarks/bulk",
+        &format!("action=add_tags&tags=x&{context}"),
+    );
+    let nothing = app.send(nothing.cookie(&token)).await;
+    assert_eq!(nothing.status, StatusCode::SEE_OTHER);
+    assert!(location(&nothing).contains("notice=nothing-selected"));
+
+    let pick = form_post(
+        "/bookmarks/bulk",
+        &format!("id-1=1&action=add_tags&tags=picked&{context}"),
+    );
+    let done = app.send(pick.cookie(&token)).await;
+    assert_eq!(done.status, StatusCode::SEE_OTHER);
+    let tagged = app.send(Send::get("/?tag=picked").cookie(&token)).await;
+    assert!(tagged.text.contains("Aaa"));
+    assert!(!tagged.text.contains("Bbb"));
+}
+
+#[tokio::test]
+async fn the_pager_links_to_older_bookmarks() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    for number in 0..60 {
+        let fields = format!("url=https%3A%2F%2Fsite{number}.test&title=Item{number}&note=&tags=");
+        save_through_the_form(&app, &token, &fields).await;
+    }
+    let first = app.send(Send::get("/").cookie(&token)).await;
+    assert!(first.text.contains(r#"rel="next""#));
+    assert!(!first.text.contains(r#"rel="prev""#));
+    let second = app.send(Send::get("/?page=2").cookie(&token)).await;
+    assert!(second.text.contains(r#"rel="prev""#));
+}
+
+#[tokio::test]
+async fn managing_users_needs_an_admin_and_a_recent_password() {
+    let app = TestApp::running().await;
+    let member = app.sign_in_as("henry").await;
+    let refused = app.send(Send::get("/users").cookie(&member)).await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN);
+
+    let admin = sign_in_as_admin(&app).await;
+    let page = app.send(Send::get("/users").cookie(&admin)).await;
+    assert_eq!(page.status, StatusCode::OK);
+    make_sessions_stale(&app).await;
+    let change = form_post("/users/1/role", "is_admin=true");
+    let change = app.send(change.cookie(&admin)).await;
+    assert_eq!(change.status, StatusCode::SEE_OTHER);
+    assert_eq!(location(&change), "/confirm");
+
+    let confirm = form_post("/confirm", &password_field());
+    let confirmed = app.send(confirm.cookie(&admin)).await;
+    assert_eq!(confirmed.status, StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn the_account_page_lists_this_browser_and_signing_out_ends_the_session() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let page = app.send(Send::get("/account").cookie(&token)).await;
+    assert!(page.text.contains("This browser"));
+
+    let out = app.send(form_post("/logout", "").cookie(&token)).await;
+    assert_eq!(out.status, StatusCode::SEE_OTHER);
+    let after = app.send(Send::get("/").cookie(&token)).await;
+    assert_eq!(location(&after), "/login");
+}
+
+#[tokio::test]
+async fn a_bookmark_file_can_be_imported_through_the_upload_form() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let body = format!(
+        "--XBOUNDARYX\r\nContent-Disposition: form-data; name=\"file\"; filename=\"b.html\"\r\n\
+         Content-Type: text/html\r\n\r\n{FIREFOX_FILE}\r\n--XBOUNDARYX--\r\n"
+    );
+    let upload = Send::new(Method::POST, "/transfer/import")
+        .raw("multipart/form-data; boundary=XBOUNDARYX", body)
+        .origin("http://bkd.test")
+        .cookie(&token);
+    let reply = app.send(upload).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert!(reply.text.contains("Added "));
+}
+
+#[tokio::test]
+async fn a_huge_page_number_does_not_overflow() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let reply = app
+        .send(Send::get("/?page=4294967295").cookie(&token))
+        .await;
+    assert_eq!(reply.status, StatusCode::OK);
 }

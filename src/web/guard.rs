@@ -196,8 +196,11 @@ pub async fn security_headers(
             "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
         ),
     ];
+    // A page route sets its own `Referrer-Policy` and keeps it.
     for (name, value) in fixed {
-        headers.insert(name, HeaderValue::from_static(value));
+        headers
+            .entry(name)
+            .or_insert(HeaderValue::from_static(value));
     }
     if state.secure_cookies {
         headers.insert(

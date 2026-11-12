@@ -72,6 +72,35 @@ impl Filter {
     }
 }
 
+/// The part of a bookmark a page is about to show, to pick which terms to highlight.
+#[derive(Debug, Clone, Copy)]
+pub enum Highlight<'a> {
+    Title,
+    Url,
+    Note,
+    /// One tag: a `tag:` term matches only a tag equal to it.
+    Tag(&'a str),
+}
+
+impl Filter {
+    /// The text of the terms that matched in `part`, for the page to mark.
+    pub fn highlights(&self, part: Highlight<'_>) -> Vec<String> {
+        self.terms
+            .iter()
+            .filter(|term| !term.negated)
+            .filter(|term| match (term.field, part) {
+                (Field::Any, _)
+                | (Field::Title, Highlight::Title)
+                | (Field::Url, Highlight::Url)
+                | (Field::Note, Highlight::Note) => true,
+                (Field::Tag, Highlight::Tag(tag)) => term.text.trim().to_lowercase() == tag,
+                _ => false,
+            })
+            .map(|term| term.text.clone())
+            .collect()
+    }
+}
+
 impl Field {
     fn from_prefix(name: &str) -> Option<Self> {
         match name.to_lowercase().as_str() {
