@@ -15,6 +15,7 @@ use super::view::with_query;
 use crate::auth::session::SessionUser;
 use crate::bookmarks::{self, LinkCount, TagCount};
 use crate::web::SharedState;
+use crate::web::cookie;
 use crate::web::error::ApiError;
 
 // Forms post to this origin only. A page has no inline script or style, as the API's
@@ -28,6 +29,12 @@ const PAGE_CONTENT_SECURITY_POLICY: &str = "default-src 'none'; script-src 'self
 pub enum PageError {
     /// Nobody is signed in.
     LoginRequired,
+    /// A page was asked for without a session; `next` is where to go after signing in.
+    /// `session_ended` is true only when a session cookie came with the request.
+    SignInAgain {
+        next: Option<String>,
+        session_ended: bool,
+    },
     /// The password must be typed again before this admin change.
     ReauthRequired,
     Failed(StatusCode, String),
@@ -91,6 +98,10 @@ impl IntoResponse for PageError {
     fn into_response(self) -> Response {
         match self {
             Self::LoginRequired => Redirect::to("/login").into_response(),
+            Self::SignInAgain {
+                next,
+                session_ended,
+            } => Redirect::to(&sign_in_again_href(next.as_deref(), session_ended)).into_response(),
             Self::ReauthRequired => Redirect::to("/confirm").into_response(),
             Self::Failed(status, message) => error_page(status, &message),
             Self::TooManyRequests(wait) => {
@@ -123,11 +134,54 @@ where
     type Rejection = PageError;
 
     async fn from_request_parts(parts: &mut Parts, state: &SharedState) -> Result<Self, PageError> {
-        T::from_request_parts(parts, state)
-            .await
-            .map(Self)
-            .map_err(PageError::from)
+        match T::from_request_parts(parts, state).await {
+            Ok(value) => Ok(Self(value)),
+            // A first visit sends no cookie; only a cookie that no longer works means a
+            // session ended.
+            Err(ApiError::Unauthorized) => Err(PageError::SignInAgain {
+                next: return_path(parts),
+                session_ended: cookie::read_token(&parts.headers, state.secure_cookies).is_some(),
+            }),
+            Err(error) => Err(PageError::from(error)),
+        }
     }
+}
+
+/// Where to come back to after signing in. Only a page that is read can be asked for
+/// again; a refused form post has no address to return to.
+fn return_path(parts: &Parts) -> Option<String> {
+    if parts.method != axum::http::Method::GET {
+        return None;
+    }
+    let path = parts.uri.path_and_query()?.as_str();
+    same_site_path(path).map(str::to_owned)
+}
+
+fn sign_in_again_href(next: Option<&str>, session_ended: bool) -> String {
+    let mut pairs = Vec::new();
+    if let Some(next) = next {
+        pairs.push(("next", next));
+    }
+    if session_ended {
+        pairs.push(("notice", "session-ended"));
+    }
+    with_query("/login", &pairs)
+}
+
+/// `value` when it is a path on this site, so that a link or redirect built from it can
+/// not lead to another one. A scheme, a `//` host, a backslash (which browsers read as
+/// `/`) and control characters are all refused.
+pub fn same_site_path(value: &str) -> Option<&str> {
+    let safe = value.starts_with('/')
+        && !value.starts_with("//")
+        && !value.contains('\\')
+        && !value.chars().any(char::is_control);
+    safe.then_some(value)
+}
+
+/// `value` as a same-site path, else the list.
+pub fn path_or_home(value: Option<&str>) -> String {
+    value.and_then(same_site_path).unwrap_or("/").to_owned()
 }
 
 /// A page that knows how to draw itself.
@@ -172,6 +226,7 @@ pub fn redirect_keeping_cookie(api_response: &Response, to: &str) -> Response {
 
 /// A redirect that carries a fixed notice key, which the target page turns into text.
 pub fn redirect_with_notice(path: &str, notice: Notice) -> Response {
+    // `path` may carry a query already, such as the list the person came from.
     Redirect::to(&with_query(path, &[("notice", notice.key())])).into_response()
 }
 
@@ -383,6 +438,28 @@ mod tests {
             Some("http://evil.test"),
             "bkd.test"
         )));
+    }
+
+    #[test]
+    fn only_a_path_on_this_site_is_a_same_site_path() {
+        for good in ["/", "/account", "/?q=a&page=2", "/a/b?x=%2F%2F"] {
+            assert_eq!(same_site_path(good), Some(good));
+        }
+        for bad in [
+            "",
+            "evil.test",
+            "https://evil.test",
+            "//evil.test",
+            "/\\evil.test",
+            "\\\\evil.test",
+            "javascript:alert(1)",
+            "/a\r\nSet-Cookie: x=1",
+            "/a\tb",
+        ] {
+            assert_eq!(same_site_path(bad), None, "{bad:?}");
+        }
+        assert_eq!(path_or_home(None), "/");
+        assert_eq!(path_or_home(Some("//evil.test")), "/");
     }
 
     #[test]

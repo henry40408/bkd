@@ -89,7 +89,9 @@ fn session_row(session: &SessionRow) -> Markup {
             span.meta { (session.ip) " · last used " (time_tag(&session.last_used)) }
             @if !session.is_current {
                 form method="post" action={ "/account/sessions/" (session.id) "/revoke" } {
-                    button.quiet.danger type="submit" { "Sign out" }
+                    button.quiet.danger type="submit" aria-label={ "Sign out " (session.agent) } {
+                        "Sign out"
+                    }
                 }
             }
         }

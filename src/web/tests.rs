@@ -2260,7 +2260,94 @@ async fn the_list_sends_anonymous_visitors_to_sign_in() {
     let app = TestApp::running().await;
     let reply = app.send(Send::get("/")).await;
     assert_eq!(reply.status, StatusCode::SEE_OTHER);
-    assert_eq!(location(&reply), "/login");
+    assert_eq!(location(&reply), "/login?next=%2F");
+}
+
+#[tokio::test]
+async fn the_sign_in_redirect_remembers_the_page_that_was_asked_for() {
+    let app = TestApp::running().await;
+    let reply = app.send(Send::get("/?tag=to%20read&page=2")).await;
+    assert_eq!(
+        location(&reply),
+        "/login?next=%2F%3Ftag%3Dto%2520read%26page%3D2"
+    );
+    let form_refused = app
+        .send(form_post("/bookmarks", "url=https%3A%2F%2Fa.test"))
+        .await;
+    assert_eq!(location(&form_refused), "/login");
+}
+
+#[tokio::test]
+async fn only_a_session_cookie_that_no_longer_works_says_the_session_ended() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    app.send(form_post("/logout", "").cookie(&token)).await;
+    let page = app.send(Send::get("/?tag=rust").cookie(&token)).await;
+    assert_eq!(
+        location(&page),
+        "/login?next=%2F%3Ftag%3Drust&notice=session-ended"
+    );
+    let form_refused = app
+        .send(form_post("/bookmarks", "url=https%3A%2F%2Fa.test").cookie(&token))
+        .await;
+    assert_eq!(location(&form_refused), "/login?notice=session-ended");
+}
+
+#[tokio::test]
+async fn the_login_page_explains_an_ended_session_with_fixed_text() {
+    let app = TestApp::running().await;
+    let page = app
+        .send(Send::get("/login?next=%2Fusers&notice=session-ended"))
+        .await;
+    assert!(page.text.contains("Your session ended. Sign in again."));
+    assert!(page.text.contains(r#"name="next" value="/users""#));
+    let other = app.send(Send::get("/login?notice=%3Cb%3Ezzmarker")).await;
+    assert!(!other.text.contains("zzmarker"));
+    assert!(!other.text.contains("Your session ended"));
+}
+
+#[tokio::test]
+async fn signing_in_returns_to_a_same_site_page_and_never_to_another_site() {
+    let app = TestApp::running().await;
+    app.add_user("henry", false).await;
+    let allowed = [
+        ("%2Faccount", "/account"),
+        ("%2F%3Ftag%3Drust%26page%3D2", "/?tag=rust&page=2"),
+    ];
+    let refused = [
+        "https%3A%2F%2Fevil.test",
+        "%2F%2Fevil.test",
+        "%2F%5Cevil.test",
+        "%5C%5Cevil.test",
+        "javascript%3Aalert(1)",
+        "evil.test",
+        "%2Fa%0D%0ASet-Cookie%3A+x%3D1",
+        "",
+    ];
+    for (next, expected) in allowed {
+        let body = format!("username=henry&{}&next={next}", password_field());
+        let reply = app.send(form_post("/login", &body)).await;
+        assert_eq!(location(&reply), expected);
+    }
+    for next in refused {
+        let body = format!("username=henry&{}&next={next}", password_field());
+        let reply = app.send(form_post("/login", &body)).await;
+        assert_eq!(location(&reply), "/", "{next}");
+    }
+}
+
+#[tokio::test]
+async fn a_failed_sign_in_keeps_the_page_to_return_to() {
+    let app = TestApp::running().await;
+    app.add_user("henry", false).await;
+    let reply = app
+        .send(form_post(
+            "/login",
+            "username=henry&password=nope&next=%2Faccount",
+        ))
+        .await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    assert!(reply.text.contains(r#"name="next" value="/account""#));
 }
 
 #[tokio::test]
@@ -2496,7 +2583,7 @@ async fn the_account_page_lists_this_browser_and_signing_out_ends_the_session() 
     let out = app.send(form_post("/logout", "").cookie(&token)).await;
     assert_eq!(out.status, StatusCode::SEE_OTHER);
     let after = app.send(Send::get("/").cookie(&token)).await;
-    assert_eq!(location(&after), "/login");
+    assert_eq!(location(&after), "/login?next=%2F&notice=session-ended");
 }
 
 #[tokio::test]
@@ -2542,4 +2629,178 @@ async fn select_all_ticks_every_row_on_the_page() {
     let all = app.send(Send::get("/?select=1&all=1").cookie(&token)).await;
     assert!(all.text.contains(r#"name="id-1" value="1" checked"#));
     assert!(all.text.contains("Clear selection"));
+}
+
+async fn two_bookmarks_in_select_mode(app: &TestApp) -> String {
+    let token = app.sign_in_as("henry").await;
+    for (site, title) in [("a", "Aaa"), ("b", "Bbb")] {
+        let fields = format!("url=https%3A%2F%2F{site}.test&title={title}&note=&tags=rust");
+        save_through_the_form(app, &token, &fields).await;
+    }
+    token
+}
+
+const BULK_CONTEXT: &str = "q=&tag=&status=&page=1";
+
+#[tokio::test]
+async fn a_refused_bulk_action_shows_the_list_again_with_the_ticks_and_the_reason() {
+    let app = TestApp::running().await;
+    let token = two_bookmarks_in_select_mode(&app).await;
+    let long_tag = "a".repeat(100);
+    let cases = [
+        (
+            "remove_tags",
+            "nope",
+            StatusCode::BAD_REQUEST,
+            "has that tag",
+        ),
+        ("add_tags", "", StatusCode::BAD_REQUEST, "must not be empty"),
+        ("add_tags", &long_tag, StatusCode::BAD_REQUEST, "tag"),
+    ];
+    for (action, tags, status, reason) in cases {
+        let body = format!("id-1=1&id-2=1&action={action}&tags={tags}&{BULK_CONTEXT}");
+        let reply = app
+            .send(form_post("/bookmarks/bulk", &body).cookie(&token))
+            .await;
+        assert_eq!(reply.status, status, "{action} {tags}");
+        assert!(reply.text.contains(r#"role="alert""#), "{action} {tags}");
+        assert!(reply.text.contains(reason), "{action} {tags}");
+        assert!(reply.text.contains(r#"name="id-1" value="1" checked"#));
+        assert!(reply.text.contains(r#"name="id-2" value="1" checked"#));
+        assert!(reply.text.contains("selecting"));
+    }
+}
+
+#[tokio::test]
+async fn a_refused_bulk_action_keeps_the_typed_tags_and_only_the_ticked_rows() {
+    let app = TestApp::running().await;
+    let token = two_bookmarks_in_select_mode(&app).await;
+    let body = format!("id-2=1&action=remove_tags&tags=nope&{BULK_CONTEXT}");
+    let reply = app
+        .send(form_post("/bookmarks/bulk", &body).cookie(&token))
+        .await;
+    assert!(reply.text.contains(r#"value="nope""#));
+    assert!(reply.text.contains(r#"name="id-2" value="1" checked"#));
+    assert!(!reply.text.contains(r#"name="id-1" value="1" checked"#));
+}
+
+#[tokio::test]
+async fn a_bulk_action_on_a_bookmark_that_is_gone_shows_the_list_with_the_reason() {
+    let app = TestApp::running().await;
+    let token = two_bookmarks_in_select_mode(&app).await;
+    let body = format!("id-1=1&id-99=1&action=add_tags&tags=x&{BULK_CONTEXT}");
+    let reply = app
+        .send(form_post("/bookmarks/bulk", &body).cookie(&token))
+        .await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    assert!(reply.text.contains("no longer exist"));
+    assert!(reply.text.contains(r#"name="id-1" value="1" checked"#));
+}
+
+#[tokio::test]
+async fn a_finished_bulk_action_ends_select_mode() {
+    let app = TestApp::running().await;
+    let token = two_bookmarks_in_select_mode(&app).await;
+    let body = "id-1=1&action=add_tags&tags=x&q=rust&tag=&status=&page=1";
+    let done = app
+        .send(form_post("/bookmarks/bulk", body).cookie(&token))
+        .await;
+    assert_eq!(location(&done), "/?q=rust&notice=bulk-done");
+    let delete = format!("id-1=1&action=delete&confirm=yes&{BULK_CONTEXT}");
+    let deleted = app
+        .send(form_post("/bookmarks/bulk", &delete).cookie(&token))
+        .await;
+    assert_eq!(location(&deleted), "/?notice=bulk-done");
+}
+
+#[tokio::test]
+async fn edit_and_delete_return_to_the_list_they_were_opened_from() {
+    let app = TestApp::running().await;
+    let token = two_bookmarks_in_select_mode(&app).await;
+    let list = app
+        .send(Send::get("/?tag=rust&page=1").cookie(&token))
+        .await;
+    assert!(
+        list.text
+            .contains("/bookmarks/1/edit?back=%2F%3Ftag%3Drust")
+    );
+    assert!(
+        list.text
+            .contains("/bookmarks/1/delete?back=%2F%3Ftag%3Drust")
+    );
+
+    let edit = "/bookmarks/1/edit?back=%2F%3Ftag%3Drust";
+    let form = app.send(Send::get(edit).cookie(&token)).await;
+    assert!(form.text.contains(r#"name="back" value="/?tag=rust""#));
+    assert!(form.text.contains(r#"href="/?tag=rust""#));
+    assert!(form.text.contains("autofocus"));
+    let save = "url=https%3A%2F%2Fa.test&title=New&note=&tags=&back=%2F%3Ftag%3Drust";
+    let saved = app
+        .send(form_post("/bookmarks/1/edit", save).cookie(&token))
+        .await;
+    assert_eq!(location(&saved), "/?tag=rust&notice=bookmark-saved");
+
+    let delete = "/bookmarks/1/delete?back=%2F%3Ftag%3Drust";
+    let confirm = app.send(Send::get(delete).cookie(&token)).await;
+    assert!(confirm.text.contains(r#"name="back" value="/?tag=rust""#));
+    assert!(confirm.text.contains(r#"href="/?tag=rust" autofocus"#));
+    let gone = app
+        .send(form_post("/bookmarks/delete", "id=1&back=%2F%3Ftag%3Drust").cookie(&token))
+        .await;
+    assert_eq!(location(&gone), "/?tag=rust&notice=bookmark-deleted");
+}
+
+#[tokio::test]
+async fn a_back_address_that_leaves_the_site_is_ignored() {
+    let app = TestApp::running().await;
+    let token = two_bookmarks_in_select_mode(&app).await;
+    for back in [
+        "https%3A%2F%2Fevil.test",
+        "%2F%2Fevil.test",
+        "%2F%5Cevil.test",
+    ] {
+        let page = app
+            .send(Send::get(&format!("/bookmarks/1/edit?back={back}")).cookie(&token))
+            .await;
+        assert!(page.text.contains(r#"name="back" value="/""#), "{back}");
+        let save = format!("url=https%3A%2F%2Fa.test&title=New&note=&tags=&back={back}");
+        let saved = app
+            .send(form_post("/bookmarks/1/edit", &save).cookie(&token))
+            .await;
+        assert_eq!(location(&saved), "/?notice=bookmark-saved", "{back}");
+    }
+    let gone = app
+        .send(form_post("/bookmarks/delete", "id=2&back=%2F%2Fevil.test").cookie(&token))
+        .await;
+    assert_eq!(location(&gone), "/?notice=bookmark-deleted");
+}
+
+#[tokio::test]
+async fn the_buttons_for_each_user_and_session_say_whose_they_are() {
+    let app = TestApp::running().await;
+    app.add_user("mei", false).await;
+    let admin = sign_in_as_admin(&app).await;
+    let users = app.send(Send::get("/users").cookie(&admin)).await;
+    for label in [
+        "Promote mei",
+        "Disable mei",
+        "Reset password of mei",
+        "Delete mei",
+    ] {
+        assert!(
+            users.text.contains(&format!(r#"aria-label="{label}""#)),
+            "{label}"
+        );
+    }
+    app.login("root", PASSWORD).await;
+    let account = app.send(Send::get("/account").cookie(&admin)).await;
+    assert!(account.text.contains(r#"aria-label="Sign out "#));
+}
+
+#[tokio::test]
+async fn the_bulk_panel_has_a_live_region_for_the_selection_count() {
+    let app = TestApp::running().await;
+    let token = two_bookmarks_in_select_mode(&app).await;
+    let page = app.send(Send::get("/?select=1").cookie(&token)).await;
+    assert!(page.text.contains(r#"id="bulk-count" aria-live="polite""#));
 }

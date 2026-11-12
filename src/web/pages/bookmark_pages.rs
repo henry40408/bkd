@@ -3,12 +3,13 @@
 
 use axum::Json;
 use axum::extract::{Form, Path, Query, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
 use super::support::{
-    Active, Notice, Page, PageError, Section, Shell, View, form_refusal, redirect_with_notice,
-    render, render_with_status,
+    Active, Notice, Page, PageError, Section, Shell, View, form_refusal, path_or_home,
+    redirect_with_notice, render, render_with_status,
 };
 use maud::{Markup, html};
 
@@ -53,6 +54,8 @@ struct BookmarkView {
     link: Option<LinkNote>,
     link_class: Option<String>,
     saved: SavedTime,
+    edit_href: String,
+    delete_href: String,
 }
 
 fn link_label(status: &str) -> &'static str {
@@ -85,7 +88,8 @@ fn link_note(link: &bookmarks::LinkCheck) -> Option<LinkNote> {
     })
 }
 
-fn bookmark_view(bookmark: Bookmark, filter: &Filter, now: i64) -> BookmarkView {
+/// `back` is the list address that Edit and Delete return to.
+fn bookmark_view(bookmark: Bookmark, filter: &Filter, now: i64, back: &str) -> BookmarkView {
     let tags = bookmark
         .tags
         .iter()
@@ -97,6 +101,14 @@ fn bookmark_view(bookmark: Bookmark, filter: &Filter, now: i64) -> BookmarkView 
     let link = bookmark.link.as_ref().and_then(link_note);
     BookmarkView {
         id: bookmark.id,
+        edit_href: with_query(
+            &format!("/bookmarks/{}/edit", bookmark.id),
+            &[("back", back)],
+        ),
+        delete_href: with_query(
+            &format!("/bookmarks/{}/delete", bookmark.id),
+            &[("back", back)],
+        ),
         domain: highlight(
             &domain_of(&bookmark.url),
             &filter.highlights(Highlight::Url),
@@ -123,6 +135,14 @@ struct AddForm {
     error: Option<String>,
 }
 
+/// What a refused bulk action shows again: the ticked rows, the tags typed and the reason.
+#[derive(Default)]
+struct BulkState {
+    selected: Vec<i64>,
+    tags: String,
+    error: Option<String>,
+}
+
 struct BookmarksPage {
     shell: Shell,
     view: ListView,
@@ -131,6 +151,7 @@ struct BookmarksPage {
     done_selecting_href: String,
     toggle_all_href: String,
     add: AddForm,
+    bulk: BulkState,
     pick: Option<BookmarkView>,
     pick_empty: bool,
     rows: Vec<BookmarkView>,
@@ -188,9 +209,9 @@ fn bookmark_item(bookmark: &BookmarkView, ticked: Option<bool>) -> Markup {
             div.when {
                 (time_tag(&bookmark.saved))
                 div.actions {
-                    a.quiet href={ "/bookmarks/" (bookmark.id) "/edit" }
+                    a.quiet href=(bookmark.edit_href)
                         aria-label={ "Edit " (bookmark.plain_title) } { "Edit" }
-                    a.quiet.danger href={ "/bookmarks/" (bookmark.id) "/delete" }
+                    a.quiet.danger href=(bookmark.delete_href)
                         aria-label={ "Delete " (bookmark.plain_title) } { "Delete" }
                 }
             }
@@ -254,7 +275,7 @@ impl BookmarksPage {
                     @if let Some(note) = &pick.note { p.note { (note) } }
                     div.actions {
                         a.quiet href=(self.random_href) { "Another" }
-                        a.quiet href={ "/bookmarks/" (pick.id) "/edit" } { "Edit" }
+                        a.quiet href=(pick.edit_href) { "Edit" }
                         a.quiet href=(self.view.href()) { "Close" }
                     }
                 }
@@ -273,13 +294,16 @@ impl BookmarksPage {
             input type="hidden" name="page" value=(view.page);
             div.bulk role="region" aria-label="Bulk actions" {
                 div."bulk-panel" {
-                    input type="text" name="tags" placeholder="Tags, separated by commas"
+                    input type="text" name="tags" value=(self.bulk.tags)
+                        placeholder="Tags, separated by commas"
                         aria-label="Tags for adding or removing";
                     button type="submit" name="action" value="add_tags" { "Add tags" }
                     button.quiet type="submit" name="action" value="remove_tags" { "Remove tags" }
                     button.quiet type="submit" name="action" value="check" { "Check links" }
                     button.quiet.danger type="submit" name="action" value="delete" { "Delete" }
+                    (error_line(self.bulk.error.as_deref()))
                 }
+                p."bulk-count" id="bulk-count" aria-live="polite" {}
                 p.hint {
                     a.quiet href=(self.toggle_all_href) {
                         @if view.all { "Clear selection" } @else { "Select all on this page" }
@@ -290,6 +314,13 @@ impl BookmarksPage {
         }
     }
 
+    /// `None` outside select mode, else whether the row's box starts ticked.
+    fn ticked(&self, id: i64) -> Option<bool> {
+        self.view
+            .select
+            .then(|| self.view.all || self.bulk.selected.contains(&id))
+    }
+
     fn list(&self) -> Markup {
         html! {
             @if self.rows.is_empty() {
@@ -297,7 +328,7 @@ impl BookmarksPage {
             } @else {
                 p.summary { (self.summary) }
                 ul.list.selecting[self.view.select] {
-                    @for row in &self.rows { (bookmark_item(row, self.view.select.then_some(self.view.all))) }
+                    @for row in &self.rows { (bookmark_item(row, self.ticked(row.id))) }
                 }
             }
         }
@@ -344,7 +375,11 @@ impl View for EditPage {
         let content = html! {
             h1 { "Edit bookmark" }
             form.stack."edit-form" method="post" action={ "/bookmarks/" (self.id) "/edit" } {
-                label { "URL " input type="url" name="url" value=(self.url) placeholder="https://" required; }
+                input type="hidden" name="back" value=(self.back);
+                label {
+                    "URL "
+                    input type="url" name="url" value=(self.url) placeholder="https://" required autofocus;
+                }
                 label {
                     "Title "
                     input type="text" name="title" value=(self.title) placeholder="Leave blank to use the domain";
@@ -355,7 +390,7 @@ impl View for EditPage {
                 div {
                     button type="submit" { "Save" }
                     " "
-                    a."quiet-link" href="/" { "Cancel" }
+                    a."quiet-link" href=(self.back) { "Cancel" }
                 }
             }
         };
@@ -375,7 +410,7 @@ impl View for ConfirmDeletePage {
                 div {
                     button."danger-button" type="submit" { "Delete" }
                     " "
-                    a."quiet-link" href=(self.cancel_href) { "Keep" }
+                    a."quiet-link" href=(self.cancel_href) autofocus { "Keep" }
                 }
             }
         };
@@ -412,6 +447,7 @@ struct ListContext<'a> {
     notice: Option<&'a str>,
     add: AddForm,
     pick: PickResult,
+    bulk: BulkState,
 }
 
 enum PickResult {
@@ -430,6 +466,7 @@ async fn render_list(
         notice,
         add,
         pick,
+        bulk,
     } = context;
     let filter = Filter::new(
         Some(&view.q),
@@ -448,9 +485,10 @@ async fn render_list(
     let has_next = found.len() > PAGE_SIZE as usize;
     found.truncate(PAGE_SIZE as usize);
     let now = unix_now();
+    let back = view.href();
     let rows: Vec<BookmarkView> = found
         .into_iter()
-        .map(|bookmark| bookmark_view(bookmark, &filter, now))
+        .map(|bookmark| bookmark_view(bookmark, &filter, now, &back))
         .collect();
     let shell = Shell::load(
         state,
@@ -466,7 +504,7 @@ async fn render_list(
     let (pick, pick_empty) = match pick {
         PickResult::NotAsked => (None, false),
         PickResult::Nothing => (None, true),
-        PickResult::Chosen(bookmark) => (Some(bookmark_view(bookmark, &filter, now)), false),
+        PickResult::Chosen(bookmark) => (Some(bookmark_view(bookmark, &filter, now, &back)), false),
     };
     let summary = format!("Showing {}–{}", offset + 1, offset + rows.len() as u32);
     Ok(BookmarksPage {
@@ -480,6 +518,7 @@ async fn render_list(
         shell,
         view,
         add,
+        bulk,
         pick,
         pick_empty,
         rows,
@@ -506,6 +545,7 @@ pub async fn list(
         notice: query.notice.as_deref(),
         add: AddForm::default(),
         pick: PickResult::NotAsked,
+        bulk: BulkState::default(),
     };
     Ok(render(&render_list(&state, &user, context).await?)?.into_response())
 }
@@ -536,6 +576,7 @@ pub async fn random(
         notice: None,
         add: AddForm::default(),
         pick,
+        bulk: BulkState::default(),
     };
     Ok(render(&render_list(&state, &user, context).await?)?.into_response())
 }
@@ -549,6 +590,8 @@ pub struct BookmarkForm {
     note: String,
     #[serde(default)]
     tags: String,
+    /// The list address to return to after editing; ignored when adding.
+    back: Option<String>,
 }
 
 impl BookmarkForm {
@@ -602,6 +645,7 @@ pub async fn create(
                     ..add
                 },
                 pick: PickResult::NotAsked,
+                bulk: BulkState::default(),
             };
             render_with_status(status, &render_list(&state, &session_user, context).await?)
         }
@@ -616,6 +660,13 @@ struct EditPage {
     note: String,
     tags: String,
     error: Option<String>,
+    back: String,
+}
+
+/// The list address a page was opened from.
+#[derive(Deserialize, Default)]
+pub struct BackQuery {
+    back: Option<String>,
 }
 
 async fn edit_shell(state: &SharedState, user: &SessionUser) -> Result<Shell, PageError> {
@@ -632,6 +683,7 @@ pub async fn edit_form(
     State(state): State<SharedState>,
     Page(CurrentUser(user)): Page<CurrentUser>,
     Path(id): Path<i64>,
+    Query(query): Query<BackQuery>,
 ) -> Result<Response, PageError> {
     let bookmark = bookmarks::get(&state.pool, user.user_id, id)
         .await?
@@ -644,6 +696,7 @@ pub async fn edit_form(
         note: bookmark.note,
         tags: bookmark.tags.join(", "),
         error: None,
+        back: path_or_home(query.back.as_deref()),
     };
     Ok(render(&page)?.into_response())
 }
@@ -663,11 +716,13 @@ pub async fn edit_submit(
         note: form.note.clone(),
         tags: form.tags.clone(),
         error: None,
+        back: path_or_home(form.back.as_deref()),
     };
+    let back = page.back.clone();
     let outcome =
         bookmark_routes::update(State(state), user, Path(id), Json(form.into_input())).await;
     match outcome {
-        Ok(_) => Ok(redirect_with_notice("/", Notice::BookmarkSaved)),
+        Ok(_) => Ok(redirect_with_notice(&back, Notice::BookmarkSaved)),
         Err(ApiError::NotFound) => Err(PageError::not_found()),
         Err(error) => {
             let (status, message) = form_refusal(error)?;
@@ -700,20 +755,26 @@ pub async fn delete_form(
     State(state): State<SharedState>,
     Page(CurrentUser(user)): Page<CurrentUser>,
     Path(id): Path<i64>,
+    Query(query): Query<BackQuery>,
 ) -> Result<Response, PageError> {
     let bookmark = bookmarks::get(&state.pool, user.user_id, id)
         .await?
         .ok_or_else(PageError::not_found)?;
+    let back = path_or_home(query.back.as_deref());
+    let hidden_field = |name: &str, value: String| HiddenField {
+        name: name.to_owned(),
+        value,
+    };
     let page = ConfirmDeletePage {
         shell: edit_shell(&state, &user).await?,
         heading: "Delete this bookmark?".to_owned(),
         detail: bookmark.title,
         action: "/bookmarks/delete".to_owned(),
-        hidden: vec![HiddenField {
-            name: "id".to_owned(),
-            value: id.to_string(),
-        }],
-        cancel_href: "/".to_owned(),
+        hidden: vec![
+            hidden_field("id", id.to_string()),
+            hidden_field("back", back.clone()),
+        ],
+        cancel_href: back,
     };
     Ok(render(&page)?.into_response())
 }
@@ -721,6 +782,7 @@ pub async fn delete_form(
 #[derive(Deserialize)]
 pub struct DeleteForm {
     id: i64,
+    back: Option<String>,
 }
 
 pub async fn delete_submit(
@@ -729,7 +791,8 @@ pub async fn delete_submit(
     Form(form): Form<DeleteForm>,
 ) -> Result<Response, PageError> {
     bookmark_routes::delete(State(state), user, Path(form.id)).await?;
-    Ok(redirect_with_notice("/", Notice::BookmarkDeleted))
+    let back = path_or_home(form.back.as_deref());
+    Ok(redirect_with_notice(&back, Notice::BookmarkDeleted))
 }
 
 /// What the selection form sent: ticked ids (`id-<n>`), the action, and where to return.
@@ -797,23 +860,50 @@ pub async fn bulk(
     Form(fields): Form<Vec<(String, String)>>,
 ) -> Result<Response, PageError> {
     let request = BulkRequest::parse(fields);
-    let back = request.view.href();
     if request.ids.is_empty() {
-        return Ok(Redirect::to(&with_notice(&back, "nothing-selected")).into_response());
+        let back = with_query(&request.view.href(), &[("notice", "nothing-selected")]);
+        return Ok(Redirect::to(&back).into_response());
     }
-    match request.action.as_str() {
-        "check" => check_links(&state, &user.0, request.ids).await?,
+    let session_user = user.0.clone();
+    let outcome = match request.action.as_str() {
+        "check" => check_links(&state, &session_user, request.ids.clone()).await,
         "delete" if !request.confirmed => {
-            return confirm_bulk_delete(&state, &user.0, &request).await;
+            return confirm_bulk_delete(&state, &session_user, &request).await;
         }
-        action => run_bulk(&state, user, action, &request).await?,
+        action => run_bulk(&state, user, action, &request).await,
+    };
+    match outcome {
+        Ok(()) => {
+            let done = request.view.without_select().href();
+            Ok(Redirect::to(&with_query(&done, &[("notice", "bulk-done")])).into_response())
+        }
+        Err(PageError::Failed(status, message)) => {
+            bulk_refused(&state, &session_user, request, (status, message)).await
+        }
+        Err(error) => Err(error),
     }
-    Ok(Redirect::to(&with_notice(&back, "bulk-done")).into_response())
 }
 
-fn with_notice(href: &str, key: &str) -> String {
-    let separator = if href.contains('?') { '&' } else { '?' };
-    format!("{href}{separator}notice={key}")
+/// The list again in select mode, with the same rows ticked and the reason shown, so
+/// that a refused action does not cost the person their selection.
+async fn bulk_refused(
+    state: &SharedState,
+    user: &SessionUser,
+    request: BulkRequest,
+    (status, message): (StatusCode, String),
+) -> Result<Response, PageError> {
+    let context = ListContext {
+        view: request.view,
+        notice: None,
+        add: AddForm::default(),
+        pick: PickResult::NotAsked,
+        bulk: BulkState {
+            selected: request.ids,
+            tags: request.tags,
+            error: Some(message),
+        },
+    };
+    render_with_status(status, &render_list(state, user, context).await?)
 }
 
 async fn confirm_bulk_delete(
@@ -852,12 +942,33 @@ async fn run_bulk(
         },
         _ => return Err(PageError::bad_request("Choose an action.")),
     };
+    let removing = matches!(action, BulkActionInput::RemoveTags { .. });
     let input = BulkInput {
         ids: request.ids.clone(),
         action,
     };
-    let _changed = bookmark_routes::bulk(State(state.clone()), user, Json(input)).await?;
+    let outcome = bookmark_routes::bulk(State(state.clone()), user, Json(input)).await;
+    let changed = outcome.map_err(bulk_error)?.0.changed;
+    if removing && changed == 0 {
+        return Err(PageError::bad_request(
+            "None of the selected bookmarks has that tag.",
+        ));
+    }
     Ok(())
+}
+
+fn bulk_error(error: ApiError) -> PageError {
+    match error {
+        ApiError::NotFound => stale_selection(),
+        other => PageError::from(other),
+    }
+}
+
+fn stale_selection() -> PageError {
+    PageError::Failed(
+        StatusCode::NOT_FOUND,
+        "Some of those bookmarks no longer exist. Reload the list.".to_owned(),
+    )
 }
 
 /// Without a script there is no live progress, so the page waits for every check to
@@ -876,7 +987,7 @@ async fn check_links(
         .ok_or(PageError::TooManyRequests(CHECK_RETRY_AFTER))?;
     let targets = linkcheck::targets(&state.pool, user.user_id, &valid)
         .await?
-        .ok_or_else(PageError::not_found)?;
+        .ok_or_else(stale_selection)?;
     let mut running = state.link_checker.start(targets);
     while let Some(checked) = running.next().await {
         linkcheck::store(&state.pool, user.user_id, &[checked], unix_now()).await?;

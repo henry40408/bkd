@@ -96,14 +96,18 @@ fn user_actions(user: &UserRow) -> Markup {
         div."user-actions" {
             form method="post" action={ "/users/" (user.id) "/role" } {
                 input type="hidden" name="is_admin" value=(!user.is_admin);
-                button.quiet type="submit" { @if user.is_admin { "Demote" } @else { "Promote" } }
+                @let role = if user.is_admin { "Demote" } else { "Promote" };
+                button.quiet type="submit" aria-label={ (role) " " (user.username) } { (role) }
             }
             form method="post" action={ "/users/" (user.id) "/disabled" } {
                 input type="hidden" name="is_disabled" value=(!user.is_disabled);
-                button.quiet type="submit" { @if user.is_disabled { "Enable" } @else { "Disable" } }
+                @let state = if user.is_disabled { "Enable" } else { "Disable" };
+                button.quiet type="submit" aria-label={ (state) " " (user.username) } { (state) }
             }
-            a.quiet href={ "/users/" (user.id) "/password" } { "Reset password" }
-            a.quiet.danger href={ "/users/" (user.id) "/delete" } { "Delete" }
+            a.quiet href={ "/users/" (user.id) "/password" }
+                aria-label={ "Reset password of " (user.username) } { "Reset password" }
+            a.quiet.danger href={ "/users/" (user.id) "/delete" }
+                aria-label={ "Delete " (user.username) } { "Delete" }
         }
     }
 }

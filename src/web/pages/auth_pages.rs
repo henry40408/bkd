@@ -11,8 +11,8 @@ use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
 use super::support::{
-    Active, Notice, Page, PageError, Section, Shell, View, form_refusal, redirect_keeping_cookie,
-    redirect_with_notice, render, render_with_status,
+    Active, Notice, Page, PageError, Section, Shell, View, form_refusal, path_or_home,
+    redirect_keeping_cookie, redirect_with_notice, render, render_with_status,
 };
 use maud::{Markup, html};
 
@@ -21,9 +21,14 @@ use crate::web::SharedState;
 use crate::web::account::{self, ConfirmRequest, LoginRequest, SetupRequest};
 use crate::web::guard::{CurrentUser, user_from_request};
 
+const SESSION_ENDED_TEXT: &str = "Your session ended. Sign in again.";
+
 struct LoginPage {
     error: Option<String>,
     username: String,
+    /// Where to go after signing in; already checked to be a path on this site.
+    next: String,
+    session_ended: bool,
 }
 
 struct SetupPage {
@@ -42,7 +47,9 @@ impl View for LoginPage {
         let content = html! {
             form.card method="post" action="/login" {
                 h1 { "bkd" }
+                @if self.session_ended { p.notice role="status" { (SESSION_ENDED_TEXT) } }
                 (error_line(self.error.as_deref()))
+                input type="hidden" name="next" value=(self.next);
                 label {
                     "Username "
                     input type="text" name="username" value=(self.username) autocomplete="username"
@@ -111,16 +118,24 @@ impl View for ConfirmPage {
     }
 }
 
+#[derive(Deserialize, Default)]
+pub struct LoginQuery {
+    next: Option<String>,
+    notice: Option<String>,
+}
+
 pub async fn login_form(
     State(state): State<SharedState>,
     ConnectInfo(client): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
+    Query(query): Query<LoginQuery>,
 ) -> Result<Response, PageError> {
+    let next = path_or_home(query.next.as_deref());
     if user_from_request(&state, Some(client.ip()), &headers)
         .await?
         .is_some()
     {
-        return Ok(Redirect::to("/").into_response());
+        return Ok(Redirect::to(&next).into_response());
     }
     if state.setup_token().is_some() {
         return Ok(Redirect::to("/setup").into_response());
@@ -128,6 +143,8 @@ pub async fn login_form(
     Ok(render(&LoginPage {
         error: None,
         username: String::new(),
+        next,
+        session_ended: query.notice.as_deref() == Some("session-ended"),
     })?
     .into_response())
 }
@@ -136,6 +153,7 @@ pub async fn login_form(
 pub struct LoginForm {
     username: String,
     password: String,
+    next: Option<String>,
 }
 
 pub async fn login_submit(
@@ -145,12 +163,13 @@ pub async fn login_submit(
     Form(form): Form<LoginForm>,
 ) -> Result<Response, PageError> {
     let username = form.username.clone();
+    let next = path_or_home(form.next.as_deref());
     let request = Json(LoginRequest {
         username: form.username,
         password: form.password,
     });
     match account::login(State(state), ConnectInfo(client), headers, request).await {
-        Ok(response) => Ok(redirect_keeping_cookie(&response, "/")),
+        Ok(response) => Ok(redirect_keeping_cookie(&response, &next)),
         Err(error) => {
             let (status, message) = form_refusal(error)?;
             render_with_status(
@@ -158,6 +177,8 @@ pub async fn login_submit(
                 &LoginPage {
                     error: Some(message),
                     username,
+                    next,
+                    session_ended: false,
                 },
             )
         }

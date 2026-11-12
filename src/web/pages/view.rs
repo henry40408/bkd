@@ -226,10 +226,11 @@ impl ListView {
     }
 }
 
+/// `path` with the pairs appended, after any query it already has.
 pub fn with_query(path: &str, pairs: &[(&str, &str)]) -> String {
     let mut out = path.to_owned();
-    for (index, (name, value)) in pairs.iter().enumerate() {
-        out.push(if index == 0 { '?' } else { '&' });
+    for (name, value) in pairs {
+        out.push(if out.contains('?') { '&' } else { '?' });
         out.push_str(name);
         out.push('=');
         percent_encode_into(&mut out, value);
