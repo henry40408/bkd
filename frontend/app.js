@@ -72,6 +72,19 @@
     }
   }
 
+  // Shift-click ticks or clears every row between the last box clicked and this one.
+  let lastTicked = null;
+  document.addEventListener("click", (event) => {
+    const box = event.target instanceof Element ? event.target.closest(".pick-box input") : null;
+    if (!box) return;
+    const boxes = Array.from(document.querySelectorAll(".pick-box input"));
+    if (event.shiftKey && lastTicked && boxes.includes(lastTicked)) {
+      const [from, to] = [boxes.indexOf(lastTicked), boxes.indexOf(box)].sort((a, b) => a - b);
+      for (const between of boxes.slice(from, to + 1)) between.checked = box.checked;
+    }
+    lastTicked = box;
+  });
+
   document.addEventListener("click", (event) => {
     if (wantsBrowserDefault(event)) return;
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;

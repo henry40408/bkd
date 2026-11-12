@@ -158,6 +158,8 @@ pub struct ListView {
     pub status: String,
     pub page: u32,
     pub select: bool,
+    /// Select mode with every bookmark on the page already ticked.
+    pub all: bool,
 }
 
 impl ListView {
@@ -193,12 +195,25 @@ impl ListView {
         if self.select {
             pairs.push(("select", "1"));
         }
+        if self.select && self.all {
+            pairs.push(("all", "1"));
+        }
         with_query(path, &pairs)
     }
 
     pub fn without_select(&self) -> Self {
         Self {
             select: false,
+            all: false,
+            ..self.clone()
+        }
+    }
+
+    /// The same select-mode view with every bookmark ticked, or none.
+    pub fn with_all(&self, all: bool) -> Self {
+        Self {
+            select: true,
+            all,
             ..self.clone()
         }
     }

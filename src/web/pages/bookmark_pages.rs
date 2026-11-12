@@ -129,6 +129,7 @@ struct BookmarksPage {
     random_href: String,
     select_href: String,
     done_selecting_href: String,
+    toggle_all_href: String,
     add: AddForm,
     pick: Option<BookmarkView>,
     pick_empty: bool,
@@ -160,16 +161,16 @@ fn link_note_line(link: &LinkNote) -> Markup {
     }
 }
 
-fn bookmark_item(bookmark: &BookmarkView, selecting: bool) -> Markup {
+fn bookmark_item(bookmark: &BookmarkView, ticked: Option<bool>) -> Markup {
     let item_class = bookmark
         .link_class
         .as_deref()
         .map_or_else(|| "item".to_owned(), |class| format!("item {class}"));
     html! {
         li class=(item_class) data-id=(bookmark.id) {
-            @if selecting {
+            @if let Some(checked) = ticked {
                 label."pick-box" {
-                    input type="checkbox" name={ "id-" (bookmark.id) } value="1"
+                    input type="checkbox" name={ "id-" (bookmark.id) } value="1" checked[checked]
                         aria-label={ "Select " (bookmark.plain_title) };
                 }
             }
@@ -279,6 +280,11 @@ impl BookmarksPage {
                     button.quiet type="submit" name="action" value="check" { "Check links" }
                     button.quiet.danger type="submit" name="action" value="delete" { "Delete" }
                 }
+                p.hint {
+                    a.quiet href=(self.toggle_all_href) {
+                        @if view.all { "Clear selection" } @else { "Select all on this page" }
+                    }
+                }
                 p.hint { "Tick the bookmarks you want, then choose an action." }
             }
         }
@@ -291,7 +297,7 @@ impl BookmarksPage {
             } @else {
                 p.summary { (self.summary) }
                 ul.list.selecting[self.view.select] {
-                    @for row in &self.rows { (bookmark_item(row, self.view.select)) }
+                    @for row in &self.rows { (bookmark_item(row, self.view.select.then_some(self.view.all))) }
                 }
             }
         }
@@ -384,6 +390,7 @@ pub struct ListQuery {
     status: Option<String>,
     page: Option<u32>,
     select: Option<String>,
+    all: Option<String>,
     notice: Option<String>,
 }
 
@@ -395,6 +402,7 @@ impl ListQuery {
             status: self.status.clone().unwrap_or_default(),
             page: self.page.unwrap_or(1).clamp(1, MAX_PAGE),
             select: self.select.is_some(),
+            all: self.all.is_some(),
         }
     }
 }
@@ -465,6 +473,7 @@ async fn render_list(
         random_href: view.without_select().href_to("/random"),
         select_href: view.with_select().href(),
         done_selecting_href: view.without_select().href(),
+        toggle_all_href: view.with_all(!view.all).href(),
         prev_href: (view.page > 1).then(|| view.href_for_page(view.page - 1)),
         next_href: has_next.then(|| view.href_for_page(view.page + 1)),
         empty_text: empty_text(&view),

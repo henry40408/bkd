@@ -2525,3 +2525,21 @@ async fn a_huge_page_number_does_not_overflow() {
         .await;
     assert_eq!(reply.status, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn select_all_ticks_every_row_on_the_page() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    save_through_the_form(
+        &app,
+        &token,
+        "url=https%3A%2F%2Fa.test&title=Aaa&note=&tags=",
+    )
+    .await;
+    let plain = app.send(Send::get("/?select=1").cookie(&token)).await;
+    assert!(plain.text.contains("/?select=1&amp;all=1"));
+    assert!(!plain.text.contains(r#"name="id-1" value="1" checked"#));
+    let all = app.send(Send::get("/?select=1&all=1").cookie(&token)).await;
+    assert!(all.text.contains(r#"name="id-1" value="1" checked"#));
+    assert!(all.text.contains("Clear selection"));
+}
