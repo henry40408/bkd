@@ -490,7 +490,7 @@ async fn pager_has(world: &BkdWorld, label: &str, offered: bool) -> Result<()> {
         .browser()?
         .eventually(
             &format!("the pager offering {label} is {offered}"),
-            || async { Ok(!driver.find_all(link.clone()).await?.is_empty() == offered) },
+            || async { Ok(driver.find_all(link.clone()).await?.is_empty() != offered) },
         )
         .await
 }
