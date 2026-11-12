@@ -27,8 +27,9 @@ pub fn read_token(headers: &HeaderMap, secure: bool) -> Option<&str> {
         .map(|(_, value)| value)
 }
 
-/// `HttpOnly` hides the token from scripts. `SameSite=Strict` keeps the browser from
-/// sending it on any request that starts on another site.
+/// `HttpOnly` hides the token from scripts. `SameSite=Lax` keeps the browser from
+/// sending it on a POST or a script request that starts on another site. A link followed
+/// from another site still carries it, so a shared bkd link opens signed in.
 pub fn set(token: &str, secure: bool) -> HeaderValue {
     build(token, SESSION_LIFETIME_SECONDS, secure)
 }
@@ -42,7 +43,7 @@ fn build(value: &str, max_age: i64, secure: bool) -> HeaderValue {
     let secure = if secure { "; Secure" } else { "" };
     let name = name(secure_flag);
     let cookie =
-        format!("{name}={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{secure}");
+        format!("{name}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}");
     HeaderValue::from_str(&cookie).expect("cookie contains only visible ASCII")
 }
 
@@ -75,11 +76,11 @@ mod tests {
     }
 
     #[test]
-    fn the_cookie_is_http_only_and_strict() {
+    fn the_cookie_is_http_only_and_lax() {
         let value = set("tok", false);
         let text = value.to_str().unwrap();
         assert!(text.starts_with("bkd_session=tok;"));
-        assert!(text.contains("HttpOnly") && text.contains("SameSite=Strict"));
+        assert!(text.contains("HttpOnly") && text.contains("SameSite=Lax"));
         assert!(!text.contains("Secure"));
         assert!(set("tok", true).to_str().unwrap().ends_with("; Secure"));
     }

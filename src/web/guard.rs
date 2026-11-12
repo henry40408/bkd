@@ -132,7 +132,7 @@ async fn user_from_cookie(
 }
 
 /// Refuses a state-changing request whose `Origin` names another site. Together with
-/// `SameSite=Strict` and the JSON-only bodies, this closes cross-site request forgery
+/// `SameSite=Lax` and the JSON-only bodies, this closes cross-site request forgery
 /// even for a browser that ignores `SameSite`.
 pub async fn same_origin_only(request: Request, next: Next) -> Response {
     if !is_safe_method(request.method()) && !origin_matches_host(request.headers()) {

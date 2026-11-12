@@ -365,7 +365,7 @@ async fn guessing_the_setup_token_is_rate_limited_per_ip() {
 // ---------------------------------------------------------------- login
 
 #[tokio::test]
-async fn login_sets_a_http_only_strict_cookie() {
+async fn login_sets_a_http_only_lax_cookie() {
     let app = TestApp::running().await;
     app.add_user("henry", false).await;
     let reply = app.login("Henry", PASSWORD).await;
@@ -376,7 +376,7 @@ async fn login_sets_a_http_only_strict_cookie() {
         .unwrap()
         .to_str()
         .unwrap();
-    assert!(cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"));
+    assert!(cookie.contains("HttpOnly") && cookie.contains("SameSite=Lax"));
     assert!(!cookie.contains("Secure"));
 }
 

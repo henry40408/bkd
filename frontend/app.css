@@ -140,7 +140,7 @@ dialog form { display: grid; gap: var(--s3); }
 dialog h2 { margin: 0; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--s2); }
 
-.login { display: flex; overflow-y: auto; position: fixed; inset: 0; background: var(--paper); z-index: 5; }
+main.login { max-width: none; padding: 0; display: flex; overflow-y: auto; position: fixed; inset: 0; background: var(--paper); z-index: 5; }
 .login .card { margin: auto; background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: var(--s6) var(--s6) var(--s5); width: min(22rem, 92vw); display: grid; gap: var(--s3); }
 .login h1 { font: 700 1.6rem/1 var(--serif); margin: 0 0 var(--s2); }
 .login .hint { color: var(--ink-soft); font-size: .85rem; margin: 0; }
