@@ -95,7 +95,7 @@ Every word you type must match somewhere in the title, URL, note or a tag. Case 
 
 Prefixes combine with the rest: `-tag:old`, `title:"rust book"`. Anything else is plain text, so `https://x.test` and a prefix with nothing after it search for what you typed. A search uses at most 8 terms of 100 characters each.
 
-The address bar keeps where you are: the search, the tag or status you chose in the sidebar, and the "Import and export" and "Manage users" screens (for example `#/?q=rust&tag=web&status=broken`). Reload the page, use Back, or send the link, and you land on the same list. It is only in the address; the server never sees it. The page you scrolled to ("Show more") is not kept.
+Every screen has its own address: the search, the tag or status you chose in the sidebar, the page of results, and the "Import and export" and "Manage users" screens (for example `/?q=rust&tag=web&status=broken&page=2`). Reload the page, use Back, or send the link, and you land on the same list. bkd also works with JavaScript turned off; the script only makes pages change faster.
 
 ## Random
 

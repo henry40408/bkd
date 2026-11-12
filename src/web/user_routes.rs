@@ -52,10 +52,10 @@ pub async fn list(
 
 #[derive(Deserialize)]
 pub struct NewUser {
-    username: String,
-    password: String,
+    pub(super) username: String,
+    pub(super) password: String,
     #[serde(default)]
-    is_admin: bool,
+    pub(super) is_admin: bool,
 }
 
 pub async fn create(
@@ -83,7 +83,7 @@ pub async fn create(
 
 #[derive(Deserialize)]
 pub struct RoleRequest {
-    is_admin: bool,
+    pub(super) is_admin: bool,
 }
 
 pub async fn set_role(
@@ -98,7 +98,7 @@ pub async fn set_role(
 
 #[derive(Deserialize)]
 pub struct DisabledRequest {
-    is_disabled: bool,
+    pub(super) is_disabled: bool,
 }
 
 pub async fn set_disabled(
@@ -114,7 +114,7 @@ pub async fn set_disabled(
 
 #[derive(Deserialize)]
 pub struct PasswordRequest {
-    password: String,
+    pub(super) password: String,
 }
 
 pub async fn reset_password(

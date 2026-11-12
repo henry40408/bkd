@@ -60,9 +60,9 @@ pub async fn current_state(
 
 #[derive(Deserialize)]
 pub struct SetupRequest {
-    token: String,
-    username: String,
-    password: String,
+    pub(super) token: String,
+    pub(super) username: String,
+    pub(super) password: String,
 }
 
 pub async fn setup(
@@ -109,8 +109,8 @@ pub async fn setup(
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
-    username: String,
-    password: String,
+    pub(super) username: String,
+    pub(super) password: String,
 }
 
 pub async fn login(
@@ -201,8 +201,8 @@ fn refuse_proxy_user(user: &SessionUser) -> Result<(), ApiError> {
 
 #[derive(Deserialize)]
 pub struct ChangePasswordRequest {
-    current: String,
-    new: String,
+    pub(super) current: String,
+    pub(super) new: String,
 }
 
 /// Changes the caller's own password. Every session ends, this one included, and the
@@ -295,7 +295,7 @@ pub async fn revoke_other_sessions(
 
 #[derive(Deserialize)]
 pub struct ConfirmRequest {
-    password: String,
+    pub(super) password: String,
 }
 
 /// Proves the person at the keyboard knows the password, for the admin changes that ask

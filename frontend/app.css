@@ -128,11 +128,11 @@ label.inline { display: flex; align-items: center; gap: var(--s2); font-weight: 
 /* A row with no buttons (your own) must be as tall as one with buttons: one line plus the button's vertical padding. */
 .user-actions { min-height: calc(1.5em + var(--s2)); }
 .user-confirm { color: var(--danger); overflow-wrap: anywhere; }
-#user-list + .summary { margin-top: var(--s2); }
+.user-list + .summary { margin-top: var(--s2); }
 form.stack.new-user { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; margin-top: var(--s5); padding-top: var(--s4); }
 
-#session-list { margin-bottom: var(--s2); }
-#session-list .name .here { margin-left: var(--s2); color: var(--ok); font-weight: 500; font-size: .85rem; }
+.session-list { margin-bottom: var(--s2); }
+.session-list .name .here { margin-left: var(--s2); color: var(--ok); font-weight: 500; font-size: .85rem; }
 
 dialog { background: var(--sheet); color: var(--ink); border: 1px solid var(--rule); border-radius: 8px; padding: var(--s5); width: min(22rem, 92vw); }
 dialog::backdrop { background: rgb(0 0 0 / .45); }
@@ -140,8 +140,8 @@ dialog form { display: grid; gap: var(--s3); }
 dialog h2 { margin: 0; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--s2); }
 
-.login { display: flex; overflow-y: auto; position: fixed; inset: 0; background: var(--paper); z-index: 5; }
-.login form { margin: auto; background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: var(--s6) var(--s6) var(--s5); width: min(22rem, 92vw); display: grid; gap: var(--s3); }
+main.login { max-width: none; padding: 0; display: flex; overflow-y: auto; position: fixed; inset: 0; background: var(--paper); z-index: 5; }
+.login .card { margin: auto; background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: var(--s6) var(--s6) var(--s5); width: min(22rem, 92vw); display: grid; gap: var(--s3); }
 .login h1 { font: 700 1.6rem/1 var(--serif); margin: 0 0 var(--s2); }
 .login .hint { color: var(--ink-soft); font-size: .85rem; margin: 0; }
 
@@ -156,10 +156,9 @@ dialog h2 { margin: 0; }
   .topbar { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--rule); position: sticky; top: 0; background: var(--paper); z-index: 3; }
   .topbar .brand { margin: 0; }
   .backdrop { display: block; position: fixed; inset: 0; background: rgb(0 0 0 / .45); z-index: 4; opacity: 0; visibility: hidden; }
-  .backdrop.open { opacity: 1; visibility: visible; }
-  body.menu-open { overflow: hidden; }
+  #menu-toggle:checked ~ .backdrop { opacity: 1; visibility: visible; }
   .side { position: fixed; top: 0; left: 0; bottom: 0; width: min(18rem, 85vw); background: var(--paper); z-index: 5; transform: translateX(-100%); visibility: hidden; overscroll-behavior: contain; }
-  .side.open { transform: none; visibility: visible; }
+  #menu-toggle:checked ~ .side { transform: none; visibility: visible; }
   /* Touch targets: about 44px for controls, 32px for the small tag pills. */
   .menu { min-width: 44px; min-height: 44px; }
   button.quiet, .side li a, .me a, .me button { display: inline-flex; align-items: center; min-height: 44px; }
@@ -176,19 +175,19 @@ dialog h2 { margin: 0; }
 @media (max-width: 760px) and (prefers-reduced-motion: no-preference) {
   /* Visibility flips after the slide when closing and before it when opening, so the drawer is never cut off. */
   .side { transition: transform .15s ease-out, visibility 0s linear .15s; }
-  .side.open { transition: transform .15s ease-out, visibility 0s; }
+  #menu-toggle:checked ~ .side { transition: transform .15s ease-out, visibility 0s; }
   .backdrop { transition: opacity .15s, visibility 0s linear .15s; }
-  .backdrop.open { transition: opacity .15s, visibility 0s; }
+  #menu-toggle:checked ~ .backdrop { transition: opacity .15s, visibility 0s; }
 }
 
 /* Added for the real app. */
 .more { margin-top: var(--s4); }
 .user-reset { display: flex; flex-wrap: wrap; gap: var(--s2); flex-basis: 100%; align-items: center; }
 .user-reset input { flex: 1; min-width: 12rem; width: auto; }
-.login form .ok-hint { color: var(--ink-soft); font-size: .85rem; margin: 0; }
+.login .card .ok-hint { color: var(--ink-soft); font-size: .85rem; margin: 0; }
 
 
-#transfer-view h2, #account-view h2 { font: 700 1.05rem/1.3 var(--serif); margin: var(--s5) 0 var(--s2); }
+main h2 { font: 700 1.05rem/1.3 var(--serif); margin: var(--s5) 0 var(--s2); }
 form.stack.import-form,
 form.stack.password-form { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding-top: var(--s4); }
 .import-result { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; margin-top: var(--s3); padding: var(--s3) var(--s4); overflow-wrap: anywhere; }
@@ -245,3 +244,34 @@ a.button { font-weight: 600; background: var(--ink); color: var(--paper); border
 .item.link-redirected { background: color-mix(in srgb, var(--moved) 13%, transparent); }
 /* Select mode already pads its rows. */
 .list.selecting .item.link-broken, .list.selecting .item.link-redirected { margin: 0; }
+
+/* Server-rendered pages: links that look like the buttons they replace, and the no-script menu. */
+.menu { cursor: pointer; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; }
+#menu-toggle:focus-visible ~ .topbar .menu { outline: 2px solid var(--link); outline-offset: 2px; }
+.notice { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: var(--s3) var(--s4); margin: 0 0 var(--s4); }
+a.quiet, a.quiet-link { color: var(--link); font-weight: 500; padding: var(--s1) var(--s2); border-radius: 4px; display: inline-block; }
+a.quiet.danger { color: var(--danger); }
+a.quiet-link { padding-left: var(--s3); }
+a.button.quiet-button { background: none; color: var(--link); border: 1px solid var(--rule); font-weight: 500; }
+a.button.quiet-button.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.bar a.button { display: inline-flex; align-items: center; white-space: nowrap; }
+button.danger-button { background: var(--danger); color: #fff; }
+.pager { display: flex; justify-content: space-between; gap: var(--s3); margin-top: var(--s5); }
+.bulk-form { margin: 0; }
+/* The script fills these in; without it the count stays empty and hidden. */
+.bulk p.bulk-count { margin: 0; }
+.bulk-count:empty { display: none; }
+.check-progress { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); }
+.check-progress button { padding: var(--s2) var(--s3); border: 1px solid var(--rule); }
+main[aria-busy="true"] { cursor: progress; }
+.bulk-panel button { padding: var(--s2) var(--s3); border: 1px solid transparent; }
+.bulk-panel button.quiet { border-color: var(--rule); }
+.user-actions form, .user-row form { margin: 0; display: inline; }
+.user-row form button.quiet { padding: var(--s1) var(--s2); }
+.pick-box { cursor: pointer; }
+.item .actions a { white-space: nowrap; }
+@media (hover: none), (pointer: coarse) { .actions { opacity: 1; } }
+@media (max-width: 760px) {
+  a.quiet, a.quiet-link { min-height: 44px; align-items: center; display: inline-flex; }
+  .bar { flex-wrap: wrap; }
+}

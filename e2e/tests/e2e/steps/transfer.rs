@@ -26,9 +26,8 @@ const BROWSER_FILE: &str = r#"<!DOCTYPE NETSCAPE-Bookmark-file-1>
 
 #[when("I open Import and export")]
 async fn open_import_and_export(world: &mut BkdWorld) -> Result<()> {
-    let link = By::XPath("//*[@id='me']//a[text()='Import and export']");
-    world.element_by(link).await?.click().await?;
-    world.element("#transfer-view").await?;
+    world.click(".me a[href='/transfer']").await?;
+    world.element(".import-form").await?;
     Ok(())
 }
 
@@ -38,20 +37,24 @@ async fn import_browser_file(world: &mut BkdWorld) -> Result<()> {
     let mut file = tempfile::Builder::new().suffix(".html").tempfile()?;
     file.write_all(BROWSER_FILE.as_bytes())?;
     let path = file.path().to_string_lossy().into_owned();
-    world.element("#import-file").await?.send_keys(path).await?;
-    world.click("#import-form button[type=submit]").await?;
-    world.element("#import-result").await?;
+    world
+        .element(".import-form input[type=file]")
+        .await?
+        .send_keys(path)
+        .await?;
+    world.click(".import-form button[type=submit]").await?;
+    world.element(".import-result").await?;
     Ok(())
 }
 
 #[when("I import without choosing a file")]
 async fn import_without_a_file(world: &mut BkdWorld) -> Result<()> {
-    world.click("#import-form button[type=submit]").await
+    world.click(".import-form button[type=submit]").await
 }
 
 #[then(expr = "the import result says {string}")]
 async fn import_result_says(world: &mut BkdWorld, expected: String) -> Result<()> {
-    super::text_contains(world, "#import-result", &expected).await
+    super::text_contains(world, ".import-result", &expected).await
 }
 
 #[then("importing my own export adds nothing new")]

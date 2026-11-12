@@ -6,6 +6,7 @@ mod bookmark_routes;
 mod cookie;
 mod error;
 mod guard;
+mod pages;
 #[cfg(test)]
 mod tests;
 mod transfer_routes;
@@ -131,7 +132,7 @@ pub fn router(state: SharedState) -> Router {
         .layer(middleware::from_fn(guard::api_headers))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES));
     Router::new()
-        .route("/", get(assets::index))
+        .merge(pages::router())
         .route("/app.css", get(assets::stylesheet))
         .route("/app.js", get(assets::script))
         .nest("/api", api)

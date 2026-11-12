@@ -14,7 +14,7 @@ const IDLE_REFRESH_SECONDS: i64 = 60 * 60;
 
 /// The account a valid session belongs to, read fresh from the database on every
 /// request so that a role change or a disable takes effect at once.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionUser {
     pub user_id: i64,
     pub username: String,

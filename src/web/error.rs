@@ -38,9 +38,10 @@ struct ErrorBody<'a> {
     code: Option<&'a str>,
 }
 
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        let (status, message) = match &self {
+impl ApiError {
+    /// The status and the text a client sees. The page routes show the same text.
+    pub fn status_and_message(&self) -> (StatusCode, &str) {
+        match self {
             Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message.as_str()),
             Self::InvalidCredentials => (StatusCode::UNAUTHORIZED, "invalid username or password"),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "not signed in"),
@@ -57,7 +58,13 @@ impl IntoResponse for ApiError {
                 tracing::error!("internal error: {error:#}");
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal error")
             }
-        };
+        }
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let (status, message) = self.status_and_message();
         let code = matches!(self, Self::ReauthRequired).then_some("reauth_required");
         let body = ErrorBody {
             error: message,

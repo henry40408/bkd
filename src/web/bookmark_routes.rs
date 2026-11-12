@@ -119,7 +119,7 @@ pub async fn tags(
 
 #[derive(Serialize)]
 pub struct BulkResult {
-    changed: usize,
+    pub changed: usize,
 }
 
 pub async fn bulk(
