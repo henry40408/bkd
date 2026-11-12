@@ -1,4 +1,4 @@
-//! The account page (password and signed-in browsers) and the import and export page.
+//! The account page (sessions and password) and the import and export page.
 
 use std::net::SocketAddr;
 
@@ -43,6 +43,16 @@ impl View for AccountPage {
     fn markup(&self) -> Markup {
         let content = html! {
             h1 { "Account" }
+            h2 { "Sessions" }
+            p.summary { "Every browser that is signed in to your account. End the ones you do not recognize." }
+            div."session-list" {
+                @for session in &self.sessions { (session_row(session)) }
+            }
+            @if self.sessions.len() > 1 {
+                form.downloads method="post" action="/account/sessions/revoke-others" {
+                    button.quiet type="submit" { "Sign out all other browsers" }
+                }
+            }
             h2 { "Change password" }
             p.summary {
                 "Use at least 12 characters, and do not put your username in it. "
@@ -63,16 +73,6 @@ impl View for AccountPage {
                 }
                 (error_line(self.error.as_deref()))
                 div { button type="submit" { "Change password" } }
-            }
-            h2 { "Signed-in browsers" }
-            p.summary { "Every browser that is signed in to your account. End the ones you do not recognize." }
-            div."session-list" {
-                @for session in &self.sessions { (session_row(session)) }
-            }
-            @if self.sessions.len() > 1 {
-                form.downloads method="post" action="/account/sessions/revoke-others" {
-                    button.quiet type="submit" { "Sign out all other browsers" }
-                }
             }
         };
         framed("Account · bkd", &self.shell, content)
