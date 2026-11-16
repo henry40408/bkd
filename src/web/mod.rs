@@ -7,6 +7,7 @@ mod cookie;
 mod error;
 mod guard;
 mod pages;
+mod settings_routes;
 #[cfg(test)]
 mod tests;
 mod transfer_routes;
@@ -54,6 +55,8 @@ pub struct AppState {
     pub forward_auth: Option<ForwardAuth>,
     pub link_checker: Checker,
     pub active_checks: ActiveChecks,
+    /// The administrator started the server with the background link check on.
+    pub background_link_check: bool,
 }
 
 pub struct Settings {
@@ -63,6 +66,7 @@ pub struct Settings {
     pub secure_cookies: bool,
     pub forward_auth: Option<ForwardAuth>,
     pub link_checker: Checker,
+    pub background_link_check: bool,
 }
 
 impl AppState {
@@ -76,6 +80,7 @@ impl AppState {
             forward_auth: settings.forward_auth,
             link_checker: settings.link_checker,
             active_checks: ActiveChecks::default(),
+            background_link_check: settings.background_link_check,
         })
     }
 
@@ -99,6 +104,10 @@ pub fn router(state: SharedState) -> Router {
         .route("/setup", post(account::setup))
         .route("/login", post(account::login))
         .route("/logout", post(account::logout))
+        .route(
+            "/settings",
+            get(settings_routes::get).put(settings_routes::put),
+        )
         .route("/account/password", put(account::change_password))
         .route("/account/confirm", post(account::confirm_password))
         .route(

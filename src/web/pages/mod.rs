@@ -6,6 +6,7 @@ mod account_pages;
 mod auth_pages;
 mod bookmark_pages;
 mod layout;
+mod settings_pages;
 mod support;
 mod user_pages;
 mod view;
@@ -52,6 +53,10 @@ pub fn router() -> Router<SharedState> {
         .route(
             "/users/{id}/delete",
             get(user_pages::delete_form).post(user_pages::delete_submit),
+        )
+        .route(
+            "/settings",
+            get(settings_pages::settings).post(settings_pages::save),
         )
         .route("/account", get(account_pages::account))
         .route("/account/password", post(account_pages::change_password))

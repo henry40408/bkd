@@ -232,6 +232,18 @@
     return { update, remove: () => box.remove() };
   }
 
+  const SKIP_REASONS = {
+    slow_down: "asked us to slow down",
+    not_answering: "is not answering",
+  };
+
+  function takeSkipped(run, event, progress) {
+    const { reason, host } = JSON.parse(event.data);
+    run.skipped += 1;
+    run.skips.set(host, SKIP_REASONS[reason] || "was left alone");
+    progress.update(run.done + run.skipped);
+  }
+
   function takeResult(run, event, progress) {
     const { id, link } = JSON.parse(event.data);
     run.done += 1;
@@ -252,6 +264,7 @@
       if (event.name === "done") return;
       if (event.name === "error") throw new CheckFailed("The link check stopped early.");
       if (event.name === "result") takeResult(run, event, progress);
+      if (event.name === "skipped") takeSkipped(run, event, progress);
     }
     throw new CheckFailed("The link check was interrupted.");
   }
@@ -259,7 +272,10 @@
   function checkSummary(run, total) {
     const count = run.done === total ? `${total}` : `${run.done} of ${total}`;
     const broken = run.broken > 0 ? `: ${run.broken} broken` : "";
-    return `Checked ${count} bookmark${total === 1 ? "" : "s"}${broken}`;
+    const summary = `Checked ${count} bookmark${total === 1 ? "" : "s"}${broken}`;
+    if (run.skipped === 0) return summary;
+    const sites = Array.from(run.skips, ([host, why]) => `${host} ${why}`).join("; ");
+    return `${summary}. ${sites}, so some links were left unchecked: try again later.`;
   }
 
   function showNotice(text) {
@@ -294,7 +310,13 @@
   }
 
   async function runLinkCheck(form, ids) {
-    const run = { controller: new AbortController(), done: 0, broken: 0 };
+    const run = {
+      controller: new AbortController(),
+      done: 0,
+      broken: 0,
+      skipped: 0,
+      skips: new Map(),
+    };
     checkRun = run;
     const progress = showCheckProgress(form, ids.length, () => run.controller.abort());
     let failure = null;

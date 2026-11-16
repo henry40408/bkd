@@ -18,7 +18,7 @@ use super::guard::CurrentUser;
 use crate::auth::unix_now;
 use crate::bookmarks::{self, Bookmark, BookmarkInput, LinkCheck, LinkCount, Page, TagCount};
 use crate::bulk::{self, BulkInput, BulkOutcome};
-use crate::linkcheck::{self, ActiveCheck, CheckInput, RunningCheck};
+use crate::linkcheck::{self, ActiveCheck, CheckInput, Outcome, RunningCheck, Skipped};
 use crate::search::Filter;
 
 #[derive(Deserialize)]
@@ -147,7 +147,8 @@ pub struct CheckedLink {
 }
 
 /// Answers with a server-sent event stream: one `result` event as each link is
-/// checked, then `done`. Each result is saved as it arrives, so a client that stops
+/// checked (or `skipped`, when its site asked to be left alone or stopped answering),
+/// then `done`. Each result is saved as it arrives, so a client that stops
 /// early keeps what was already found.
 pub async fn check(
     State(state): State<SharedState>,
@@ -193,9 +194,15 @@ async fn next_check_event(
     }
     // A result for a bookmark edited during the check is not stored, so it is not sent.
     loop {
-        let Some(checked) = progress.checks.next().await else {
+        let Some(outcome) = progress.checks.next().await else {
             progress.finished = true;
             return Some((Ok(Event::default().event("done").data("{}")), progress));
+        };
+        let checked = match outcome {
+            Outcome::Checked(checked) => checked,
+            Outcome::Skipped(skipped) => {
+                return Some((Ok(skipped_event(&skipped)), progress));
+            }
         };
         let stored =
             linkcheck::store(&progress.pool, progress.user_id, &[checked], unix_now()).await;
@@ -212,6 +219,26 @@ async fn next_check_event(
         };
         return Some((Ok(event), progress));
     }
+}
+
+#[derive(Serialize)]
+struct SkippedLink<'a> {
+    id: i64,
+    reason: &'a str,
+    host: &'a str,
+}
+
+/// A link that was not asked, because its site asked to be left alone or stopped answering.
+fn skipped_event(skipped: &Skipped) -> Event {
+    let link = SkippedLink {
+        id: skipped.target.id,
+        reason: skipped.reason.as_str(),
+        host: &skipped.host,
+    };
+    Event::default()
+        .event("skipped")
+        .json_data(&link)
+        .unwrap_or_else(|_| Event::default().event("error").data("{}"))
 }
 
 fn result_event(link: &CheckedLink) -> Event {

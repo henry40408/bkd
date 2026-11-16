@@ -19,7 +19,7 @@ use crate::auth::session::SessionUser;
 use crate::auth::unix_now;
 use crate::bookmarks::{self, Bookmark, BookmarkInput, DEFAULT_PAGE_SIZE, Page as Window};
 use crate::bulk::{BulkActionInput, BulkInput};
-use crate::linkcheck::{self, CheckInput};
+use crate::linkcheck::{self, CheckInput, Outcome};
 use crate::search::{Filter, Highlight};
 use crate::web::SharedState;
 use crate::web::bookmark_routes;
@@ -29,6 +29,10 @@ use crate::web::guard::CurrentUser;
 const PAGE_SIZE: u32 = DEFAULT_PAGE_SIZE;
 // Keeps `(page - 1) * PAGE_SIZE` far from overflowing.
 const MAX_PAGE: u32 = 1_000_000;
+// Without a script the page is one response, so a check that drags on would end as a
+// gateway timeout. Proxies commonly give up after 60 seconds.
+const NO_SCRIPT_CHECK_LIMIT: std::time::Duration = std::time::Duration::from_secs(45);
+
 const CHECK_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
 
 struct TagChip {
@@ -866,16 +870,26 @@ pub async fn bulk(
     }
     let session_user = user.0.clone();
     let outcome = match request.action.as_str() {
-        "check" => check_links(&state, &session_user, request.ids.clone()).await,
+        "check" => check_links(&state, &session_user, request.ids.clone())
+            .await
+            .map(|complete| {
+                if complete {
+                    "bulk-done"
+                } else {
+                    "check-incomplete"
+                }
+            }),
         "delete" if !request.confirmed => {
             return confirm_bulk_delete(&state, &session_user, &request).await;
         }
-        action => run_bulk(&state, user, action, &request).await,
+        action => run_bulk(&state, user, action, &request)
+            .await
+            .map(|()| "bulk-done"),
     };
     match outcome {
-        Ok(()) => {
+        Ok(notice) => {
             let done = request.view.without_select().href();
-            Ok(Redirect::to(&with_query(&done, &[("notice", "bulk-done")])).into_response())
+            Ok(Redirect::to(&with_query(&done, &[("notice", notice)])).into_response())
         }
         Err(PageError::Failed(status, message)) => {
             bulk_refused(&state, &session_user, request, (status, message)).await
@@ -972,12 +986,13 @@ fn stale_selection() -> PageError {
 }
 
 /// Without a script there is no live progress, so the page waits for every check to
-/// finish and then shows the list again with the results.
+/// finish and then shows the list again with the results. Returns false when some links
+/// were not checked: their site asked to be left alone, or the time ran out.
 async fn check_links(
     state: &SharedState,
     user: &SessionUser,
     ids: Vec<i64>,
-) -> Result<(), PageError> {
+) -> Result<bool, PageError> {
     let valid = CheckInput { ids }
         .validate()
         .map_err(|error| PageError::bad_request(&error.to_string()))?;
@@ -989,9 +1004,21 @@ async fn check_links(
         .await?
         .ok_or_else(stale_selection)?;
     let mut running = state.link_checker.start(targets);
-    while let Some(checked) = running.next().await {
-        linkcheck::store(&state.pool, user.user_id, &[checked], unix_now()).await?;
+    let deadline = tokio::time::Instant::now() + NO_SCRIPT_CHECK_LIMIT;
+    let mut complete = true;
+    loop {
+        match tokio::time::timeout_at(deadline, running.next()).await {
+            Err(_) => {
+                complete = false;
+                break;
+            }
+            Ok(None) => break,
+            Ok(Some(Outcome::Skipped(_))) => complete = false,
+            Ok(Some(Outcome::Checked(checked))) => {
+                linkcheck::store(&state.pool, user.user_id, &[checked], unix_now()).await?;
+            }
+        }
     }
     drop(slot);
-    Ok(())
+    Ok(complete)
 }

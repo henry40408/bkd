@@ -1,4 +1,5 @@
 mod auth;
+mod background_check;
 mod bookmarks;
 mod bulk;
 mod db;
@@ -11,6 +12,7 @@ mod web;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -19,6 +21,7 @@ use tokio::net::TcpListener;
 use auth::forward_auth::{ForwardAuth, ForwardAuthConfig};
 use auth::setup_token::SetupToken;
 use auth::{first_admin, password};
+use background_check::Schedule;
 use linkcheck::Checker;
 use web::{AppState, Settings};
 
@@ -62,9 +65,35 @@ struct Args {
     /// roles stay as an admin sets them in bkd.
     #[arg(long, env = "BKD_FORWARD_AUTH_ADMIN_GROUP")]
     forward_auth_admin_group: Option<String>,
+
+    /// Seconds between rounds of the background link check. 0 turns it off. Even when it
+    /// is on, it only checks the bookmarks of users who chose that in their settings.
+    #[arg(
+        long,
+        env = "BKD_LINK_CHECK_INTERVAL",
+        default_value_t = 0,
+        value_parser = clap::value_parser!(u64).range(0..=30 * 24 * 60 * 60)
+    )]
+    link_check_interval: u64,
+
+    /// Bookmarks the background link check visits per round, all users together.
+    #[arg(
+        long,
+        env = "BKD_LINK_CHECK_BATCH",
+        default_value_t = 20,
+        value_parser = clap::value_parser!(u32).range(1..=200)
+    )]
+    link_check_batch: u32,
 }
 
 impl Args {
+    fn link_check_schedule(&self) -> Option<Schedule> {
+        (self.link_check_interval > 0).then(|| Schedule {
+            interval: Duration::from_secs(self.link_check_interval),
+            batch: self.link_check_batch as usize,
+        })
+    }
+
     fn forward_auth(&self) -> Result<Option<ForwardAuth>> {
         if self.forward_auth_trusted_proxies.is_empty() {
             return Ok(None);
@@ -89,6 +118,8 @@ async fn main() -> Result<()> {
     let pool = db::open(&args.db).await?;
     password::warm_up();
     let setup_token = announce_setup_token(&pool).await?;
+    let link_checker = Checker::public_only()?;
+    let schedule = args.link_check_schedule();
     let state = AppState::new(Settings {
         pool: pool.clone(),
         setup_token,
@@ -96,14 +127,20 @@ async fn main() -> Result<()> {
         forward_auth: args
             .forward_auth()
             .context("invalid forward auth setting")?,
-        link_checker: Checker::public_only()?,
+        link_checker: link_checker.clone(),
+        background_link_check: schedule.is_some(),
     });
+    let background_check = schedule
+        .map(|schedule| tokio::spawn(background_check::run(pool.clone(), link_checker, schedule)));
 
     let listener = TcpListener::bind(args.addr)
         .await
         .with_context(|| format!("cannot listen on {}", args.addr))?;
     tracing::info!("listening on http://{}", listener.local_addr()?);
     web::serve(state, listener).await?;
+    if let Some(task) = background_check {
+        task.abort();
+    }
 
     // Closing checkpoints the WAL, so the -wal and -shm files do not outlive the process.
     pool.close().await;

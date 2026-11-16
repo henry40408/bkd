@@ -162,6 +162,34 @@ pub async fn username_of(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
     Ok(row.map(|(username,)| username))
 }
 
+pub async fn link_check_enabled(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let row: Option<(bool,)> = sqlx::query_as("SELECT link_check_enabled FROM users WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.is_some_and(|(enabled,)| enabled))
+}
+
+/// Opted in and still allowed to sign in: the two things the background check needs.
+pub async fn wants_background_check(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let row: Option<(bool,)> = sqlx::query_as(
+        "SELECT link_check_enabled AND disabled_at IS NULL FROM users WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.is_some_and(|(wanted,)| wanted))
+}
+
+pub async fn set_link_check_enabled(pool: &SqlitePool, id: i64, enabled: bool) -> Result<()> {
+    sqlx::query("UPDATE users SET link_check_enabled = ?2 WHERE id = ?1")
+        .bind(id)
+        .bind(enabled)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct UserRecord {
     pub id: i64,

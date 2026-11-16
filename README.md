@@ -48,6 +48,8 @@ On the first start, with an empty database, bkd logs a one-time setup token like
 | `--db` | `BKD_DB` | `bkd.sqlite3` | Path of the SQLite database file. Created if missing. |
 | `--addr` | `BKD_ADDR` | `127.0.0.1:8080` | Address to listen on. |
 | `--secure-cookies` | `BKD_SECURE_COOKIES` | off | Mark the session cookie `Secure`. Turn on when serving over HTTPS. |
+| `--link-check-interval` | `BKD_LINK_CHECK_INTERVAL` | `0` (off) | Seconds between rounds of the background link check. `0` turns it off for the whole server. See "Link check". |
+| `--link-check-batch` | `BKD_LINK_CHECK_BATCH` | `20` | Bookmarks the background link check visits per round, all users together (1 to 200). |
 
 ## Sign in through a reverse proxy (Authelia)
 
@@ -114,9 +116,15 @@ In select mode, tick bookmarks and press "Check links". The server asks each add
 - **Link moved** (amber arrow, amber background, "now at <address>"): the page answers, but at another address. bkd only tells you; it does not change the saved URL.
 - **Link not confirmed** (grey question mark): the site refused robots (401, 403, 429), it did not answer within 10 seconds, or the address was not contacted because it is not public.
 
+A site that answers 429 or 503 is asked to be left alone, and so is a site that does not answer twice in a row: the check does not ask it about the other bookmarks, and says so ("example.com asked us to slow down, so some links were left unchecked"). Each bookmark gets 10 seconds in all (HEAD and GET together). Without a script the page is one response, so it stops waiting after 45 seconds and tells you that some links were not checked. The background check leaves such a site alone for the `Retry-After` it gave (up to 24 hours), or 1 minute, doubling each time in a row, up to 24 hours; one normal answer starts it over. The wait follows the site that answered, so a short link that redirects to a throttling site does not stop the short-link site. A page behind Cloudflare's bot check (`cf-mitigated: challenge`) is "not confirmed", not broken. The checker identifies itself as `bkd-link-checker/<version>` with the project's address in its `User-Agent`.
+
 A result is cleared when you change the bookmark's URL. The sidebar lists each result under "Status" with a count (Broken, Moved, Not confirmed, OK, Not checked; a result with no bookmarks is left out); choose one to show only those bookmarks, or search with `status:broken`.
 
 The server only contacts public addresses, since it makes the requests on behalf of every user. Addresses for private networks, this machine and link-local ranges (such as cloud metadata) are never contacted, including through a redirect or a host name that resolves to one. This means bkd cannot check links to services on your own network. Each request has a 10 second limit and follows at most 5 redirects. One user can run one check at a time (429 otherwise). Over the API: `POST /api/bookmarks/check` with `{"ids": [...]}` (1 to 200 ids; 404 if any id is missing or not yours). It answers with a server-sent event stream: an event `result` with `{"id", "link": {"status", "checked_at", "detail"}}` for each link as soon as it is checked, then `done`. Closing the connection stops the check.
+
+### Background check
+
+bkd can also check your bookmarks without being asked. It is off until both sides agree: the administrator starts the server with `--link-check-interval` (seconds between rounds), and you tick "Check my bookmarks in the background" under "Settings". Each round checks up to `--link-check-batch` bookmarks of the users who ticked it, never-checked ones first and then the longest unchecked, with users taking turns so one large collection does not use up the rounds. A bookmark with a result less than 7 days old is skipped. Requests to one site are 1.5 seconds apart. Results are the same as for the button, and the same public-address rule applies. Over the API: `GET` and `PUT /api/settings` with `{"link_check_enabled": bool}`.
 
 ## Import and export
 
