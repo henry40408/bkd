@@ -1497,6 +1497,11 @@ async fn an_exported_file_imports_back_into_another_account() {
 // -------------------------------------------------------------- front end
 
 async fn fetch_page(app: &TestApp, uri: &str) -> (StatusCode, HeaderMap, String) {
+    let (status, headers, bytes) = fetch_bytes(app, uri).await;
+    (status, headers, String::from_utf8(bytes).unwrap())
+}
+
+async fn fetch_bytes(app: &TestApp, uri: &str) -> (StatusCode, HeaderMap, Vec<u8>) {
     let mut request = Request::builder()
         .uri(uri)
         .header(header::HOST, "bkd.test")
@@ -1507,8 +1512,7 @@ async fn fetch_page(app: &TestApp, uri: &str) -> (StatusCode, HeaderMap, String)
     let response = app.router.clone().oneshot(request).await.unwrap();
     let (parts, body) = response.into_parts();
     let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
-    let text = String::from_utf8(bytes.to_vec()).unwrap();
-    (parts.status, parts.headers, text)
+    (parts.status, parts.headers, bytes.to_vec())
 }
 
 #[tokio::test]
@@ -1529,6 +1533,30 @@ async fn the_front_end_is_served_with_a_strict_content_security_policy() {
         assert!(!policy.contains("unsafe-inline"));
         assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
     }
+}
+
+#[tokio::test]
+async fn the_icons_are_served_with_their_own_content_types() {
+    let app = TestApp::running().await;
+    for (uri, content_type, magic) in [
+        ("/favicon.svg", "image/svg+xml", &b"<svg"[..]),
+        ("/favicon.ico", "image/x-icon", &[0, 0, 1, 0][..]),
+        ("/apple-touch-icon.png", "image/png", &b"\x89PNG"[..]),
+    ] {
+        let (status, headers, body) = fetch_bytes(&app, uri).await;
+        assert_eq!(status, StatusCode::OK, "{uri}");
+        assert_eq!(headers[header::CONTENT_TYPE], content_type, "{uri}");
+        assert!(body.starts_with(magic), "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn every_page_links_its_icons() {
+    let app = TestApp::running().await;
+    let (_, _, html) = fetch_page(&app, "/login").await;
+    assert!(html.contains(r#"<link rel="icon" href="/favicon.svg" type="image/svg+xml">"#));
+    assert!(html.contains(r#"<link rel="icon" href="/favicon.ico" sizes="48x48">"#));
+    assert!(html.contains(r#"<link rel="apple-touch-icon" href="/apple-touch-icon.png">"#));
 }
 
 #[tokio::test]
