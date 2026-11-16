@@ -32,6 +32,10 @@ const BASE_COOLDOWN: Duration = Duration::from_secs(60);
 /// Also the longest a site can ask for: a `Retry-After` of a week is not believed.
 const MAX_COOLDOWN: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// How long after a wait ends a site is still remembered, so that asking again soon
+/// doubles the wait. After this, a site is treated as new.
+const FORGET_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
+
 pub struct Schedule {
     /// Time between the starts of two rounds.
     pub interval: Duration,
@@ -149,6 +153,13 @@ impl Worker {
         );
     }
 
+    /// Without this the map would keep every site that was ever throttled.
+    fn forget_old_cooldowns(&mut self) {
+        let now = Instant::now();
+        self.cooldowns
+            .retain(|_, cooldown| cooldown.until + FORGET_AFTER > now);
+    }
+
     fn is_cooling(&self, host: &str) -> bool {
         self.cooldowns
             .get(host)
@@ -157,6 +168,7 @@ impl Worker {
 
     /// The bookmarks to check now, skipping sites that are cooling down.
     async fn due_now(&mut self) -> Result<Vec<Due>> {
+        self.forget_old_cooldowns();
         // The cooling sites are known only after the query, so read extra rows: a site
         // that fills the front of the line must not leave the batch empty.
         let wanted = self.batch.saturating_mul(OVERFETCH);
@@ -321,6 +333,33 @@ mod tests {
         let asked = |seconds| cooldown_for(3, Some(Duration::from_secs(seconds)));
         assert_eq!(asked(30), Duration::from_secs(30));
         assert_eq!(asked(7 * 24 * 3600), MAX_COOLDOWN);
+    }
+
+    #[tokio::test]
+    async fn a_site_is_forgotten_a_day_after_its_wait_ends() {
+        let (_dir, pool) = test_pool().await;
+        let mut worker = worker(pool, Checker::public_only().unwrap());
+        let now = Instant::now();
+        // An Instant counts from boot on some systems, so going back a day can be impossible.
+        let ended = |ago: Duration| {
+            now.checked_sub(ago)
+                .map(|until| HostCooldown { strikes: 3, until })
+        };
+        let (Some(recent), Some(old)) = (
+            ended(Duration::from_secs(60)),
+            ended(FORGET_AFTER + Duration::from_secs(60)),
+        ) else {
+            return;
+        };
+        worker.cooldowns.insert("recent.test".to_owned(), recent);
+        worker.cooldowns.insert("old.test".to_owned(), old);
+
+        worker.forget_old_cooldowns();
+        assert!(
+            worker.cooldowns.contains_key("recent.test"),
+            "still doubles"
+        );
+        assert!(!worker.cooldowns.contains_key("old.test"));
     }
 
     #[tokio::test]
