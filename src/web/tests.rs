@@ -2737,6 +2737,10 @@ async fn the_settings_page_saves_the_checkbox() {
     let page = app.send(Send::get("/settings").cookie(&token)).await;
     assert_eq!(page.status, StatusCode::OK);
     assert!(page.text.contains(r#"name="link_check_enabled""#));
+    assert!(
+        page.text.contains(r#"<label class="inline strong">"#),
+        "the checkbox shares a row with its text"
+    );
     assert!(!page.text.contains("checked"), "off by default");
     assert!(
         page.text.contains("turned off on this server"),

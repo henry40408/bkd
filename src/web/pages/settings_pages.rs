@@ -39,11 +39,11 @@ impl View for SettingsPage {
                     "until the administrator turns them on."
                 }
             }
-            form.stack method="post" action="/settings" {
-                label {
+            form.stack.flush method="post" action="/settings" {
+                label.inline.strong {
                     input type="checkbox" name="link_check_enabled" value="on"
                         checked[self.link_check_enabled];
-                    " Check my bookmarks in the background"
+                    "Check my bookmarks in the background"
                 }
                 div { button type="submit" { "Save" } }
             }

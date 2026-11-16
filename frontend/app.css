@@ -73,6 +73,9 @@ details.add summary { padding: var(--s3) var(--s4); cursor: pointer; font-weight
 form.stack { display: grid; gap: var(--s3); padding: 0 var(--s4) var(--s4); }
 label { display: grid; gap: var(--s1); font-size: .9rem; font-weight: 600; }
 label.inline { display: flex; align-items: center; gap: var(--s2); font-weight: 400; }
+label.inline.strong { font-weight: 600; }
+/* A form that sits in a section under a heading, so it lines up with the heading. */
+form.stack.flush { padding: 0; }
 .err { color: var(--danger); font-size: .9rem; margin: 0; }
 
 .summary { color: var(--ink-soft); font-size: .85rem; margin: 0 0 var(--s2); }
