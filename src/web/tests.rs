@@ -1593,6 +1593,9 @@ impl FakeSite {
                     let head = String::from_utf8_lossy(&buffer[..read]).into_owned();
                     let mut words = head.split_whitespace();
                     let (method, path) = (words.next().unwrap_or(""), words.next().unwrap_or(""));
+                    if path.starts_with("/hang") {
+                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    }
                     let reply = match (method, path) {
                         (_, "/ok") => "200 OK",
                         (_, "/missing") => "404 Not Found",
@@ -1602,10 +1605,14 @@ impl FakeSite {
                         ("HEAD", "/no-head") => "405 Method Not Allowed",
                         (_, "/no-head") => "200 OK",
                         (_, "/moved") => "301 Moved Permanently\r\nLocation: /ok",
+                        (_, "/to-another-host") => {
+                            "302 Found\r\nLocation: http://localhost:PORT/slow-down"
+                        }
                         (_, "/loop") => "302 Found\r\nLocation: /loop",
                         (_, "/inside") => "302 Found\r\nLocation: http://10.0.0.1/secret",
                         _ => "500 Internal Server Error",
                     };
+                    let reply = reply.replace("PORT", &port.to_string());
                     let response = format!(
                         "HTTP/1.1 {reply}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                     );
@@ -1746,6 +1753,56 @@ async fn a_site_that_says_slow_down_is_not_asked_about_its_other_links() {
         ("unknown".to_owned(), "HTTP 429".to_owned())
     );
     assert_eq!(site.requests(), 1);
+    let skipped = events_named(&reply, "skipped");
+    assert_eq!(skipped.len(), 1, "and the page is told why");
+    assert_eq!(skipped[0]["id"], second);
+    assert_eq!(skipped[0]["reason"], "slow_down");
+    assert_eq!(skipped[0]["host"], "127.0.0.1");
+}
+
+#[tokio::test]
+async fn a_site_that_does_not_answer_twice_is_not_asked_a_third_time() {
+    let checker =
+        Checker::allowing_loopback_with_timeout(std::time::Duration::from_millis(200)).unwrap();
+    let app = TestApp::with_checker(None, checker).await;
+    let token = app.sign_in_as("henry").await;
+    let site = FakeSite::start().await;
+    let mut ids = Vec::new();
+    for page in 0..3 {
+        ids.push(create_at(&app, &token, &site.url(&format!("/hang?{page}")), "hangs").await);
+    }
+
+    let reply = check_links(&app, &token, &ids).await;
+    assert_eq!(events_named(&reply, "result").len(), 2);
+    assert_eq!(
+        link_of(&reply, ids[0]),
+        ("unknown".to_owned(), "Timed out".to_owned())
+    );
+    let skipped = events_named(&reply, "skipped");
+    assert_eq!(skipped.len(), 1);
+    assert_eq!(skipped[0]["reason"], "not_answering");
+    assert_eq!(
+        site.requests(),
+        2,
+        "one HEAD each; a timeout is not retried with GET"
+    );
+}
+
+#[tokio::test]
+async fn the_wait_is_for_the_site_that_said_slow_down_not_the_one_that_redirected() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let site = FakeSite::start().await;
+    let first = create_at(&app, &token, &site.url("/to-another-host"), "shortened").await;
+    let second = create_at(&app, &token, &site.url("/ok"), "same site").await;
+
+    let reply = check_links(&app, &token, &[first, second]).await;
+    assert!(events_named(&reply, "skipped").is_empty());
+    assert_eq!(
+        link_of(&reply, first),
+        ("unknown".to_owned(), "HTTP 429".to_owned())
+    );
+    assert_eq!(link_of(&reply, second).0, "ok");
 }
 
 #[tokio::test]

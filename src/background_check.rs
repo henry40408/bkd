@@ -3,7 +3,8 @@
 //! It uses the same checker as the "Check links" button, so the same rules keep it off
 //! private addresses. On top of that it is gentle: a bounded batch per round, one
 //! request at a time per site with a pause between, and a site that asks to be left
-//! alone (429, 503) is skipped until the wait it asked for is over.
+//! alone (429, 503) or stops answering is skipped for a while. The wait is what the site
+//! asked for, or else doubles with each time in a row and starts over after an answer.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -13,7 +14,7 @@ use sqlx::SqlitePool;
 use tokio::time::MissedTickBehavior;
 
 use crate::auth::unix_now;
-use crate::linkcheck::{Checker, Target, host_of, store};
+use crate::linkcheck::{Backoff, Checker, Outcome, Target, host_of, store};
 use crate::users;
 
 /// A result younger than this is not asked for again.
@@ -24,6 +25,12 @@ const OVERFETCH: usize = 5;
 
 /// Between two requests to one site. Longer than the manual check, which is quick on purpose.
 const SAME_HOST_PAUSE: Duration = Duration::from_millis(1500);
+
+/// The first wait for a site that did not say how long. Each time in a row doubles it.
+const BASE_COOLDOWN: Duration = Duration::from_secs(60);
+
+/// Also the longest a site can ask for: a `Retry-After` of a week is not believed.
+const MAX_COOLDOWN: Duration = Duration::from_secs(24 * 60 * 60);
 
 pub struct Schedule {
     /// Time between the starts of two rounds.
@@ -57,8 +64,22 @@ struct Worker {
     pool: SqlitePool,
     checker: Checker,
     batch: usize,
-    /// Sites that asked to be left alone, and until when.
-    cooldowns: HashMap<String, Instant>,
+    cooldowns: HashMap<String, HostCooldown>,
+}
+
+/// What is known about a site that asked to be left alone.
+#[derive(Debug, Clone, Copy)]
+struct HostCooldown {
+    /// Times in a row it asked. Starts over when the site answers normally.
+    strikes: u32,
+    until: Instant,
+}
+
+/// How long to leave a site alone after its `strikes`th request in a row to be.
+fn cooldown_for(strikes: u32, retry_after: Option<Duration>) -> Duration {
+    let doublings = strikes.saturating_sub(1).min(20);
+    let wait = retry_after.unwrap_or(BASE_COOLDOWN * 2u32.pow(doublings));
+    wait.min(MAX_COOLDOWN)
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -85,11 +106,18 @@ impl Worker {
             .collect();
         let mut running = self.checker.start_paced(targets, SAME_HOST_PAUSE);
         let mut stored = 0;
-        while let Some(checked) = running.next().await {
-            if let Some(wait) = checked.backoff {
-                let host = host_of(&checked.target.url);
-                tracing::info!(%host, seconds = wait.as_secs(), "site asked to be left alone");
-                self.cooldowns.insert(host, Instant::now() + wait);
+        while let Some(outcome) = running.next().await {
+            // Skipped targets stay due, and a later round picks them up.
+            let Outcome::Checked(checked) = outcome else {
+                continue;
+            };
+            match checked.backoff.clone() {
+                Some(backoff) => self.leave_alone(backoff),
+                // Only a reply ends the waiting; a timeout says nothing about a site's mood.
+                None if checked.answered => {
+                    self.cooldowns.remove(&host_of(&checked.target.url));
+                }
+                None => {}
             }
             let user_id = owners[&checked.target.id];
             // The user may have opted out, or been disabled, since the round began.
@@ -103,17 +131,39 @@ impl Worker {
         Ok(stored)
     }
 
+    fn leave_alone(&mut self, backoff: Backoff) {
+        let cooldown = self
+            .cooldowns
+            .entry(backoff.host.clone())
+            .or_insert_with(|| HostCooldown {
+                strikes: 0,
+                until: Instant::now(),
+            });
+        cooldown.strikes = cooldown.strikes.saturating_add(1);
+        let wait = cooldown_for(cooldown.strikes, backoff.retry_after);
+        cooldown.until = Instant::now() + wait;
+        tracing::info!(
+            host = %backoff.host,
+            seconds = wait.as_secs(),
+            "leaving a site alone for a while"
+        );
+    }
+
+    fn is_cooling(&self, host: &str) -> bool {
+        self.cooldowns
+            .get(host)
+            .is_some_and(|cooldown| cooldown.until > Instant::now())
+    }
+
     /// The bookmarks to check now, skipping sites that are cooling down.
     async fn due_now(&mut self) -> Result<Vec<Due>> {
-        let now = Instant::now();
-        self.cooldowns.retain(|_, until| *until > now);
         // The cooling sites are known only after the query, so read extra rows: a site
         // that fills the front of the line must not leave the batch empty.
         let wanted = self.batch.saturating_mul(OVERFETCH);
         let due = due_bookmarks(&self.pool, unix_now(), wanted).await?;
         Ok(due
             .into_iter()
-            .filter(|due| !self.cooldowns.contains_key(&host_of(&due.url)))
+            .filter(|due| !self.is_cooling(&host_of(&due.url)))
             .take(self.batch)
             .collect())
     }
@@ -253,6 +303,45 @@ mod tests {
         assert!(ids(&due).contains(&big_ids[0]));
     }
 
+    #[test]
+    fn a_site_that_says_nothing_is_left_alone_for_twice_as_long_each_time() {
+        let waits: Vec<u64> = (1..=5)
+            .map(|strikes| cooldown_for(strikes, None).as_secs())
+            .collect();
+        assert_eq!(waits, [60, 120, 240, 480, 960]);
+        assert_eq!(
+            cooldown_for(100, None),
+            MAX_COOLDOWN,
+            "capped, and no overflow"
+        );
+    }
+
+    #[test]
+    fn what_a_site_asks_for_is_used_but_never_more_than_a_day() {
+        let asked = |seconds| cooldown_for(3, Some(Duration::from_secs(seconds)));
+        assert_eq!(asked(30), Duration::from_secs(30));
+        assert_eq!(asked(7 * 24 * 3600), MAX_COOLDOWN);
+    }
+
+    #[tokio::test]
+    async fn an_answer_starts_the_waiting_over() {
+        let (_dir, pool) = test_pool().await;
+        let mut worker = worker(pool, Checker::public_only().unwrap());
+        let ask = || Backoff {
+            host: "slow.test".to_owned(),
+            retry_after: None,
+        };
+        worker.leave_alone(ask());
+        worker.leave_alone(ask());
+        assert_eq!(worker.cooldowns["slow.test"].strikes, 2);
+        assert!(worker.is_cooling("slow.test"));
+        assert!(!worker.is_cooling("other.test"));
+
+        worker.cooldowns.remove("slow.test");
+        worker.leave_alone(ask());
+        assert_eq!(worker.cooldowns["slow.test"].strikes, 1);
+    }
+
     fn worker(pool: SqlitePool, checker: Checker) -> Worker {
         Worker {
             pool,
@@ -273,10 +362,10 @@ mod tests {
         let elsewhere = add_bookmark(&pool, user, "http://10.0.0.2/", None).await;
         let mut worker = worker(pool.clone(), Checker::public_only().unwrap());
         worker.batch = 2;
-        worker.cooldowns.insert(
-            "10.0.0.1".to_owned(),
-            Instant::now() + Duration::from_secs(60),
-        );
+        worker.leave_alone(Backoff {
+            host: "10.0.0.1".to_owned(),
+            retry_after: None,
+        });
 
         let due = worker.due_now().await.unwrap();
         assert_eq!(ids(&due), [elsewhere]);

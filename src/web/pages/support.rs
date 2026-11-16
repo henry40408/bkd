@@ -275,6 +275,10 @@ impl Notice {
             "bookmark-deleted" => "Bookmark deleted.",
             "settings-saved" => "Settings saved.",
             "bulk-done" => "Done.",
+            "check-incomplete" => {
+                "Some links were not checked: a site asked to be left alone, did not answer, \
+                 or the time ran out. Check them again later."
+            }
             "nothing-selected" => "Tick at least one bookmark first.",
             _ => return None,
         })

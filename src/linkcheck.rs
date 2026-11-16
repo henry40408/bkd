@@ -40,9 +40,9 @@ const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     "; +https://github.com/henry40408/bkd)"
 );
-// A site that says "too many requests" or "unavailable" is left alone for a while.
-const DEFAULT_BACKOFF: Duration = Duration::from_secs(60);
-const MAX_BACKOFF: Duration = Duration::from_secs(60);
+// Two timeouts in a row mean the site is not answering. Asking about its other bookmarks
+// would only make the check wait 10 seconds for each of them.
+const TIMEOUTS_BEFORE_GIVING_UP: u32 = 2;
 
 // A slow site is usually busy, not gone, so a timeout is "unknown" rather than "broken".
 const TIMED_OUT: &str = "Timed out";
@@ -240,22 +240,32 @@ struct Answer {
 }
 
 impl Answer {
-    /// How long to leave the site alone, when it asks for that.
-    fn backoff(&self) -> Option<Duration> {
-        let asks_to_wait = matches!(self.status.as_u16(), 429 | 503);
-        asks_to_wait.then(|| self.retry_after.unwrap_or(DEFAULT_BACKOFF).min(MAX_BACKOFF))
+    /// "Too many requests" or "unavailable": the site wants to be left alone for a while.
+    fn asks_to_wait(&self) -> bool {
+        matches!(self.status.as_u16(), 429 | 503)
     }
 
     /// Asking again with GET would get the same refusal, so it only adds load.
     fn is_final(&self) -> bool {
-        self.status.is_success() || self.challenged || self.backoff().is_some()
+        self.status.is_success() || self.challenged || self.asks_to_wait()
     }
 }
 
-/// A verdict, and how long the site asked to be left alone.
+/// A site that should be left alone for a while. `retry_after` is what the site asked
+/// for, when it said; how long to really wait is for the caller to decide.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Backoff {
+    pub host: String,
+    pub retry_after: Option<Duration>,
+}
+
+/// A verdict, and whether the site should be left alone.
 pub struct Inspection {
     pub verdict: Verdict,
-    pub backoff: Option<Duration>,
+    pub backoff: Option<Backoff>,
+    timed_out: bool,
+    /// A site replied, as opposed to a timeout or a failed connection.
+    answered: bool,
 }
 
 #[derive(Clone)]
@@ -263,29 +273,43 @@ pub struct Checker {
     client: Client,
     guard: Guard,
     in_flight: Arc<Semaphore>,
+    /// For one bookmark, HEAD and GET together.
+    budget: Duration,
 }
 
 impl Checker {
     pub fn public_only() -> Result<Self> {
-        Self::with_guard(Guard {
-            allow_loopback: false,
-        })
+        Self::with_guard(
+            Guard {
+                allow_loopback: false,
+            },
+            REQUEST_TIMEOUT,
+        )
     }
 
     #[cfg(test)]
     pub fn allowing_loopback() -> Result<Self> {
-        Self::with_guard(Guard {
-            allow_loopback: true,
-        })
+        Self::allowing_loopback_with_timeout(REQUEST_TIMEOUT)
     }
 
-    fn with_guard(guard: Guard) -> Result<Self> {
+    /// For tests of a site that does not answer, which cannot wait 10 seconds.
+    #[cfg(test)]
+    pub fn allowing_loopback_with_timeout(timeout: Duration) -> Result<Self> {
+        Self::with_guard(
+            Guard {
+                allow_loopback: true,
+            },
+            timeout,
+        )
+    }
+
+    fn with_guard(guard: Guard, timeout: Duration) -> Result<Self> {
         let client = Client::builder()
             .user_agent(USER_AGENT)
             .no_proxy()
             // Every host is visited once, so a pooled connection is only an open file descriptor.
             .pool_max_idle_per_host(0)
-            .timeout(REQUEST_TIMEOUT)
+            .timeout(timeout)
             .connect_timeout(CONNECT_TIMEOUT)
             .dns_resolver(Arc::new(GuardedResolver { guard }))
             .redirect(redirect::Policy::custom(move |attempt| {
@@ -302,6 +326,7 @@ impl Checker {
             client,
             guard,
             in_flight: Arc::new(Semaphore::new(MAX_REQUESTS_IN_FLIGHT)),
+            budget: timeout,
         })
     }
 
@@ -321,18 +346,26 @@ impl Checker {
             .acquire()
             .await
             .expect("semaphore is never closed");
-        let answer = match self.ask(Method::HEAD, &url).await {
-            Ok(answer) if answer.is_final() => return Inspection::from_answer(&url, &answer),
+        // HEAD and the GET after it share one budget, so a slow site costs 10 seconds, not 20.
+        match tokio::time::timeout(self.budget, self.request(&url)).await {
+            Ok(inspection) => inspection,
+            Err(_) => Inspection::timed_out(),
+        }
+    }
+
+    async fn request(&self, url: &Url) -> Inspection {
+        let answer = match self.ask(Method::HEAD, url).await {
+            Ok(answer) if answer.is_final() => return Inspection::from_answer(url, &answer),
             // Waiting for the same host again would only repeat the delay.
             Err(error) if error.is_timeout() || caused_by::<BlockedAddress>(&error) => {
-                return Inspection::without_backoff(verdict_for_error(&error));
+                return Inspection::from_error(&error);
             }
             // Many servers refuse or mishandle HEAD, so anything else is confirmed with GET.
-            _ => self.ask(Method::GET, &url).await,
+            _ => self.ask(Method::GET, url).await,
         };
         match answer {
-            Ok(answer) => Inspection::from_answer(&url, &answer),
-            Err(error) => Inspection::without_backoff(verdict_for_error(&error)),
+            Ok(answer) => Inspection::from_answer(url, &answer),
+            Err(error) => Inspection::from_error(&error),
         }
     }
 
@@ -361,7 +394,8 @@ impl Checker {
     /// Starts checking every target and hands back the results as each one finishes.
     /// Targets on one host go one after another, so a batch of bookmarks from one
     /// site is not a burst of requests to it. A host that asks to be left alone
-    /// (429, 503) is not asked again in this check.
+    /// (429, 503) or does not answer twice in a row is not asked again in this check;
+    /// its other targets come back as skipped.
     pub fn start(&self, targets: Vec<Target>) -> RunningCheck {
         self.start_paced(targets, Duration::ZERO)
     }
@@ -378,7 +412,7 @@ impl Checker {
         let (sender, receiver) = mpsc::unbounded_channel();
         let hosts_at_once = Arc::new(Semaphore::new(MAX_HOSTS_PER_CHECK));
         let mut tasks = JoinSet::new();
-        for group in by_host.into_values() {
+        for (host, group) in by_host {
             let checker = self.clone();
             let sender = sender.clone();
             let hosts_at_once = hosts_at_once.clone();
@@ -386,20 +420,7 @@ impl Checker {
                 let Ok(_turn) = hosts_at_once.acquire().await else {
                     return;
                 };
-                for (index, target) in group.into_iter().enumerate() {
-                    if index > 0 {
-                        tokio::time::sleep(pause).await;
-                    }
-                    let Inspection { verdict, backoff } = checker.inspect(&target.url).await;
-                    let _ = sender.send(Checked {
-                        target,
-                        verdict,
-                        backoff,
-                    });
-                    if backoff.is_some() {
-                        return;
-                    }
-                }
+                checker.check_host(host, group, pause, sender).await;
             });
         }
         RunningCheck {
@@ -407,19 +428,104 @@ impl Checker {
             _tasks: tasks,
         }
     }
+
+    /// One host's targets, one after another, until the host asks to be left alone or
+    /// stops answering.
+    async fn check_host(
+        &self,
+        host: String,
+        group: Vec<Target>,
+        pause: Duration,
+        sender: mpsc::UnboundedSender<Outcome>,
+    ) {
+        let mut targets = group.into_iter();
+        let mut timeouts_in_a_row = 0;
+        let mut first = true;
+        while let Some(target) = targets.next() {
+            if !first {
+                tokio::time::sleep(pause).await;
+            }
+            first = false;
+            let inspection = self.inspect(&target.url).await;
+            timeouts_in_a_row = if inspection.timed_out {
+                timeouts_in_a_row + 1
+            } else {
+                0
+            };
+            let gives_up = timeouts_in_a_row >= TIMEOUTS_BEFORE_GIVING_UP;
+            let mut backoff = inspection.backoff;
+            // A redirect can end at another site; only an answer from this one stops this group.
+            let asked_to_wait = backoff.as_ref().is_some_and(|backoff| backoff.host == host);
+            if gives_up && backoff.is_none() {
+                backoff = Some(Backoff {
+                    host: host.clone(),
+                    retry_after: None,
+                });
+            }
+            let _ = sender.send(Outcome::Checked(Checked {
+                target,
+                verdict: inspection.verdict,
+                backoff,
+                answered: inspection.answered,
+            }));
+            let reason = match (asked_to_wait, gives_up) {
+                (true, _) => SkipReason::SlowDown,
+                (false, true) => SkipReason::NotAnswering,
+                (false, false) => continue,
+            };
+            for rest in targets {
+                let _ = sender.send(Outcome::Skipped(Skipped {
+                    target: rest,
+                    reason,
+                    host: host.clone(),
+                }));
+            }
+            return;
+        }
+    }
 }
 
 /// A check in progress. Dropping it stops the requests that have not finished, so a
 /// client that goes away does not leave the server working for nobody.
 pub struct RunningCheck {
-    receiver: mpsc::UnboundedReceiver<Checked>,
+    receiver: mpsc::UnboundedReceiver<Outcome>,
     _tasks: JoinSet<()>,
 }
 
 impl RunningCheck {
-    /// The next result, or `None` once every target has been checked.
-    pub async fn next(&mut self) -> Option<Checked> {
+    /// The next result, or `None` once every target has been dealt with.
+    pub async fn next(&mut self) -> Option<Outcome> {
         self.receiver.recv().await
+    }
+}
+
+/// What became of one target.
+#[derive(Debug)]
+pub enum Outcome {
+    Checked(Checked),
+    /// Not asked, because its site asked to be left alone or stopped answering.
+    Skipped(Skipped),
+}
+
+#[derive(Debug)]
+pub struct Skipped {
+    pub target: Target,
+    pub reason: SkipReason,
+    pub host: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipReason {
+    SlowDown,
+    NotAnswering,
+}
+
+impl SkipReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SlowDown => "slow_down",
+            Self::NotAnswering => "not_answering",
+        }
     }
 }
 
@@ -447,13 +553,36 @@ impl Inspection {
         Self {
             verdict,
             backoff: None,
+            timed_out: false,
+            answered: false,
+        }
+    }
+
+    fn timed_out() -> Self {
+        Self {
+            timed_out: true,
+            ..Self::without_backoff(Verdict::new(LinkStatus::Unknown, TIMED_OUT))
+        }
+    }
+
+    fn from_error(error: &reqwest::Error) -> Self {
+        Self {
+            timed_out: error.is_timeout(),
+            ..Self::without_backoff(verdict_for_error(error))
         }
     }
 
     fn from_answer(requested: &Url, answer: &Answer) -> Self {
+        // The site that answered, which after a redirect is not the one that was asked.
+        let backoff = answer.asks_to_wait().then(|| Backoff {
+            host: host_of(answer.final_url.as_str()),
+            retry_after: answer.retry_after,
+        });
         Self {
             verdict: verdict_for(requested, answer),
-            backoff: answer.backoff(),
+            backoff,
+            timed_out: false,
+            answered: true,
         }
     }
 }
@@ -567,8 +696,10 @@ pub struct Target {
 pub struct Checked {
     pub target: Target,
     pub verdict: Verdict,
-    /// Set when the site asked to be left alone; the check stopped asking it.
-    pub backoff: Option<Duration>,
+    /// Set when a site should be left alone for a while.
+    pub backoff: Option<Backoff>,
+    /// A site replied. A timeout or a failed connection is not an answer.
+    pub answered: bool,
 }
 
 /// The bookmarks to check, or `None` when an id is missing or belongs to someone else.
