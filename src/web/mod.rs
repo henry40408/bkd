@@ -144,6 +144,9 @@ pub fn router(state: SharedState) -> Router {
         .merge(pages::router())
         .route("/app.css", get(assets::stylesheet))
         .route("/app.js", get(assets::script))
+        .route("/favicon.svg", get(assets::favicon_svg))
+        .route("/favicon.ico", get(assets::favicon_ico))
+        .route("/apple-touch-icon.png", get(assets::apple_touch_icon))
         .nest("/api", api)
         .layer(middleware::from_fn_with_state(
             state.clone(),
