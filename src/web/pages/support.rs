@@ -248,6 +248,7 @@ pub enum Notice {
     Confirmed,
     BookmarkSaved,
     BookmarkDeleted,
+    SettingsSaved,
 }
 
 impl Notice {
@@ -259,6 +260,7 @@ impl Notice {
             Self::Confirmed => "confirmed",
             Self::BookmarkSaved => "bookmark-saved",
             Self::BookmarkDeleted => "bookmark-deleted",
+            Self::SettingsSaved => "settings-saved",
         }
     }
 
@@ -271,6 +273,7 @@ impl Notice {
             "confirmed" => "Password confirmed. You can change accounts for the next few minutes.",
             "bookmark-saved" => "Bookmark saved.",
             "bookmark-deleted" => "Bookmark deleted.",
+            "settings-saved" => "Settings saved.",
             "bulk-done" => "Done.",
             "nothing-selected" => "Tick at least one bookmark first.",
             _ => return None,
@@ -282,6 +285,7 @@ impl Notice {
 pub enum Section {
     Bookmarks,
     Transfer,
+    Settings,
     Account,
     Users,
 }

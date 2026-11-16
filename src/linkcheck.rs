@@ -33,12 +33,22 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_REQUESTS_IN_FLIGHT: usize = 16;
 // Per check, so one user cannot queue ahead of everyone else for the slots above.
 const MAX_HOSTS_PER_CHECK: usize = 4;
-const USER_AGENT: &str = "Mozilla/5.0 (compatible; bkd link checker)";
+// Honest about being a robot, and says where to ask about it. The `Mozilla/5.0
+// (compatible; ...)` shape is the one crawlers such as Googlebot use.
+const USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (compatible; bkd-link-checker/",
+    env!("CARGO_PKG_VERSION"),
+    "; +https://github.com/henry40408/bkd)"
+);
+// A site that says "too many requests" or "unavailable" is left alone for a while.
+const DEFAULT_BACKOFF: Duration = Duration::from_secs(60);
+const MAX_BACKOFF: Duration = Duration::from_secs(60);
 
 // A slow site is usually busy, not gone, so a timeout is "unknown" rather than "broken".
 const TIMED_OUT: &str = "Timed out";
 const COULD_NOT_CONNECT: &str = "Could not connect";
 const NOT_PUBLIC: &str = "Address is not public";
+const BOT_CHECK: &str = "Blocked by a bot check";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkStatus {
@@ -223,6 +233,29 @@ fn caused_by<E: Error + 'static>(error: &reqwest::Error) -> bool {
 struct Answer {
     status: StatusCode,
     final_url: Url,
+    /// The site put a bot check in front of the page (Cloudflare's `cf-mitigated`), so
+    /// the status says nothing about the page.
+    challenged: bool,
+    retry_after: Option<Duration>,
+}
+
+impl Answer {
+    /// How long to leave the site alone, when it asks for that.
+    fn backoff(&self) -> Option<Duration> {
+        let asks_to_wait = matches!(self.status.as_u16(), 429 | 503);
+        asks_to_wait.then(|| self.retry_after.unwrap_or(DEFAULT_BACKOFF).min(MAX_BACKOFF))
+    }
+
+    /// Asking again with GET would get the same refusal, so it only adds load.
+    fn is_final(&self) -> bool {
+        self.status.is_success() || self.challenged || self.backoff().is_some()
+    }
+}
+
+/// A verdict, and how long the site asked to be left alone.
+pub struct Inspection {
+    pub verdict: Verdict,
+    pub backoff: Option<Duration>,
 }
 
 #[derive(Clone)]
@@ -272,12 +305,15 @@ impl Checker {
         })
     }
 
-    pub async fn check(&self, address: &str) -> Verdict {
+    pub async fn inspect(&self, address: &str) -> Inspection {
         let Ok(url) = Url::parse(address) else {
-            return Verdict::new(LinkStatus::Unknown, "Not a valid address");
+            return Inspection::without_backoff(Verdict::new(
+                LinkStatus::Unknown,
+                "Not a valid address",
+            ));
         };
         if !self.guard.allows_url(&url) {
-            return Verdict::new(LinkStatus::Unknown, NOT_PUBLIC);
+            return Inspection::without_backoff(Verdict::new(LinkStatus::Unknown, NOT_PUBLIC));
         }
         // The semaphore is never closed, so acquiring cannot fail.
         let _permit = self
@@ -286,17 +322,17 @@ impl Checker {
             .await
             .expect("semaphore is never closed");
         let answer = match self.ask(Method::HEAD, &url).await {
-            Ok(answer) if answer.status.is_success() => return verdict_for(&url, &answer),
+            Ok(answer) if answer.is_final() => return Inspection::from_answer(&url, &answer),
             // Waiting for the same host again would only repeat the delay.
             Err(error) if error.is_timeout() || caused_by::<BlockedAddress>(&error) => {
-                return verdict_for_error(&error);
+                return Inspection::without_backoff(verdict_for_error(&error));
             }
             // Many servers refuse or mishandle HEAD, so anything else is confirmed with GET.
             _ => self.ask(Method::GET, &url).await,
         };
         match answer {
-            Ok(answer) => verdict_for(&url, &answer),
-            Err(error) => verdict_for_error(&error),
+            Ok(answer) => Inspection::from_answer(&url, &answer),
+            Err(error) => Inspection::without_backoff(verdict_for_error(&error)),
         }
     }
 
@@ -304,16 +340,34 @@ impl Checker {
     /// connection, so a GET never downloads the page.
     async fn ask(&self, method: Method, url: &Url) -> Result<Answer, reqwest::Error> {
         let response = self.client.request(method, url.clone()).send().await?;
+        let headers = response.headers();
+        let challenged = headers
+            .get("cf-mitigated")
+            .is_some_and(|value| value.as_bytes().eq_ignore_ascii_case(b"challenge"));
+        // Only the seconds form; a date is rare, and the default wait is a safe answer.
+        let retry_after = headers
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|text| text.trim().parse::<u64>().ok())
+            .map(Duration::from_secs);
         Ok(Answer {
             status: response.status(),
             final_url: response.url().clone(),
+            challenged,
+            retry_after,
         })
     }
 
     /// Starts checking every target and hands back the results as each one finishes.
     /// Targets on one host go one after another, so a batch of bookmarks from one
-    /// site is not a burst of requests to it.
+    /// site is not a burst of requests to it. A host that asks to be left alone
+    /// (429, 503) is not asked again in this check.
     pub fn start(&self, targets: Vec<Target>) -> RunningCheck {
+        self.start_paced(targets, Duration::ZERO)
+    }
+
+    /// Like [`Checker::start`], and waits `pause` between two requests to one host.
+    pub fn start_paced(&self, targets: Vec<Target>, pause: Duration) -> RunningCheck {
         let mut by_host: HashMap<String, Vec<Target>> = HashMap::new();
         for target in targets {
             by_host
@@ -332,9 +386,19 @@ impl Checker {
                 let Ok(_turn) = hosts_at_once.acquire().await else {
                     return;
                 };
-                for target in group {
-                    let verdict = checker.check(&target.url).await;
-                    let _ = sender.send(Checked { target, verdict });
+                for (index, target) in group.into_iter().enumerate() {
+                    if index > 0 {
+                        tokio::time::sleep(pause).await;
+                    }
+                    let Inspection { verdict, backoff } = checker.inspect(&target.url).await;
+                    let _ = sender.send(Checked {
+                        target,
+                        verdict,
+                        backoff,
+                    });
+                    if backoff.is_some() {
+                        return;
+                    }
                 }
             });
         }
@@ -359,11 +423,17 @@ impl RunningCheck {
     }
 }
 
-fn host_of(address: &str) -> String {
-    Url::parse(address)
+/// The host that requests are spaced by. `www.example.com` and `example.com` are one
+/// site, so they count as one.
+pub fn host_of(address: &str) -> String {
+    let host = Url::parse(address)
         .ok()
         .and_then(|url| url.host_str().map(str::to_lowercase))
-        .unwrap_or_default()
+        .unwrap_or_default();
+    match host.strip_prefix("www.") {
+        Some(rest) => rest.to_owned(),
+        None => host,
+    }
 }
 
 fn without_fragment(url: &Url) -> Url {
@@ -372,7 +442,26 @@ fn without_fragment(url: &Url) -> Url {
     url
 }
 
+impl Inspection {
+    fn without_backoff(verdict: Verdict) -> Self {
+        Self {
+            verdict,
+            backoff: None,
+        }
+    }
+
+    fn from_answer(requested: &Url, answer: &Answer) -> Self {
+        Self {
+            verdict: verdict_for(requested, answer),
+            backoff: answer.backoff(),
+        }
+    }
+}
+
 fn verdict_for(requested: &Url, answer: &Answer) -> Verdict {
+    if answer.challenged {
+        return Verdict::new(LinkStatus::Unknown, BOT_CHECK);
+    }
     let status = answer.status;
     if status.is_success() {
         if without_fragment(requested) == without_fragment(&answer.final_url) {
@@ -382,7 +471,7 @@ fn verdict_for(requested: &Url, answer: &Answer) -> Verdict {
     }
     let detail = format!("HTTP {}", status.as_u16());
     // These say "not for robots" or "not now", not "gone". 999 is LinkedIn's refusal.
-    let inconclusive = matches!(status.as_u16(), 401 | 403 | 429 | 999)
+    let inconclusive = matches!(status.as_u16(), 401 | 403 | 429 | 503 | 999)
         || !status.is_client_error() && !status.is_server_error();
     if inconclusive {
         return Verdict::new(LinkStatus::Unknown, detail);
@@ -478,6 +567,8 @@ pub struct Target {
 pub struct Checked {
     pub target: Target,
     pub verdict: Verdict,
+    /// Set when the site asked to be left alone; the check stopped asking it.
+    pub backoff: Option<Duration>,
 }
 
 /// The bookmarks to check, or `None` when an id is missing or belongs to someone else.
@@ -509,7 +600,10 @@ pub async fn store(
 ) -> Result<Vec<(i64, LinkCheck)>> {
     let mut transaction = pool.begin().await?;
     let mut stored = Vec::with_capacity(checked.len());
-    for Checked { target, verdict } in checked {
+    for Checked {
+        target, verdict, ..
+    } in checked
+    {
         let updated = sqlx::query(
             "UPDATE bookmarks SET link_status = ?1, link_checked_at = ?2, link_detail = ?3
              WHERE id = ?4 AND user_id = ?5 AND url = ?6",
@@ -644,6 +738,8 @@ mod tests {
         Answer {
             status: StatusCode::from_u16(status).unwrap(),
             final_url: Url::parse(final_url).unwrap(),
+            challenged: false,
+            retry_after: None,
         }
     }
 
@@ -657,14 +753,14 @@ mod tests {
             (moved.status, moved.detail.as_str()),
             (LinkStatus::Redirected, "https://a.test/new")
         );
-        for broken in [404, 410, 400, 500, 503] {
+        for broken in [404, 410, 400, 500] {
             let found = verdict(broken, "https://a.test/page");
             assert_eq!(
                 (found.status, found.detail),
                 (LinkStatus::Broken, format!("HTTP {broken}"))
             );
         }
-        for unknown in [401, 403, 429, 999, 304] {
+        for unknown in [401, 403, 429, 503, 999, 304] {
             assert_eq!(
                 verdict(unknown, "https://a.test/page").status,
                 LinkStatus::Unknown,

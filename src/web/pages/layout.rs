@@ -91,6 +91,7 @@ fn sidebar(shell: &Shell) -> Markup {
             div.me {
                 span { "Signed in as " strong { (shell.username) } }
                 a href="/transfer" aria-current=[on(Section::Transfer)] { "Import and export" }
+                a href="/settings" aria-current=[on(Section::Settings)] { "Settings" }
                 @if !shell.forwarded {
                     a href="/account" aria-current=[on(Section::Account)] { "Account" }
                 }

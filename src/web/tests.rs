@@ -113,6 +113,7 @@ impl TestApp {
             secure_cookies: false,
             forward_auth: None,
             link_checker,
+            background_link_check: false,
         });
         Self {
             router: router(state.clone()),
@@ -566,6 +567,7 @@ async fn hsts_is_sent_only_when_cookies_are_secure() {
         secure_cookies: true,
         forward_auth: None,
         link_checker: Checker::allowing_loopback().unwrap(),
+        background_link_check: false,
     });
     let request = Request::builder()
         .uri("/")
@@ -1595,6 +1597,8 @@ impl FakeSite {
                         (_, "/ok") => "200 OK",
                         (_, "/missing") => "404 Not Found",
                         (_, "/forbidden") => "403 Forbidden",
+                        (_, "/slow-down") => "429 Too Many Requests\r\nRetry-After: 30",
+                        (_, "/bot-check") => "403 Forbidden\r\ncf-mitigated: challenge",
                         ("HEAD", "/no-head") => "405 Method Not Allowed",
                         (_, "/no-head") => "200 OK",
                         (_, "/moved") => "301 Moved Permanently\r\nLocation: /ok",
@@ -1708,6 +1712,40 @@ async fn checking_links_sorts_them_into_ok_redirected_broken_and_unknown() {
     assert_eq!(stored["link"]["status"], "broken");
     assert_eq!(stored["link"]["detail"], "HTTP 404");
     assert!(stored["link"]["checked_at"].as_i64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn a_bot_check_page_is_not_confirmed_rather_than_broken() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let site = FakeSite::start().await;
+    let id = create_at(&app, &token, &site.url("/bot-check"), "guarded").await;
+
+    let reply = check_links(&app, &token, &[id]).await;
+    assert_eq!(
+        link_of(&reply, id),
+        ("unknown".to_owned(), "Blocked by a bot check".to_owned())
+    );
+    assert_eq!(site.requests(), 1, "GET would only repeat the refusal");
+}
+
+#[tokio::test]
+async fn a_site_that_says_slow_down_is_not_asked_about_its_other_links() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("henry").await;
+    let site = FakeSite::start().await;
+    let first = create_at(&app, &token, &site.url("/slow-down"), "first").await;
+    let second = create_at(&app, &token, &site.url("/ok"), "second").await;
+
+    let reply = check_links(&app, &token, &[first, second]).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let results = events_named(&reply, "result");
+    assert_eq!(results.len(), 1, "the second link is left for later");
+    assert_eq!(
+        link_of(&reply, first),
+        ("unknown".to_owned(), "HTTP 429".to_owned())
+    );
+    assert_eq!(site.requests(), 1);
 }
 
 #[tokio::test]
@@ -1974,6 +2012,7 @@ impl TestApp {
             secure_cookies: false,
             forward_auth: Some(forward_auth),
             link_checker: Checker::allowing_loopback().unwrap(),
+            background_link_check: false,
         });
         Self {
             router: router(state.clone()),
@@ -2130,6 +2169,7 @@ async fn the_first_forwarded_user_closes_setup() {
             secure_cookies: false,
             forward_auth: Some(forward_auth),
             link_checker: Checker::allowing_loopback().unwrap(),
+            background_link_check: false,
         })
     };
     app.router = router(app.state.clone());
@@ -2584,6 +2624,108 @@ async fn the_account_page_lists_this_browser_and_signing_out_ends_the_session() 
     assert_eq!(out.status, StatusCode::SEE_OTHER);
     let after = app.send(Send::get("/").cookie(&token)).await;
     assert_eq!(location(&after), "/login?next=%2F&notice=session-ended");
+}
+
+// ---------------------------------------------------------------- settings
+
+async fn settings_of(app: &TestApp, token: &str) -> Reply {
+    app.send(Send::get("/api/settings").cookie(token)).await
+}
+
+#[tokio::test]
+async fn settings_need_a_session() {
+    let app = TestApp::running().await;
+    let get = app.send(Send::get("/api/settings")).await;
+    assert_eq!(get.status, StatusCode::UNAUTHORIZED);
+    let put = Send::put("/api/settings", json!({"link_check_enabled": true}));
+    assert_eq!(app.send(put).await.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn background_link_check_is_off_until_the_user_turns_it_on() {
+    let app = TestApp::running().await;
+    let mei = app.sign_in_as("mei").await;
+    let henry = app.sign_in_as("henry").await;
+    assert_eq!(
+        settings_of(&app, &mei).await.body["link_check_enabled"],
+        false
+    );
+
+    let put = Send::put("/api/settings", json!({"link_check_enabled": true})).cookie(&mei);
+    let saved = app.send(put).await;
+    assert_eq!(saved.status, StatusCode::OK);
+    assert_eq!(saved.body["link_check_enabled"], true);
+
+    assert_eq!(
+        settings_of(&app, &mei).await.body["link_check_enabled"],
+        true
+    );
+    assert_eq!(
+        settings_of(&app, &henry).await.body["link_check_enabled"],
+        false,
+        "one user's choice is not another's"
+    );
+    let off = Send::put("/api/settings", json!({"link_check_enabled": false})).cookie(&mei);
+    app.send(off).await;
+    assert_eq!(
+        settings_of(&app, &mei).await.body["link_check_enabled"],
+        false
+    );
+}
+
+#[tokio::test]
+async fn the_settings_page_saves_the_checkbox() {
+    let app = TestApp::running().await;
+    let token = app.sign_in_as("mei").await;
+    let page = app.send(Send::get("/settings").cookie(&token)).await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(page.text.contains(r#"name="link_check_enabled""#));
+    assert!(!page.text.contains("checked"), "off by default");
+    assert!(
+        page.text.contains("turned off on this server"),
+        "says when the server has the background check off"
+    );
+
+    let on = app
+        .send(form_post("/settings", "link_check_enabled=on").cookie(&token))
+        .await;
+    assert_eq!(on.status, StatusCode::SEE_OTHER);
+    assert_eq!(location(&on), "/settings?notice=settings-saved");
+    assert_eq!(
+        settings_of(&app, &token).await.body["link_check_enabled"],
+        true
+    );
+    let shown = app
+        .send(Send::get("/settings?notice=settings-saved").cookie(&token))
+        .await;
+    assert!(shown.text.contains("checked"));
+    assert!(shown.text.contains("Settings saved."));
+
+    // An unticked box sends nothing at all.
+    app.send(form_post("/settings", "").cookie(&token)).await;
+    assert_eq!(
+        settings_of(&app, &token).await.body["link_check_enabled"],
+        false
+    );
+}
+
+#[tokio::test]
+async fn the_settings_page_needs_a_session_and_a_same_site_post() {
+    let app = TestApp::running().await;
+    let anonymous = app.send(Send::get("/settings")).await;
+    assert_eq!(anonymous.status, StatusCode::SEE_OTHER);
+    assert_eq!(location(&anonymous), "/login?next=%2Fsettings");
+
+    let token = app.sign_in_as("mei").await;
+    let foreign = Send::new(Method::POST, "/settings")
+        .raw("application/x-www-form-urlencoded", "link_check_enabled=on")
+        .origin("http://evil.test")
+        .cookie(&token);
+    assert_eq!(app.send(foreign).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        settings_of(&app, &token).await.body["link_check_enabled"],
+        false
+    );
 }
 
 #[tokio::test]
