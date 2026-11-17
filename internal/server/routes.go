@@ -55,8 +55,79 @@ func (a *App) Handler() http.Handler {
 	for _, route := range assets.Routes {
 		mux.Handle(route.Path, byMethod(onGet(assets.Handler(route))))
 	}
-	mux.HandleFunc("/", http.NotFound)
-	return a.securityHeaders(mux)
+	a.mountPages(mux)
+	fallback := a.page(maxBodyBytes, http.HandlerFunc(a.handleNotFound))
+	mux.Handle("/", fallback)
+	return a.securityHeaders(refuseUncleanPaths(mux, fallback))
+}
+
+// refuseUncleanPaths answers a path with //, . or .. in it with the not-found
+// answer. ServeMux would redirect it to the cleaned path with a 301; axum, which
+// the Rust server ran on, matched the path as sent and found nothing.
+func refuseUncleanPaths(mux, fallback http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isUncleanPath(r.URL.Path) {
+			fallback.ServeHTTP(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+func isUncleanPath(path string) bool {
+	if strings.Contains(path, "//") {
+		return true
+	}
+	for segment := range strings.SplitSeq(path, "/") {
+		if segment == "." || segment == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+// handleNotFound: the JSON API keeps the empty 404 it always had; any other
+// address gets the page.
+func (a *App) handleNotFound(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	a.writePageError(w, pageNotFound())
+}
+
+// mountPages routes the server-rendered pages. A page is wrapped in the page
+// headers, the form origin check and the small body limit; the import takes more.
+func (a *App) mountPages(mux *http.ServeMux) {
+	route := func(path string, handlers ...methodHandler) {
+		mux.Handle(path, a.page(maxBodyBytes, byMethod(handlers...)))
+	}
+	open := func(handle pageHandler) http.Handler { return a.serve(handle) }
+	signedIn, admin, confirmed := a.signedInPage, a.adminPage, a.confirmedAdminPage
+
+	route("/{$}", onGet(signedIn(a.pageList)))
+	route("/random", onGet(signedIn(a.pageRandom)))
+	route("/bookmarks", onPost(signedIn(a.pageCreateBookmark)))
+	route("/bookmarks/bulk", onPost(signedIn(a.pageBulk)))
+	route("/bookmarks/delete", onPost(signedIn(a.pageDeleteSubmit)))
+	route("/bookmarks/{id}/edit", onGet(signedIn(a.pageEditForm)), onPost(signedIn(a.pageEditSubmit)))
+	route("/bookmarks/{id}/delete", onGet(signedIn(a.pageDeleteForm)))
+	route("/login", onGet(open(a.pageLoginForm)), onPost(open(a.pageLoginSubmit)))
+	route("/setup", onGet(open(a.pageSetupForm)), onPost(open(a.pageSetupSubmit)))
+	route("/logout", onPost(open(a.pageLogout)))
+	route("/confirm", onGet(signedIn(a.pageConfirmForm)), onPost(signedIn(a.pageConfirmSubmit)))
+	route("/users", onGet(admin(a.pageUsers)), onPost(confirmed(a.pageCreateUser)))
+	route("/users/{id}/role", onPost(confirmed(a.pageSetRole)))
+	route("/users/{id}/disabled", onPost(confirmed(a.pageSetDisabled)))
+	route("/users/{id}/password", onGet(admin(a.pagePasswordForm)), onPost(confirmed(a.pageResetPassword)))
+	route("/users/{id}/delete", onGet(admin(a.pageDeleteUserForm)), onPost(confirmed(a.pageDeleteUser)))
+	route("/settings", onGet(signedIn(a.pageSettings)), onPost(signedIn(a.pageSaveSettings)))
+	route("/account", onGet(signedIn(a.pageAccount)))
+	route("/account/password", onPost(signedIn(a.pageChangePassword)))
+	route("/account/sessions/{id}/revoke", onPost(signedIn(a.pageRevokeSession)))
+	route("/account/sessions/revoke-others", onPost(signedIn(a.pageRevokeOtherSessions)))
+	route("/transfer", onGet(signedIn(a.pageTransfer)))
+	mux.Handle("/transfer/import", a.page(maxImportBytes, byMethod(onPost(signedIn(a.pageImport)))))
 }
 
 // api wraps one JSON route. The cross-site check sits inside the headers, so its

@@ -60,6 +60,8 @@ type App struct {
 	setupLimiter  *auth.Limiter
 	secureCookies bool
 	backgroundOn  bool
+	// checkLimit is how long a page waits for a link check (tests shorten it).
+	checkLimit time.Duration
 
 	setupMu    sync.Mutex
 	setupToken *auth.SetupToken
@@ -89,6 +91,7 @@ func New(config Config) *App {
 		setupLimiter:  auth.NewLimiter(setupAttemptsPerWindow, rateLimitWindow),
 		secureCookies: config.SecureCookies,
 		backgroundOn:  config.BackgroundLinkCheck,
+		checkLimit:    noScriptCheckLimit,
 		setupToken:    config.SetupToken,
 	}
 }

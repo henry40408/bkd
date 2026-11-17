@@ -41,8 +41,15 @@ func invalidCredentials() *apiError {
 	return &apiError{status: http.StatusUnauthorized, message: "invalid username or password"}
 }
 
+const notSignedInMessage = "not signed in"
+
 func unauthorized() *apiError {
-	return &apiError{status: http.StatusUnauthorized, message: "not signed in"}
+	return &apiError{status: http.StatusUnauthorized, message: notSignedInMessage}
+}
+
+// isNotSignedIn tells a missing session from a wrong password, which is a 401 too.
+func (e *apiError) isNotSignedIn() bool {
+	return e.status == http.StatusUnauthorized && e.message == notSignedInMessage
 }
 
 // reauthRequired is an admin change that needs the password typed again. The front

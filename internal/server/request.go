@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -51,9 +52,23 @@ func optionalUint32(r *http.Request, name string) (*uint32, *textError) {
 	if err != nil {
 		return nil, &textError{
 			http.StatusBadRequest,
-			"Failed to deserialize query string: " + name + ": invalid digit found in string",
+			"Failed to deserialize query string: " + name + ": " + integerWording(values[0], err),
 		}
 	}
 	value := uint32(parsed)
 	return &value, nil
+}
+
+// integerWording words a failed integer parse the way Rust's parser does, which
+// the 400 and 422 texts quote.
+func integerWording(raw string, err error) string {
+	switch {
+	case raw == "":
+		return "cannot parse integer from empty string"
+	case errors.Is(err, strconv.ErrRange) && strings.HasPrefix(raw, "-"):
+		return "number too small to fit in target type"
+	case errors.Is(err, strconv.ErrRange):
+		return "number too large to fit in target type"
+	}
+	return "invalid digit found in string"
 }
