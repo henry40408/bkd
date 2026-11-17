@@ -150,6 +150,18 @@ jobs:
           go mod vendor
           test -z "$(git status --porcelain -- vendor go.mod go.sum)"
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: e2e module
+        working-directory: e2e
+        run: |
+          go mod tidy -diff
+          go mod vendor
+          test -z "$(git status --porcelain -- vendor go.mod go.sum)"
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: e2e uses the same Go version as the root module
+        run: |
+          for line in go toolchain; do
+            test "$(grep -E "^$line " go.mod)" = "$(grep -E "^$line " e2e/go.mod)"
+          done
 
   go-lint:
     name: go-lint
@@ -167,6 +179,11 @@ jobs:
           test -z "$unformatted"
       - run: go vet -mod=vendor ./...
       - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+      - name: vet and staticcheck in e2e
+        working-directory: e2e
+        run: |
+          go vet ./...
+          go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
 
   go-test:
     name: go-test
@@ -179,3 +196,20 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test -mod=vendor -race ./...
+
+  # Runs beside the Rust `e2e` job until the cutover. The runner already has Chrome.
+  go-e2e:
+    name: go-e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go build -mod=vendor -o bin/bkd ./cmd/bkd
+      - run: go test -count=1 -timeout 20m -v ./...
+        working-directory: e2e
+        env:
+          E2E_CHROME: /usr/bin/google-chrome
