@@ -100,6 +100,47 @@ jobs:
           go-version-file: go.mod
       - run: go test -mod=vendor -race ./...
 
+  # Pushes mutate the whole module; pull requests only the lines changed
+  # against the base branch. `e2e/` is a separate module with no coverage
+  # profile, so gremlins would count its mutants as "not covered". `vendor/` is
+  # not ours to mutate.
+  #
+  # Locally, run it with `GOMAXPROCS=4` and `--workers 2` under `nice -n 15`, so
+  # the machine stays usable. Never pass `--test-cpu`: gremlins v0.6.0 hands
+  # `go test` the single argument "-cpu 2", which fails every mutant's build,
+  # and a failed build counts as KILLED.
+  mutation:
+    name: mutation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `--diff` needs the base branch's history, not a shallow clone.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Gremlins derives each mutant's timeout from how long its coverage run
+      # took. A cached test result makes that near zero, so nearly every mutant
+      # "times out", which the efficacy score ignores: the job would pass
+      # without testing anything.
+      - run: go clean -testcache
+      - name: Mutate the whole module (push)
+        if: github.event_name != 'pull_request'
+        run: |
+          go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash \
+            -E '^e2e/' -E '^vendor/' --threshold-efficacy 95 .
+      - name: Mutate the changed lines (pull request)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash \
+            --diff "origin/$BASE_REF" \
+            -E '^e2e/' -E '^vendor/' --threshold-efficacy 95 .
+
   # Root module only: `e2e/` is its own module, so it is not measured.
   coverage:
     name: coverage
