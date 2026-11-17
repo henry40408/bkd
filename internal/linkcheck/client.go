@@ -3,6 +3,7 @@ package linkcheck
 import (
 	"context"
 	"errors"
+	"math"
 	"net"
 	"net/http"
 	"net/netip"
@@ -51,15 +52,20 @@ func (a answer) isFinal() bool {
 	return (a.status >= 200 && a.status < 300) || a.challenged || a.asksToWait()
 }
 
+const maxResponseHeaderBytes = 64 << 10
+
 func newHTTPClient(g guard) *http.Client {
 	dialer := net.Dialer{Timeout: connectTimeout}
 	transport := &http.Transport{
 		Proxy: nil,
 		// Every host is visited once, so a pooled connection is only an open file descriptor.
-		DisableKeepAlives:   true,
-		ForceAttemptHTTP2:   false,
-		TLSHandshakeTimeout: connectTimeout,
-		DialContext:         guardedDial(g, &dialer),
+		DisableKeepAlives: true,
+		ForceAttemptHTTP2: false,
+		// hyper stops at about 400 KiB; the default 10 MiB would let a slow
+		// site hold memory in all 16 slots.
+		MaxResponseHeaderBytes: maxResponseHeaderBytes,
+		TLSHandshakeTimeout:    connectTimeout,
+		DialContext:            guardedDial(g, &dialer),
 	}
 	return &http.Client{
 		Transport:     transport,
@@ -96,7 +102,7 @@ func guardedDial(g guard, dialer *net.Dialer) func(context.Context, string, stri
 		if len(found) > 0 && len(allowed) == 0 {
 			return nil, errBlocked
 		}
-		return dialFirst(ctx, dialer, network, port, allowed)
+		return dialFirst(ctx, dialer, dialTarget{network: network, port: port, addrs: allowed})
 	}
 }
 
@@ -110,13 +116,19 @@ func publicOnly(g guard, addrs []netip.Addr) []netip.Addr {
 	return allowed
 }
 
-func dialFirst(ctx context.Context, dialer *net.Dialer, network, port string, addrs []netip.Addr) (net.Conn, error) {
-	if len(addrs) == 0 {
+type dialTarget struct {
+	network string
+	port    string
+	addrs   []netip.Addr
+}
+
+func dialFirst(ctx context.Context, dialer *net.Dialer, target dialTarget) (net.Conn, error) {
+	if len(target.addrs) == 0 {
 		return nil, errors.New("no address for the host")
 	}
 	var lastErr error
-	for _, addr := range addrs {
-		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(addr.String(), port))
+	for _, addr := range target.addrs {
+		conn, err := dialer.DialContext(ctx, target.network, net.JoinHostPort(addr.String(), target.port))
 		if err == nil {
 			return conn, nil
 		}
@@ -147,10 +159,12 @@ func ask(ctx context.Context, client *http.Client, method string, target *url.UR
 }
 
 func retryAfter(header string) *time.Duration {
-	seconds, err := strconv.ParseUint(strings.TrimSpace(header), 10, 32)
+	seconds, err := strconv.ParseUint(strings.TrimSpace(header), 10, 64)
 	if err != nil {
 		return nil
 	}
+	// A huge value still means "as long as allowed"; it must not overflow a Duration.
+	seconds = min(seconds, uint64(math.MaxInt64/time.Second))
 	wait := time.Duration(seconds) * time.Second
 	return &wait
 }

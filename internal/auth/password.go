@@ -178,8 +178,9 @@ type Hasher struct {
 	dummy     string
 }
 
+// NewHasher limits parallel runs to GOMAXPROCS, which follows a container CPU quota.
 func NewHasher() *Hasher {
-	return &Hasher{permits: make(chan struct{}, runtime.NumCPU())}
+	return &Hasher{permits: make(chan struct{}, runtime.GOMAXPROCS(0))}
 }
 
 // run waits for a permit, then does the work on its own goroutine. The permit

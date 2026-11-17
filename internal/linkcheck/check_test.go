@@ -2,9 +2,11 @@ package linkcheck
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -178,10 +180,64 @@ func TestARedirectToAnotherSchemeIsNotFollowed(t *testing.T) {
 		http.Redirect(w, r, "ftp://example.test/", http.StatusFound)
 	}))
 	defer server.Close()
-	// net/http refuses an unsupported scheme itself, which is a failure to connect.
-	got := inspect(t, loopbackChecker(0), server.URL)
-	if got.Verdict.Status == StatusOK || got.Verdict.Status == StatusRedirected {
-		t.Fatalf("got %+v", got.Verdict)
+	assertVerdict(t, inspect(t, loopbackChecker(0), server.URL), StatusUnknown, "Address is not public")
+}
+
+// countdown redirects /n to /n-1 and answers 200 at /0.
+func countdown(w http.ResponseWriter, r *http.Request) {
+	n, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/"))
+	if n == 0 {
+		return
+	}
+	http.Redirect(w, r, "/"+strconv.Itoa(n-1), http.StatusFound)
+}
+
+func TestFiveRedirectsAreFollowedAndSixAreNot(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(countdown))
+	defer server.Close()
+	assertVerdict(t, inspect(t, loopbackChecker(0), server.URL+"/5"), StatusRedirected, server.URL+"/0")
+	assertVerdict(t, inspect(t, loopbackChecker(0), server.URL+"/6"), StatusBroken, "Too many redirects")
+}
+
+func TestARedirectDetailIsWrittenLikeTheWHATWGParserDoes(t *testing.T) {
+	for location, want := range map[string]string{
+		"https://Example.COM":          "https://example.com/",
+		"https://example.com:443/a?b":  "https://example.com/a?b",
+		"http://example.com:80":        "http://example.com/",
+		"https://example.com:8443/x#f": "https://example.com:8443/x#f",
+		"https://bücher.example/":      "https://xn--bcher-kva.example/",
+		"https://[::1]:443/":           "https://[::1]/",
+	} {
+		address, err := url.Parse(location)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := serialize(address); got != want {
+			t.Errorf("%s: got %s, want %s", location, got, want)
+		}
+	}
+}
+
+func TestARedirectedDetailHasTheNormalizedFinalAddress(t *testing.T) {
+	requested := mustParseURL(t, "https://a.test/")
+	got := verdictFor(requested, answer{status: 200, finalURL: mustParseURL(t, "https://B.test:443")})
+	assertEqual(t, got, Verdict{StatusRedirected, "https://b.test/"})
+}
+
+func TestARetryAfterBeyondThirtyTwoBitsIsKept(t *testing.T) {
+	beyond32Bits := retryAfter("4294967296")
+	if beyond32Bits == nil || *beyond32Bits != 4294967296*time.Second {
+		t.Fatalf("got %v", beyond32Bits)
+	}
+	// Past what a Duration can hold the value is capped, not wrapped around.
+	for _, header := range []string{"99999999999", "18446744073709551615"} {
+		capped := retryAfter(header)
+		if capped == nil || *capped != time.Duration(math.MaxInt64/time.Second)*time.Second {
+			t.Fatalf("%s: got %v", header, capped)
+		}
+	}
+	if retryAfter("18446744073709551616") != nil || retryAfter("soon") != nil {
+		t.Fatal("accepted a bad value")
 	}
 }
 

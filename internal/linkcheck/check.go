@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/net/idna"
 )
 
 const maxRequestsInFlight = 16
@@ -143,7 +145,7 @@ func fromAnswer(requested *url.URL, reply answer) Inspection {
 	inspection := Inspection{Verdict: verdictFor(requested, reply), Answered: true}
 	if reply.asksToWait() {
 		// The site that answered, which after a redirect is not the one that was asked.
-		inspection.Backoff = &Backoff{Host: HostOf(reply.finalURL.String()), RetryAfter: reply.retryAfter}
+		inspection.Backoff = &Backoff{Host: HostOf(serialize(reply.finalURL)), RetryAfter: reply.retryAfter}
 	}
 	return inspection
 }
@@ -156,7 +158,7 @@ func verdictFor(requested *url.URL, reply answer) Verdict {
 		if normalizeForCompare(requested) == normalizeForCompare(reply.finalURL) {
 			return Verdict{StatusOK, ""}
 		}
-		return Verdict{StatusRedirected, reply.finalURL.String()}
+		return Verdict{StatusRedirected, serialize(reply.finalURL)}
 	}
 	detail := "HTTP " + strconv.Itoa(reply.status)
 	if isInconclusive(reply.status) {
@@ -194,26 +196,44 @@ func verdictForError(err error) Verdict {
 // and host, an empty path, a default port and the fragment do not count.
 func normalizeForCompare(address *url.URL) string {
 	scheme := strings.ToLower(address.Scheme)
-	host := strings.ToLower(address.Hostname())
-	port := address.Port()
-	if port == defaultPort(scheme) {
-		port = ""
-	}
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]"
-	}
-	if port != "" {
-		host += ":" + port
-	}
 	path := address.EscapedPath()
 	if path == "" {
 		path = "/"
 	}
-	normalized := scheme + "://" + host + path
+	normalized := scheme + "://" + canonicalAuthority(address) + path
 	if address.RawQuery != "" || address.ForceQuery {
 		normalized += "?" + address.RawQuery
 	}
 	return normalized
+}
+
+// serialize writes an address the way the WHATWG URL parser does, so the detail
+// stored for a redirect matches what the Rust server stored: host in lower case
+// and punycode, no default port, an empty path as "/".
+func serialize(address *url.URL) string {
+	canonical := *address
+	canonical.Scheme = strings.ToLower(address.Scheme)
+	canonical.Host = canonicalAuthority(address)
+	if canonical.Path == "" && canonical.RawPath == "" {
+		canonical.Path = "/"
+	}
+	return canonical.String()
+}
+
+// canonicalAuthority is the host and port without a default port. A name that
+// IDNA refuses stays as it is, in lower case.
+func canonicalAuthority(address *url.URL) string {
+	host := strings.ToLower(address.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	} else if ascii, err := idna.Lookup.ToASCII(host); err == nil {
+		host = ascii
+	}
+	port := address.Port()
+	if port == "" || port == defaultPort(strings.ToLower(address.Scheme)) {
+		return host
+	}
+	return host + ":" + port
 }
 
 func defaultPort(scheme string) string {
