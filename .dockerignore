@@ -1,5 +1,8 @@
-# Build artifacts (the e2e suite has its own target/)
-target/
+# Build artifacts and test output
+bin/
+coverage/
+covdata/
+coverage*.out
 e2e/
 
 # Git and CI
@@ -9,7 +12,7 @@ e2e/
 .claude/
 
 # Database files
-*.sqlite3
+bkd.sqlite3*
 *.sqlite3-journal
 *.sqlite3-wal
 *.sqlite3-shm

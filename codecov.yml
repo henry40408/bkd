@@ -1,7 +1,7 @@
 # The binary entrypoint only runs in a live process (socket bind, signal
 # handling), so leave it out of the coverage denominator.
 ignore:
-  - "src/main.rs"
+  - "cmd/bkd/main.go"
 
 coverage:
   status:
