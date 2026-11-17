@@ -41,7 +41,7 @@ func (a *App) createUser(ctx context.Context, admin auth.SessionUser, input newU
 
 func (a *App) setRole(ctx context.Context, admin auth.SessionUser, id int64, isAdmin bool) *apiError {
 	change, err := users.SetAdmin(ctx, a.db, admin.UserID, id, isAdmin)
-	return a.finishChange(admin, id, "role changed", change, err)
+	return a.finishChange(accountChange{admin: admin, id: id, action: "role changed", change: change, err: err})
 }
 
 func (a *App) setDisabled(ctx context.Context, admin auth.SessionUser, id int64, disabled bool) *apiError {
@@ -51,7 +51,7 @@ func (a *App) setDisabled(ctx context.Context, admin auth.SessionUser, id int64,
 		disabledAt = &now
 	}
 	change, err := users.SetDisabled(ctx, a.db, admin.UserID, id, disabledAt)
-	return a.finishChange(admin, id, "disabled flag changed", change, err)
+	return a.finishChange(accountChange{admin: admin, id: id, action: "disabled flag changed", change: change, err: err})
 }
 
 func (a *App) resetPassword(ctx context.Context, admin auth.SessionUser, id int64, password string) *apiError {
@@ -70,22 +70,31 @@ func (a *App) resetPassword(ctx context.Context, admin auth.SessionUser, id int6
 		return internal(err)
 	}
 	change, err := users.ResetPassword(ctx, a.db, admin.UserID, id, hash)
-	return a.finishChange(admin, id, "password reset", change, err)
+	return a.finishChange(accountChange{admin: admin, id: id, action: "password reset", change: change, err: err})
 }
 
 func (a *App) deleteUser(ctx context.Context, admin auth.SessionUser, id int64) *apiError {
 	change, err := users.Delete(ctx, a.db, admin.UserID, id)
-	return a.finishChange(admin, id, "user deleted", change, err)
+	return a.finishChange(accountChange{admin: admin, id: id, action: "user deleted", change: change, err: err})
 }
 
-func (a *App) finishChange(admin auth.SessionUser, id int64, action string, change users.Change, err error) *apiError {
-	if err != nil {
-		return internal(err)
+// accountChange is what an admin action on another account came back with.
+type accountChange struct {
+	admin  auth.SessionUser
+	id     int64
+	action string
+	change users.Change
+	err    error
+}
+
+func (a *App) finishChange(done accountChange) *apiError {
+	if done.err != nil {
+		return internal(done.err)
 	}
-	if fault := changeFault(change); fault != nil {
+	if fault := changeFault(done.change); fault != nil {
 		return fault
 	}
-	a.logger.Info(action, slog.Int64("admin", admin.UserID), slog.Int64("user_id", id))
+	a.logger.Info(done.action, slog.Int64("admin", done.admin.UserID), slog.Int64("user_id", done.id))
 	return nil
 }
 

@@ -215,17 +215,28 @@ func (a *App) changePassword(r *http.Request, c caller, user auth.SessionUser, c
 			slog.String("ip", c.addr.String()), slog.Int64("user_id", user.UserID))
 		return "", forbidden("current password is wrong")
 	}
-	return a.storeNewPassword(r, c, user, record.PasswordHash, change.New)
+	return a.storeNewPassword(r, ownPasswordUpdate{
+		caller: c, user: user, storedHash: record.PasswordHash, newPassword: change.New,
+	})
 }
 
-func (a *App) storeNewPassword(r *http.Request, c caller, user auth.SessionUser, storedHash, newPassword string) (string, *apiError) {
+// ownPasswordUpdate is a verified password change waiting to be stored.
+type ownPasswordUpdate struct {
+	caller      caller
+	user        auth.SessionUser
+	storedHash  string
+	newPassword string
+}
+
+func (a *App) storeNewPassword(r *http.Request, update ownPasswordUpdate) (string, *apiError) {
 	ctx := r.Context()
-	newHash, err := a.hasher.Hash(ctx, newPassword)
+	c, user := update.caller, update.user
+	newHash, err := a.hasher.Hash(ctx, update.newPassword)
 	if err != nil {
 		return "", internal(err)
 	}
 	changed, err := users.ChangeOwnPassword(ctx, a.db, users.OwnPasswordChange{
-		ID: user.UserID, VerifiedHash: storedHash, NewHash: newHash,
+		ID: user.UserID, VerifiedHash: update.storedHash, NewHash: newHash,
 	})
 	if err != nil {
 		return "", internal(err)

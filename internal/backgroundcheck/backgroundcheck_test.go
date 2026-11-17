@@ -195,6 +195,21 @@ func TestACoolingSiteDoesNotFillTheBatchAndStarveOtherSites(t *testing.T) {
 	assertEqual(t, ids(items), []int64{elsewhere})
 }
 
+func TestASiteWithANonAsciiNameCoolsUnderItsPunycodeBackoff(t *testing.T) {
+	pool := dbtest.Open(t)
+	user := dbtest.InsertUser(t, pool, "mei")
+	optIn(t, pool, user)
+	addBookmark(t, pool, user, "https://b\u00fccher.example/a", nil)
+	elsewhere := addBookmark(t, pool, user, "https://example.org/", nil)
+	w := newTestWorker(pool, linkcheck.New(linkcheck.Config{}))
+	// The host of a final URL is read from the serialized, punycode address.
+	w.leaveAlone(linkcheck.Backoff{Host: linkcheck.HostOf("https://xn--bcher-kva.example/a")})
+
+	items, err := w.dueNow(context.Background())
+	assertEqual(t, err, nil)
+	assertEqual(t, ids(items), []int64{elsewhere})
+}
+
 func TestAResultIsStoredOnlyWhileTheUserStillWantsTheCheck(t *testing.T) {
 	pool := dbtest.Open(t)
 	user := dbtest.InsertUser(t, pool, "mei")

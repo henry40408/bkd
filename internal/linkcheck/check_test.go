@@ -82,6 +82,12 @@ func TestHostsAreComparedWithoutWWW(t *testing.T) {
 	assertEqual(t, HostOf("not a url"), "")
 }
 
+func TestAnInternationalHostIsTheSameSiteAsItsPunycodeForm(t *testing.T) {
+	assertEqual(t, HostOf("https://B\u00fccher.example/a"), "xn--bcher-kva.example")
+	assertEqual(t, HostOf("https://xn--bcher-kva.example/a"), HostOf("https://b\u00fccher.example/b"))
+	assertEqual(t, HostOf("http://[::1]:8080/"), "::1")
+}
+
 func TestAnAddressThatIsNotAURLIsUnknown(t *testing.T) {
 	checker := New(Config{})
 	assertVerdict(t, inspect(t, checker, "example.com"), StatusUnknown, "Not a valid address")

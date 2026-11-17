@@ -220,14 +220,25 @@ func serialize(address *url.URL) string {
 	return canonical.String()
 }
 
+// canonicalHost is the lower-case punycode form of a host name, the spelling
+// the WHATWG URL parser keeps. IPv6 literals are only lower-cased.
+func canonicalHost(hostname string) string {
+	host := strings.ToLower(hostname)
+	if strings.Contains(host, ":") {
+		return host
+	}
+	if ascii, err := idna.Lookup.ToASCII(host); err == nil {
+		return ascii
+	}
+	return host
+}
+
 // canonicalAuthority is the host and port without a default port. A name that
 // IDNA refuses stays as it is, in lower case.
 func canonicalAuthority(address *url.URL) string {
-	host := strings.ToLower(address.Hostname())
+	host := canonicalHost(address.Hostname())
 	if strings.Contains(host, ":") {
 		host = "[" + host + "]"
-	} else if ascii, err := idna.Lookup.ToASCII(host); err == nil {
-		host = ascii
 	}
 	port := address.Port()
 	if port == "" || port == defaultPort(strings.ToLower(address.Scheme)) {
@@ -253,5 +264,5 @@ func HostOf(address string) string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimPrefix(strings.ToLower(parsed.Hostname()), "www.")
+	return strings.TrimPrefix(canonicalHost(parsed.Hostname()), "www.")
 }
