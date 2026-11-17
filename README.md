@@ -4,7 +4,7 @@
 [![codecov](https://codecov.io/gh/henry40408/bkd/graph/badge.svg)](https://codecov.io/gh/henry40408/bkd)
 [![Release](https://img.shields.io/github/v/release/henry40408/bkd)](https://github.com/henry40408/bkd/releases/latest)
 [![License](https://img.shields.io/github/license/henry40408/bkd)](LICENSE.txt)
-[![Rust toolchain](https://img.shields.io/badge/dynamic/toml?url=https://raw.githubusercontent.com/henry40408/bkd/main/rust-toolchain.toml&query=$.toolchain.channel&label=rust%20toolchain&logo=rust)](https://www.rust-lang.org/)
+[![Go version](https://img.shields.io/github/go-mod/go-version/henry40408/bkd)](go.mod)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://ghcr.io/henry40408/bkd)
 [![Casual Maintenance Intended](https://casuallymaintained.tech/badge.svg)](https://casuallymaintained.tech/)
 [![Vibe Coded](https://img.shields.io/badge/vibe_coded-Claude-d97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
@@ -36,7 +36,7 @@ To build the image yourself, run `docker build -t bkd .`.
 ### From source
 
 ```sh
-cargo run -- --db bkd.sqlite3 --addr 127.0.0.1:8080
+go run ./cmd/bkd --db bkd.sqlite3 --addr 127.0.0.1:8080
 ```
 
 ### Setup and settings
@@ -138,21 +138,26 @@ Over the API: send the file to `POST /api/import` with `Content-Type: text/html`
 ## Develop
 
 ```sh
-cargo fmt
-cargo clippy --all-targets -- -D warnings
-cargo nextest run
+go build -o bin/bkd ./cmd/bkd
+go test -race ./...
+go vet ./...
+go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 ```
+
+Third-party modules are vendored in `vendor/`, so builds need no network.
 
 ### Browser tests
 
-The `e2e/` directory holds end-to-end tests that drive the real page in headless Chrome or Chromium. It is a separate Cargo workspace, so `cargo nextest run` never compiles it or opens a browser.
+The `e2e/` directory holds end-to-end tests that drive the real page in headless Chrome or Chromium. It is a separate Go module, so `go test ./...` at the root never opens a browser.
 
 ```sh
+go build -o bin/bkd ./cmd/bkd
 cd e2e
-cargo test --test e2e
+E2E_CHROME=/path/to/chrome go test -count=1 -v ./...
 ```
 
-Chrome or Chromium must be installed; the first run downloads a matching chromedriver. Each scenario starts its own bkd on a free port with a temporary database. Set `BKD_E2E_FEATURES=features/bookmarks.feature` to run one feature.
+Chrome or Chromium must be installed; `E2E_CHROME` pins the binary (unset, the tests look for one). Each scenario starts its own bkd on a free port with a temporary database. Set `E2E_FEATURES=features/bookmarks.feature` to run one feature (comma-separated for more).
 
 ## License
 
