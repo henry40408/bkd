@@ -28,7 +28,7 @@ pub async fn open(path: &Path) -> Result<SqlitePool> {
 
 async fn connect(options: SqliteConnectOptions) -> Result<SqlitePool> {
     let pool = SqlitePoolOptions::new().connect_with(options).await?;
-    sqlx::migrate!().run(&pool).await?;
+    sqlx::migrate!("./internal/db/migrations").run(&pool).await?;
     Ok(pool)
 }
 

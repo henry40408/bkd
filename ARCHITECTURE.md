@@ -6,7 +6,7 @@ Rust, axum, sqlx (SQLite) and clap. Pages are rendered on the server with maud; 
 
 ## Database
 
-`src/db.rs` opens the pool and runs the migrations in `migrations/` at startup (`sqlx::migrate!`). SQL is written with the runtime `sqlx::query` functions, not the `query!` macros, so building needs no database.
+`src/db.rs` opens the pool and runs the migrations in `internal/db/migrations/` at startup (`sqlx::migrate!`). SQL is written with the runtime `sqlx::query` functions, not the `query!` macros, so building needs no database.
 
 Every connection uses WAL, `synchronous = NORMAL`, `foreign_keys = ON` and a 5 second busy timeout. SQLite ignores foreign keys unless each connection enables them, and the cascade deletes below depend on it.
 
