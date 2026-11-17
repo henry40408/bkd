@@ -81,9 +81,6 @@ func (f Filter) WithStatus(status string) Filter {
 // Tag is the normalized exact tag, or "" when there is none.
 func (f Filter) Tag() string { return f.tag }
 
-// Terms returns the parsed terms.
-func (f Filter) Terms() []Term { return f.terms }
-
 // Highlight is the part of a bookmark a page is about to show, to pick which
 // terms to highlight.
 type Highlight struct {
