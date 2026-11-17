@@ -2,6 +2,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -11,27 +12,44 @@ import (
 )
 
 const (
-	exitOK    = 0
-	exitUsage = 2
+	exitOK      = 0
+	exitFailure = 1
+	exitUsage   = 2
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(run(os.Args[1:], os.LookupEnv, os.Stdout, os.Stderr))
 }
 
-// run returns the process exit code. It only knows --version until the server
-// is ported.
-func run(args []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("bkd", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	showVersion := flags.Bool("version", false, "print the version and exit")
-	if err := flags.Parse(args); err != nil {
-		return exitUsage
+// run returns the exit code. The log goes to stderr, with the setup token.
+func run(args []string, lookupEnv func(string) (string, bool), stdout, stderr io.Writer) int {
+	// First, before flags: a retired variable must stop startup however the
+	// rest of the command line looks.
+	if err := ensureNoLegacyEnvVars(lookupEnv); err != nil {
+		return reportFatal(stderr, err)
 	}
-	if !*showVersion {
-		flags.Usage()
-		return exitUsage
+	opts, err := parseOptions(args, lookupEnv, stderr)
+	if errors.Is(err, flag.ErrHelp) {
+		return exitOK
 	}
-	_, _ = fmt.Fprintf(stdout, "bkd %s\n", version.Version())
+	if err != nil {
+		return reportFatal(stderr, err)
+	}
+	if opts.showVersion {
+		_, _ = fmt.Fprintf(stdout, "bkd %s\n", version.Version())
+		return exitOK
+	}
+	if err := serve(opts, newLogger(stderr, opts.logLevel)); err != nil {
+		return reportFatal(stderr, err)
+	}
 	return exitOK
+}
+
+func reportFatal(stderr io.Writer, err error) int {
+	_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
+	var usage usageError
+	if errors.As(err, &usage) {
+		return exitUsage
+	}
+	return exitFailure
 }

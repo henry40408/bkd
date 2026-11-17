@@ -25,7 +25,7 @@ docker run -d \
   ghcr.io/henry40408/bkd:latest
 ```
 
-The image sets `BKD_DB=/data/bkd.sqlite3` and `BKD_ADDR=0.0.0.0:8080`. Override them, or set `BKD_SECURE_COOKIES=true` when a proxy serves the site over HTTPS, with `-e`. A bind mount must be writable by uid 65532.
+The image sets `BKD_DB=/data/bkd.sqlite3` and `BKD_ADDR=0.0.0.0:8080`. Override them, set `BKD_SECURE_COOKIES=true` when a proxy serves the site over HTTPS, or set `BKD_LOG_LEVEL=debug` for more log lines, with `-e`. A bind mount must be writable by uid 65532.
 
 On the first start, with an empty database, bkd logs the one-time setup token. Read it with `docker logs bkd`.
 
@@ -50,6 +50,9 @@ On the first start, with an empty database, bkd logs a one-time setup token like
 | `--secure-cookies` | `BKD_SECURE_COOKIES` | off | Mark the session cookie `Secure`. Turn on when serving over HTTPS. |
 | `--link-check-interval` | `BKD_LINK_CHECK_INTERVAL` | `0` (off) | Seconds between rounds of the background link check. `0` turns it off for the whole server. See "Link check". |
 | `--link-check-batch` | `BKD_LINK_CHECK_BATCH` | `20` | Bookmarks the background link check visits per round, all users together (1 to 200). |
+| none | `BKD_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn` or `error`. Environment only, no flag. Logs go to stderr. |
+
+`RUST_LOG` is retired: bkd no longer reads it, and refuses to start while it is set, even empty, printing `RUST_LOG -> BKD_LOG_LEVEL`. Rename it (or unset it) to continue.
 
 ## Sign in through a reverse proxy (Authelia)
 

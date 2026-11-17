@@ -72,6 +72,8 @@ VOLUME /data
 
 ENV BKD_DB=/data/bkd.sqlite3
 ENV BKD_ADDR=0.0.0.0:8080
+# The Go server also reads BKD_LOG_LEVEL (debug|info|warn|error, default info) and
+# refuses to start while RUST_LOG is set. It is left unset here so the default applies.
 
 EXPOSE 8080
 
