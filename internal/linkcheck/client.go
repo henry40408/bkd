@@ -1,0 +1,169 @@
+package linkcheck
+
+import (
+	"context"
+	"errors"
+	"net"
+	"net/http"
+	"net/netip"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/henry40408/bkd/internal/version"
+)
+
+const (
+	maxRedirects   = 5
+	requestTimeout = 10 * time.Second
+	connectTimeout = 5 * time.Second
+)
+
+var errTooManyRedirects = errors.New("too many redirects")
+
+// userAgent is honest about being a robot, and says where to ask about it. The
+// `Mozilla/5.0 (compatible; ...)` shape is the one crawlers such as Googlebot use.
+func userAgent() string {
+	return "Mozilla/5.0 (compatible; bkd-link-checker/" + version.Version() + "; +https://github.com/henry40408/bkd)"
+}
+
+// answer is what a site said, without its body.
+type answer struct {
+	status   int
+	finalURL *url.URL
+	// challenged: the site put a bot check in front of the page (Cloudflare's
+	// `cf-mitigated`), so the status says nothing about the page.
+	challenged bool
+	// retryAfter is the seconds form only; a date is rare, and the default
+	// wait is a safe answer. Nil when the site did not say.
+	retryAfter *time.Duration
+}
+
+// asksToWait: "too many requests" or "unavailable" mean the site wants to be
+// left alone for a while.
+func (a answer) asksToWait() bool {
+	return a.status == http.StatusTooManyRequests || a.status == http.StatusServiceUnavailable
+}
+
+// isFinal: asking again with GET would get the same refusal, so it only adds load.
+func (a answer) isFinal() bool {
+	return (a.status >= 200 && a.status < 300) || a.challenged || a.asksToWait()
+}
+
+func newHTTPClient(g guard) *http.Client {
+	dialer := net.Dialer{Timeout: connectTimeout}
+	transport := &http.Transport{
+		Proxy: nil,
+		// Every host is visited once, so a pooled connection is only an open file descriptor.
+		DisableKeepAlives:   true,
+		ForceAttemptHTTP2:   false,
+		TLSHandshakeTimeout: connectTimeout,
+		DialContext:         guardedDial(g, &dialer),
+	}
+	return &http.Client{
+		Transport:     transport,
+		CheckRedirect: followOnlyPublic(g),
+	}
+}
+
+func followOnlyPublic(g guard) func(*http.Request, []*http.Request) error {
+	return func(next *http.Request, via []*http.Request) error {
+		if len(via) > maxRedirects {
+			return errTooManyRedirects
+		}
+		if !g.allowsURL(next.URL) {
+			return errBlocked
+		}
+		return nil
+	}
+}
+
+// guardedDial resolves a host name and connects only to its public addresses.
+// Resolving and connecting happen here together, so no second lookup can
+// swap in another address.
+func guardedDial(g guard, dialer *net.Dialer) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, err
+		}
+		found, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		if err != nil {
+			return nil, err
+		}
+		allowed := publicOnly(g, found)
+		if len(found) > 0 && len(allowed) == 0 {
+			return nil, errBlocked
+		}
+		return dialFirst(ctx, dialer, network, port, allowed)
+	}
+}
+
+func publicOnly(g guard, addrs []netip.Addr) []netip.Addr {
+	var allowed []netip.Addr
+	for _, addr := range addrs {
+		if g.allows(addr) {
+			allowed = append(allowed, addr)
+		}
+	}
+	return allowed
+}
+
+func dialFirst(ctx context.Context, dialer *net.Dialer, network, port string, addrs []netip.Addr) (net.Conn, error) {
+	if len(addrs) == 0 {
+		return nil, errors.New("no address for the host")
+	}
+	var lastErr error
+	for _, addr := range addrs {
+		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(addr.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+// ask reads only the status line and headers. Closing the body drops the
+// connection, so a GET never downloads the page.
+func ask(ctx context.Context, client *http.Client, method string, target *url.URL) (answer, error) {
+	request, err := http.NewRequestWithContext(ctx, method, target.String(), nil)
+	if err != nil {
+		return answer{}, err
+	}
+	request.Header.Set("User-Agent", userAgent())
+	response, err := client.Do(request)
+	if err != nil {
+		return answer{}, err
+	}
+	_ = response.Body.Close()
+	return answer{
+		status:     response.StatusCode,
+		finalURL:   response.Request.URL,
+		challenged: strings.EqualFold(response.Header.Get("Cf-Mitigated"), "challenge"),
+		retryAfter: retryAfter(response.Header.Get("Retry-After")),
+	}, nil
+}
+
+func retryAfter(header string) *time.Duration {
+	seconds, err := strconv.ParseUint(strings.TrimSpace(header), 10, 32)
+	if err != nil {
+		return nil
+	}
+	wait := time.Duration(seconds) * time.Second
+	return &wait
+}
+
+func isTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+// isBadRedirect: net/http gives no typed error for a Location it cannot read.
+func isBadRedirect(err error) bool {
+	return strings.Contains(err.Error(), "Location header")
+}
