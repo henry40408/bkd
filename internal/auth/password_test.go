@@ -26,7 +26,8 @@ func TestWrongPasswordIsRejected(t *testing.T) {
 }
 
 func TestSamePasswordGetsADifferentSalt(t *testing.T) {
-	if hashPassword("correct horse") == hashPassword("correct horse") {
+	first, second := hashPassword("correct horse"), hashPassword("correct horse")
+	if first == second {
 		t.Fatal("two hashes are identical")
 	}
 }
