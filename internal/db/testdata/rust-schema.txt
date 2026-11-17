@@ -1,0 +1,48 @@
+_sqlx_migrations: CREATE TABLE _sqlx_migrations (
+    version BIGINT PRIMARY KEY,
+    description TEXT NOT NULL,
+    installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    success BOOLEAN NOT NULL,
+    checksum BLOB NOT NULL,
+    execution_time BIGINT NOT NULL
+)
+bookmark_tags: CREATE TABLE bookmark_tags (
+    bookmark_id INTEGER NOT NULL REFERENCES bookmarks (id) ON DELETE CASCADE,
+    -- The application trims and lowercases tags; SQLite cannot fold non-ASCII case.
+    tag         TEXT    NOT NULL CHECK (tag <> ''),
+    PRIMARY KEY (bookmark_id, tag)
+) STRICT
+bookmarks: CREATE TABLE bookmarks (
+    id         INTEGER PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    url        TEXT    NOT NULL CHECK (url <> ''),
+    title      TEXT    NOT NULL CHECK (title <> ''),
+    note       TEXT    NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+, link_status TEXT
+    CHECK (link_status IN ('ok', 'redirected', 'broken', 'unknown')), link_checked_at INTEGER, link_detail TEXT) STRICT
+bookmarks_user_created: CREATE INDEX bookmarks_user_created ON bookmarks (user_id, created_at DESC)
+sessions: CREATE TABLE sessions (
+    token_hash TEXT    PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+, last_used_at INTEGER NOT NULL DEFAULT 0, ip TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '', confirmed_at INTEGER NOT NULL DEFAULT 0) STRICT
+sessions_user_id: CREATE INDEX sessions_user_id ON sessions (user_id)
+users: CREATE TABLE users (
+    id            INTEGER PRIMARY KEY,
+    -- ASCII only and lowercase: SQLite folds case for ASCII alone, so this keeps the
+    -- UNIQUE constraint case-insensitive on every database.
+    username      TEXT    NOT NULL UNIQUE CHECK (
+        length(username) BETWEEN 3 AND 32
+        AND username GLOB '[a-z0-9]*[a-z0-9]'
+        AND username NOT GLOB '*[^a-z0-9._-]*'
+    ),
+    password_hash TEXT    NOT NULL,
+    is_admin      INTEGER NOT NULL DEFAULT 0 CHECK (is_admin IN (0, 1)),
+    created_at    INTEGER NOT NULL,
+    -- NULL means active.
+    disabled_at   INTEGER
+, link_check_enabled INTEGER NOT NULL DEFAULT 0
+    CHECK (link_check_enabled IN (0, 1))) STRICT

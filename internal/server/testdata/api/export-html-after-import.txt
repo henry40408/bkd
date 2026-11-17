@@ -1,0 +1,27 @@
+# GET /api/export?format=html
+HTTP/1.1 200 OK
+content-type: text/html; charset=utf-8
+content-disposition: attachment; filename="bkd-bookmarks.html"
+cache-control: no-store
+x-content-type-options: nosniff
+x-frame-options: DENY
+referrer-policy: no-referrer
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+permissions-policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+content-length: 666
+
+<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
+<TITLE>Bookmarks</TITLE>
+<H1>Bookmarks</H1>
+<DL><p>
+    <DT><A HREF="https://imported.example/one" ADD_DATE="1600000000" TAGS="a,b,dev">One &amp; only</A>
+    <DD>a note
+    <DT><A HREF="https://example.com/a2" ADD_DATE="1794898893" TAGS="rust,x">Example 2</A>
+    <DD>n
+    <DT><A HREF="http://example.org/b" ADD_DATE="1794898893" TAGS="rust,tools,web">Beta</A>
+    <DT><A HREF="https://rust-lang.org/" ADD_DATE="1794898893" TAGS="rust">Rust language</A>
+    <DD>systems
+    <DT><A HREF="https://example.org/b" ADD_DATE="1794898893" TAGS="dev">dup</A>
+</DL><p>

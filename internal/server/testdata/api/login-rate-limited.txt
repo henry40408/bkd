@@ -1,0 +1,14 @@
+# POST /api/login
+HTTP/1.1 429 Too Many Requests
+content-type: application/json
+retry-after: 57
+cache-control: no-store
+x-content-type-options: nosniff
+x-frame-options: DENY
+referrer-policy: no-referrer
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+permissions-policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+content-length: 46
+
+{"error":"too many attempts, try again later"}

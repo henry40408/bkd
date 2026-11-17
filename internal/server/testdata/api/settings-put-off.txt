@@ -1,0 +1,13 @@
+# PUT /api/settings
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-frame-options: DENY
+referrer-policy: no-referrer
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+permissions-policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+content-length: 28
+
+{"link_check_enabled":false}

@@ -1,0 +1,13 @@
+# GET /api/users
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-frame-options: DENY
+referrer-policy: no-referrer
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+permissions-policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+content-length: 274
+
+{"users":[{"id":1,"username":"alice","is_admin":true,"is_disabled":false,"created_at":1794898893},{"id":2,"username":"bob","is_admin":false,"is_disabled":false,"created_at":1794898894},{"id":3,"username":"carol","is_admin":false,"is_disabled":true,"created_at":1794898894}]}
