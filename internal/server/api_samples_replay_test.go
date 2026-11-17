@@ -1,6 +1,8 @@
 package server
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -38,8 +40,7 @@ func bookmarkJSON(address, title, note string, tags tags) obj {
 	return obj{"url": address, "title": title, "note": note, "tags": tags}
 }
 
-// sampleCalls is the capture script, minus the pages and the link check
-// (check-*, which is the SSE route of step 13).
+// sampleCalls is the capture script, minus the pages.
 func sampleCalls(setupToken string) []call {
 	const admin, bob = "admin", "bob"
 	calls := []call{
@@ -117,6 +118,9 @@ func sampleCalls(setupToken string) []call {
 		j("export-json", "GET", "/api/export?format=json", admin, nil),
 		j("export-bad-format", "GET", "/api/export?format=csv", admin, nil),
 		j("export-no-format", "GET", "/api/export", admin, nil),
+		j("check-empty", "POST", "/api/bookmarks/check", admin, obj{"ids": []int{}}),
+		j("check-not-found", "POST", "/api/bookmarks/check", admin, obj{"ids": []int{999}}),
+		j("check-sse", "POST", "/api/bookmarks/check", admin, obj{"ids": []int{3}}),
 		rawCall("import-ok", "POST", "/api/import", admin, "text/html; charset=utf-8", netscapeFile),
 		rawCall("import-again", "POST", "/api/import", admin, "text/html", netscapeFile),
 		rawCall("import-415", "POST", "/api/import", admin, jsonType, netscapeFile),
@@ -220,7 +224,14 @@ func TestApiSamplesMatchRust(t *testing.T) {
 		if c.sample == "logout" {
 			c.who = "logout-session"
 		}
+		var restore func()
+		if c.sample == "check-sse" {
+			restore = answeringBookmark(app, 3)
+		}
 		got := app.sendCall(c, cast)
+		if restore != nil {
+			restore()
+		}
 		if c.keep != "" {
 			cast[c.keep] = sessionToken(t, got)
 		}
@@ -232,7 +243,21 @@ func TestApiSamplesMatchRust(t *testing.T) {
 	requireEverySampleReplayed(t, calls)
 }
 
-// The check samples belong to the SSE route of step 13.
+// answeringBookmark points a bookmark at a local site that answers 200, because
+// the capture reached a real one. The returned function puts the address back.
+func answeringBookmark(app *testApp, id int64) (restore func()) {
+	site := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	var original string
+	if err := app.db.QueryRow("SELECT url FROM bookmarks WHERE id = ?1", id).Scan(&original); err != nil {
+		app.t.Fatal(err)
+	}
+	app.exec("UPDATE bookmarks SET url = ?1 WHERE id = ?2", site.URL+"/", id)
+	return func() {
+		site.Close()
+		app.exec("UPDATE bookmarks SET url = ?1 WHERE id = ?2", original, id)
+	}
+}
+
 func requireEverySampleReplayed(t *testing.T, calls []call) {
 	t.Helper()
 	replayed := map[string]bool{}
@@ -245,7 +270,7 @@ func requireEverySampleReplayed(t *testing.T, calls []call) {
 	}
 	for _, file := range files {
 		name := strings.TrimSuffix(filepath.Base(file), ".txt")
-		if !replayed[name] && !strings.HasPrefix(name, "check-") {
+		if !replayed[name] {
 			t.Errorf("sample %s is not replayed", name)
 		}
 	}

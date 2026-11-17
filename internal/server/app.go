@@ -62,6 +62,8 @@ type App struct {
 	backgroundOn  bool
 	// checkLimit is how long a page waits for a link check (tests shorten it).
 	checkLimit time.Duration
+	// keepAlive is how often a quiet check stream writes a comment (tests shorten it).
+	keepAlive time.Duration
 
 	setupMu    sync.Mutex
 	setupToken *auth.SetupToken
@@ -92,6 +94,7 @@ func New(config Config) *App {
 		secureCookies: config.SecureCookies,
 		backgroundOn:  config.BackgroundLinkCheck,
 		checkLimit:    noScriptCheckLimit,
+		keepAlive:     keepAliveInterval,
 		setupToken:    config.SetupToken,
 	}
 }
