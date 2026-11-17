@@ -3,3 +3,10 @@
 /bkd.sqlite3
 /bkd.sqlite3-wal
 /bkd.sqlite3-shm
+/bin/
+
+# `go test -coverprofile` output.
+coverage.out
+coverage-bin.out
+/covdata/
+/coverage/
