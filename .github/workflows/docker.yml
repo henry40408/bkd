@@ -30,8 +30,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # No qemu: the Dockerfile builder is pinned to the native platform and zig
-      # cross-compiles both musl targets, so the arm64 image needs no emulation.
+          # `git describe` needs the tags; .dockerignore keeps .git out of the
+          # build context, so the version goes in as a build arg.
+          fetch-depth: 0
+      # No qemu: the Dockerfile cross-compiles arm64 with the Go toolchain.
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         if: github.event_name != 'pull_request'
@@ -39,6 +41,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Get version
+        id: version
+        run: echo "version=$(git describe --always --tags)" >> "$GITHUB_OUTPUT"
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: meta
         with:
@@ -54,5 +59,7 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

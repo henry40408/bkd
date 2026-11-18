@@ -1,0 +1,13 @@
+# GET /api/bookmarks
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-frame-options: DENY
+referrer-policy: no-referrer
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+permissions-policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+content-length: 498
+
+{"bookmarks":[{"id":3,"url":"https://rust-lang.org/","title":"Rust language","note":"systems","tags":["rust"],"created_at":1794898893,"updated_at":1794898893,"link":null},{"id":2,"url":"http://example.org/b","title":"Beta","note":"","tags":["tools","web"],"created_at":1794898893,"updated_at":1794898893,"link":null},{"id":1,"url":"https://Example.com/a?x=1&y=<2>","title":"Example \"A\"","note":"A <note> & more","tags":["rust","web"],"created_at":1794898893,"updated_at":1794898893,"link":null}]}

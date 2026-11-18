@@ -1,0 +1,12 @@
+# POST /api/login
+HTTP/1.1 200 OK
+set-cookie: bkd_session=5957c25e80c19e8e623b8fbc538e945c8b611ff35d7b0e6c850b9c16c20f41aa; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000
+cache-control: no-store
+x-content-type-options: nosniff
+x-frame-options: DENY
+referrer-policy: no-referrer
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+permissions-policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+content-length: 0
+

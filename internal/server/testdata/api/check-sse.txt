@@ -1,0 +1,19 @@
+# POST /api/bookmarks/check
+HTTP/1.1 200 OK
+content-type: text/event-stream
+cache-control: no-store
+x-accel-buffering: no
+x-content-type-options: nosniff
+x-frame-options: DENY
+referrer-policy: no-referrer
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+permissions-policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+transfer-encoding: chunked
+
+event: result
+data: {"id":3,"link":{"status":"ok","checked_at":1794898895,"detail":""}}
+
+event: done
+data: {}
+

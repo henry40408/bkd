@@ -1,0 +1,13 @@
+# POST /api/bookmarks/bulk
+HTTP/1.1 422 Unprocessable Entity
+content-type: text/plain; charset=utf-8
+cache-control: no-store
+x-content-type-options: nosniff
+x-frame-options: DENY
+referrer-policy: no-referrer
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+permissions-policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+content-length: 156
+
+Failed to deserialize the JSON body into the target type: unknown variant `explode`, expected one of `delete`, `add_tags`, `remove_tags` at line 1 column 33

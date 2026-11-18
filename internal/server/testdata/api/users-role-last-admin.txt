@@ -1,0 +1,13 @@
+# PUT /api/users/1/role
+HTTP/1.1 409 Conflict
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-frame-options: DENY
+referrer-policy: no-referrer
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+permissions-policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+content-length: 49
+
+{"error":"at least one active admin must remain"}

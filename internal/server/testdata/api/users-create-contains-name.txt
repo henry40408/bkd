@@ -1,0 +1,13 @@
+# POST /api/users
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-frame-options: DENY
+referrer-policy: no-referrer
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+permissions-policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+content-length: 50
+
+{"error":"password must not contain the username"}

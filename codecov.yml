@@ -1,7 +1,10 @@
 # The binary entrypoint only runs in a live process (socket bind, signal
-# handling), so leave it out of the coverage denominator.
+# handling), so leave it out of the coverage denominator. dbtest is test
+# support: no test of its own runs it, and every test that opens a database
+# already depends on it working.
 ignore:
-  - "src/main.rs"
+  - "cmd/bkd/main.go"
+  - "internal/dbtest"
 
 coverage:
   status:

@@ -1,0 +1,13 @@
+# GET /api/bookmarks?limit=1
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-frame-options: DENY
+referrer-policy: no-referrer
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+permissions-policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+content-length: 153
+
+{"bookmarks":[{"id":5,"url":"https://example.org/b","title":"dup","note":"","tags":["dev"],"created_at":1794898893,"updated_at":1794898893,"link":null}]}
