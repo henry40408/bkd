@@ -2,6 +2,7 @@ package linkcheck
 
 import (
 	"context"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -80,7 +81,7 @@ func (c *Checker) StartPaced(ctx context.Context, targets []Target, pause time.D
 	// Every target gets exactly one event, so a sender never blocks and no
 	// goroutine waits for a reader that left.
 	events := make(chan Event, len(targets))
-	run := hostRun{checker: c, events: events, pause: pause}
+	shared := hostRun{checker: c, events: events, pause: pause}
 	slots := make(chan struct{}, maxHostsPerCheck)
 	var workers sync.WaitGroup
 	for host, group := range groupByHost(targets) {
@@ -93,7 +94,8 @@ func (c *Checker) StartPaced(ctx context.Context, targets []Target, pause time.D
 			case <-ctx.Done():
 				return
 			}
-			run.checkHost(ctx, host, group)
+			run := shared
+			run.checkHostSurvivingPanic(ctx, host, group)
 		}()
 	}
 	go func() {
@@ -118,11 +120,36 @@ type hostRun struct {
 	checker *Checker
 	events  chan<- Event
 	pause   time.Duration
+	// sent counts the events of this worker's group, so that after a panic
+	// the targets without an event are known. Each worker has its own copy.
+	sent int
+}
+
+func (r *hostRun) send(event Event) {
+	r.events <- event
+	r.sent++
+}
+
+// checkHostSurvivingPanic keeps a panic from ending the process: the targets
+// that have no event yet are reported as unknown, so each target still gets
+// exactly one.
+func (r *hostRun) checkHostSurvivingPanic(ctx context.Context, host string, group []Target) {
+	defer func() {
+		value := recover()
+		if value == nil {
+			return
+		}
+		r.checker.logger.Error("link check panicked", "host", host, "panic", value, "stack", string(debug.Stack()))
+		for _, target := range group[r.sent:] {
+			r.send(Event{Checked: &Checked{Target: target, Verdict: Verdict{StatusUnknown, detailCheckFailed}}})
+		}
+	}()
+	r.checkHost(ctx, host, group)
 }
 
 // checkHost asks one host's targets, one after another, until the host asks
 // to be left alone or stops answering.
-func (r hostRun) checkHost(ctx context.Context, host string, group []Target) {
+func (r *hostRun) checkHost(ctx context.Context, host string, group []Target) {
 	timeoutsInARow := 0
 	for i, target := range group {
 		if i > 0 && !sleep(ctx, r.pause) {
@@ -144,9 +171,9 @@ func (r hostRun) checkHost(ctx context.Context, host string, group []Target) {
 		if givesUp && backoff == nil {
 			backoff = &Backoff{Host: host}
 		}
-		r.events <- Event{Checked: &Checked{
+		r.send(Event{Checked: &Checked{
 			Target: target, Verdict: inspection.Verdict, Backoff: backoff, Answered: inspection.Answered,
-		}}
+		}})
 		if reason, stop := skipReason(askedToWait, givesUp); stop {
 			r.skipRest(host, group[i+1:], reason)
 			return
@@ -164,9 +191,9 @@ func skipReason(askedToWait, givesUp bool) (SkipReason, bool) {
 	return "", false
 }
 
-func (r hostRun) skipRest(host string, rest []Target, reason SkipReason) {
+func (r *hostRun) skipRest(host string, rest []Target, reason SkipReason) {
 	for _, target := range rest {
-		r.events <- Event{Skipped: &Skipped{Target: target, Reason: reason, Host: host}}
+		r.send(Event{Skipped: &Skipped{Target: target, Reason: reason, Host: host}})
 	}
 }
 

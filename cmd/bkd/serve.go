@@ -58,7 +58,7 @@ func serve(opts options, logger *slog.Logger) error {
 		return err
 	}
 	// Never with Allow: production checks public addresses only.
-	checker := linkcheck.New(linkcheck.Config{})
+	checker := linkcheck.New(linkcheck.Config{Logger: logger})
 	app := server.New(server.Config{
 		DB:                  pool,
 		SetupToken:          setupToken,

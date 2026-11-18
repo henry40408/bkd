@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -213,4 +214,40 @@ func TestABatchAsksForBetweenOneAndTheMaximumDistinctIDs(t *testing.T) {
 	assertEqual(t, len(valid.IDs), MaxCheckIDs)
 	valid, _ = validate([]int64{3, 3, 4})
 	assertEqual(t, valid.IDs, []int64{3, 4})
+}
+
+// panickingOn panics for one path and lets every other request through.
+type panickingOn struct {
+	path  string
+	inner http.RoundTripper
+}
+
+func (p panickingOn) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Path == p.path {
+		panic("boom")
+	}
+	return p.inner.RoundTrip(r)
+}
+
+func TestAPanicLeavesOneEventPerTargetAndTheProcessRunning(t *testing.T) {
+	healthy := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer healthy.Close()
+	crashing := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer crashing.Close()
+	checker := loopbackChecker(0)
+	checker.client.Transport = panickingOn{path: "/b", inner: checker.client.Transport}
+	// Hosts are told apart by name, not port, so the healthy site is reached as "localhost".
+	healthyURL := strings.Replace(healthy.URL, "127.0.0.1", "localhost", 1)
+	targets := append(targetsOn(crashing.URL, 1, 2, 3), targetsOn(healthyURL, 4)...)
+
+	events := collect(t, checker.Start(context.Background(), targets))
+	verdicts := map[int64]Verdict{}
+	for _, event := range events {
+		verdicts[event.Checked.Target.ID] = event.Checked.Verdict
+	}
+	assertEqual(t, len(events), 4)
+	assertEqual(t, verdicts, map[int64]Verdict{
+		1: {StatusOK, ""}, 2: {StatusUnknown, detailCheckFailed}, 3: {StatusUnknown, detailCheckFailed},
+		4: {StatusOK, ""},
+	})
 }

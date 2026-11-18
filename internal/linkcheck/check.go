@@ -3,6 +3,7 @@ package linkcheck
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -22,6 +23,7 @@ const (
 	detailNotPublic       = "Address is not public"
 	detailBotCheck        = "Blocked by a bot check"
 	detailNotValid        = "Not a valid address"
+	detailCheckFailed     = "Check failed"
 )
 
 // Status says what a check found.
@@ -69,6 +71,8 @@ type Config struct {
 	Timeout time.Duration
 	// Allow admits addresses that are not public. Only tests set it.
 	Allow func(netip.Addr) bool
+	// Logger receives a recovered panic; nil discards.
+	Logger *slog.Logger
 }
 
 // Checker asks addresses whether they answer. It is safe for concurrent use.
@@ -77,6 +81,7 @@ type Checker struct {
 	guard    guard
 	inFlight chan struct{}
 	budget   time.Duration
+	logger   *slog.Logger
 }
 
 // New creates a Checker.
@@ -86,7 +91,12 @@ func New(config Config) *Checker {
 	if budget <= 0 {
 		budget = requestTimeout
 	}
+	logger := config.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
 	return &Checker{
+		logger:   logger,
 		client:   newHTTPClient(g),
 		guard:    g,
 		inFlight: make(chan struct{}, maxRequestsInFlight),

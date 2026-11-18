@@ -298,3 +298,34 @@ func TestRunStopsWhenTheContextEnds(t *testing.T) {
 		t.Fatal("Run did not stop")
 	}
 }
+
+func TestAPanicInARoundDoesNotEndRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls atomic.Int32
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		Run(ctx, Config{
+			DB: dbtest.Open(t), Checker: linkcheck.New(linkcheck.Config{}), Interval: 5 * time.Millisecond, Batch: 1,
+			Now: func() time.Time {
+				if calls.Add(1) == 1 {
+					panic("boom")
+				}
+				return now
+			},
+		})
+	}()
+	deadline := time.After(5 * time.Second)
+	for calls.Load() < 3 {
+		select {
+		case <-finished:
+			t.Fatal("Run ended after a panic")
+		case <-deadline:
+			t.Fatal("no round followed the panic")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	<-finished
+}

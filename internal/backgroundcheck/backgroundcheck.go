@@ -13,6 +13,7 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"runtime/debug"
 	"time"
 
 	"github.com/henry40408/bkd/internal/linkcheck"
@@ -94,6 +95,12 @@ func newWorker(config Config) *worker {
 }
 
 func (w *worker) logRound(ctx context.Context) {
+	// A panic ends this round only; the next one starts on the next tick.
+	defer func() {
+		if value := recover(); value != nil {
+			w.config.Logger.Error("background link check panicked", "panic", value, "stack", string(debug.Stack()))
+		}
+	}()
 	count, err := w.runRound(ctx)
 	switch {
 	case ctx.Err() != nil:
