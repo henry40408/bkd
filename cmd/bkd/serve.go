@@ -68,6 +68,7 @@ func serve(opts options, logger *slog.Logger) error {
 		LinkChecker:         checker,
 		BackgroundLinkCheck: opts.linkCheckInterval > 0,
 		Hasher:              hasher,
+		Stopping:            ctx,
 		Logger:              logger,
 	})
 

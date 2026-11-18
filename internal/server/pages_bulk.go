@@ -217,6 +217,8 @@ func (a *App) checkLinks(ctx context.Context, user auth.SessionUser, ids []int64
 // collectChecks stores each verdict as it arrives. It returns false when a target
 // was skipped or the time limit ended the wait.
 func (a *App) collectChecks(ctx context.Context, user auth.SessionUser, targets []linkcheck.Target) (bool, error) {
+	ctx, endCheck := a.endsWhenStopping(ctx)
+	defer endCheck()
 	waitCtx, cancel := context.WithTimeout(ctx, a.checkLimit)
 	defer cancel()
 	running := a.linkChecker.Start(waitCtx, targets)

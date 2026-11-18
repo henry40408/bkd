@@ -348,3 +348,34 @@ func TestABodyThatArrivesTooSlowlyIsGivenUpOn(t *testing.T) {
 		t.Fatal("the server kept waiting for the body")
 	}
 }
+
+func TestStoppingTheServerEndsARunningCheckStream(t *testing.T) {
+	stopping, stop := context.WithCancel(context.Background())
+	defer stop()
+	app := newTestApp(t, Config{Stopping: stopping})
+	token := app.signIn("henry", false)
+	started := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+	}))
+	defer slow.Close()
+	app.addBookmarkAt(token, slow.URL+"/")
+	server := httptest.NewServer(app.app.Handler())
+	defer server.Close()
+
+	response := openStream(t, server.URL, token, context.Background())
+	<-started
+	stop()
+
+	finished := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(io.Discard, response.Body)
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream outlived the stop")
+	}
+}

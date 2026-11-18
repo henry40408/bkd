@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"io"
 	"log/slog"
@@ -43,6 +44,9 @@ type Config struct {
 	Hasher *auth.Hasher
 	// Logger may be nil.
 	Logger *slog.Logger
+	// Stopping ends when the process is asked to stop. Link checks, which can
+	// take a minute, end then; other requests are left to finish. Nil never ends.
+	Stopping context.Context
 }
 
 // App holds the state every request shares.
@@ -60,6 +64,7 @@ type App struct {
 	setupLimiter  *auth.Limiter
 	secureCookies bool
 	backgroundOn  bool
+	stopping      context.Context
 	// checkLimit is how long a page waits for a link check (tests shorten it).
 	checkLimit time.Duration
 	// bodyTimeout is how long a request has to deliver its body (tests shorten it).
@@ -81,7 +86,12 @@ func New(config Config) *App {
 	if hasher == nil {
 		hasher = auth.NewHasher()
 	}
+	stopping := config.Stopping
+	if stopping == nil {
+		stopping = context.Background()
+	}
 	return &App{
+		stopping:      stopping,
 		db:            config.DB,
 		logger:        logger,
 		hasher:        hasher,

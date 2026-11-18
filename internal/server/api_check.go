@@ -73,6 +73,8 @@ func (a *App) streamCheck(ctx context.Context, w http.ResponseWriter, user auth.
 	if err != nil {
 		return
 	}
+	ctx, endCheck := a.endsWhenStopping(ctx)
+	defer endCheck()
 	running := a.linkChecker.Start(ctx, targets)
 	defer running.Cancel()
 	ticker := time.NewTicker(a.keepAlive)
@@ -132,4 +134,15 @@ func (a *App) storeChecked(ctx context.Context, user auth.SessionUser, checked l
 	return a.linkStore.Store(ctx, linkcheck.StoreRequest{
 		UserID: user.UserID, Checked: []linkcheck.Checked{checked}, Now: auth.UnixNow(),
 	})
+}
+
+// endsWhenStopping lets a long check end when the process is asked to stop, so
+// that a graceful shutdown does not wait for it.
+func (a *App) endsWhenStopping(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	stopWatching := context.AfterFunc(a.stopping, cancel)
+	return ctx, func() {
+		stopWatching()
+		cancel()
+	}
 }
