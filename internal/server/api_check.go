@@ -105,9 +105,7 @@ func (a *App) sendCheckEvent(ctx context.Context, stream *sseWriter, user auth.S
 		skipped := event.Skipped
 		return stream.event("skipped", skippedLink{ID: skipped.Target.ID, Reason: skipped.Reason, Host: skipped.Host}) == nil
 	}
-	stored, err := a.linkStore.Store(ctx, linkcheck.StoreRequest{
-		UserID: user.UserID, Checked: []linkcheck.Checked{*event.Checked}, Now: auth.UnixNow(),
-	})
+	stored, err := a.storeChecked(ctx, user, *event.Checked)
 	if err != nil {
 		if ctx.Err() == nil {
 			a.logger.Error("storing a link check failed", "error", err)
@@ -120,4 +118,18 @@ func (a *App) sendCheckEvent(ctx context.Context, stream *sseWriter, user auth.S
 		return true
 	}
 	return stream.event("result", checkedLink{ID: stored[0].ID, Link: stored[0].Check}) == nil
+}
+
+// storeResultTimeout bounds a save that no longer follows the request.
+const storeResultTimeout = 5 * time.Second
+
+// storeChecked saves one finished check. The request's cancellation does not
+// reach it: the site was already asked, so a client that leaves must not make
+// the database throw that answer away.
+func (a *App) storeChecked(ctx context.Context, user auth.SessionUser, checked linkcheck.Checked) ([]linkcheck.Stored, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), storeResultTimeout)
+	defer cancel()
+	return a.linkStore.Store(ctx, linkcheck.StoreRequest{
+		UserID: user.UserID, Checked: []linkcheck.Checked{checked}, Now: auth.UnixNow(),
+	})
 }

@@ -234,10 +234,7 @@ func (a *App) collectChecks(ctx context.Context, user auth.SessionUser, targets 
 				complete = false
 				continue
 			}
-			_, err := a.linkStore.Store(ctx, linkcheck.StoreRequest{
-				UserID: user.UserID, Checked: []linkcheck.Checked{*event.Checked}, Now: auth.UnixNow(),
-			})
-			if err != nil {
+			if _, err := a.storeChecked(ctx, user, *event.Checked); err != nil {
 				return false, err
 			}
 		}

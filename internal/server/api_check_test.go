@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/henry40408/bkd/internal/auth"
+	"github.com/henry40408/bkd/internal/linkcheck"
 )
 
 // eventsOf lists the event names of a stream, in order.
@@ -280,4 +283,24 @@ func TestQuietCheckWritesKeepAliveComments(t *testing.T) {
 	if string(buffer) != ":\n\n" {
 		t.Errorf("first bytes %q, want a keep-alive comment", buffer)
 	}
+}
+
+func TestAResultIsSavedEvenWhenTheClientHasLeft(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("henry", false)
+	site := linkSite()
+	defer site.Close()
+	id := app.addBookmarkAt(token, site.URL+"/ok")
+	gone, leave := context.WithCancel(context.Background())
+	leave()
+
+	stored, err := app.app.storeChecked(gone, auth.SessionUser{UserID: 1}, linkcheck.Checked{
+		Target:  linkcheck.Target{ID: id, URL: site.URL + "/ok"},
+		Verdict: linkcheck.Verdict{Status: linkcheck.StatusOK},
+	})
+
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("stored %v, error %v", stored, err)
+	}
+	mustContain(t, app.send(get("/api/bookmarks").as(token)), `"status":"ok"`)
 }
