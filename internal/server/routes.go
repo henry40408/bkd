@@ -133,7 +133,7 @@ func (a *App) mountPages(mux *http.ServeMux) {
 // api wraps one JSON route. The cross-site check sits inside the headers, so its
 // refusal is not cached either.
 func (a *App) api(limit int64, route http.Handler) http.Handler {
-	return limitBody(limit, apiHeaders(a.sameOriginOnly(route)))
+	return limitBody(limit, a.bodyTimeout, apiHeaders(a.sameOriginOnly(route)))
 }
 
 func (a *App) mountAPI(mux *http.ServeMux) {

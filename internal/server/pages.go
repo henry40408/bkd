@@ -17,7 +17,7 @@ const pageContentSecurityPolicy = "default-src 'none'; script-src 'self'; style-
 // page wraps one page route. As in the API's stack, the body limit is outermost
 // and the origin check innermost, so a refusal carries the page headers too.
 func (a *App) page(limit int64, route http.Handler) http.Handler {
-	return limitBody(limit, pageHeaders(a.formOriginRequired(route)))
+	return limitBody(limit, a.bodyTimeout, pageHeaders(a.formOriginRequired(route)))
 }
 
 // pageHeaders sets what every page carries. Referrer-Policy is same-origin, not

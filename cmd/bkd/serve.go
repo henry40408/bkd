@@ -24,6 +24,7 @@ import (
 const (
 	shutdownGrace          = 10 * time.Second
 	readHeaderTimeout      = 10 * time.Second
+	idleTimeout            = 120 * time.Second
 	expiredSessionSweepGap = time.Hour
 )
 
@@ -142,11 +143,13 @@ func sweepExpiredSessions(ctx context.Context, pool *sql.DB, logger *slog.Logger
 }
 
 // serveUntilSignal serves until ctx ends, then drains for shutdownGrace and
-// closes what is left. WriteTimeout stays 0: the check stream is long-lived.
+// closes what is left. WriteTimeout stays 0: the check stream is long-lived. A
+// request body has its own deadline (see the server package).
 func serveUntilSignal(ctx context.Context, listener net.Listener, handler http.Handler, logger *slog.Logger) error {
 	httpServer := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       idleTimeout,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 	serveErr := make(chan error, 1)

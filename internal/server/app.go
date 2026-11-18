@@ -62,6 +62,8 @@ type App struct {
 	backgroundOn  bool
 	// checkLimit is how long a page waits for a link check (tests shorten it).
 	checkLimit time.Duration
+	// bodyTimeout is how long a request has to deliver its body (tests shorten it).
+	bodyTimeout time.Duration
 	// keepAlive is how often a quiet check stream writes a comment (tests shorten it).
 	keepAlive time.Duration
 
@@ -94,6 +96,7 @@ func New(config Config) *App {
 		secureCookies: config.SecureCookies,
 		backgroundOn:  config.BackgroundLinkCheck,
 		checkLimit:    noScriptCheckLimit,
+		bodyTimeout:   requestBodyTimeout,
 		keepAlive:     keepAliveInterval,
 		setupToken:    config.SetupToken,
 	}

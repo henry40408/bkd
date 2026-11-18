@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -303,4 +304,47 @@ func TestAResultIsSavedEvenWhenTheClientHasLeft(t *testing.T) {
 		t.Fatalf("stored %v, error %v", stored, err)
 	}
 	mustContain(t, app.send(get("/api/bookmarks").as(token)), `"status":"ok"`)
+}
+
+func TestACheckStreamOutlivesTheBodyReadDeadline(t *testing.T) {
+	app := runningApp(t)
+	app.app.bodyTimeout = 50 * time.Millisecond
+	token := app.signIn("henry", false)
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(400 * time.Millisecond)
+	}))
+	defer slow.Close()
+	app.addBookmarkAt(token, slow.URL+"/")
+	server := httptest.NewServer(app.app.Handler())
+	defer server.Close()
+
+	response := openStream(t, server.URL, token, context.Background())
+	stream, err := io.ReadAll(response.Body)
+
+	if err != nil || strings.Join(eventsOf(string(stream)), ",") != "result,done" {
+		t.Fatalf("events in %q, error %v", stream, err)
+	}
+}
+
+func TestABodyThatArrivesTooSlowlyIsGivenUpOn(t *testing.T) {
+	app := runningApp(t)
+	app.app.bodyTimeout = 100 * time.Millisecond
+	token := app.signIn("henry", false)
+	server := httptest.NewServer(app.app.Handler())
+	defer server.Close()
+	conn, err := net.Dial("tcp", strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	// 50 bytes are promised and one arrives.
+	_, _ = io.WriteString(conn, "POST /api/bookmarks HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"+
+		"Cookie: bkd_session="+token+"\r\nContent-Length: 50\r\n\r\n{")
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	answer, _ := io.ReadAll(conn)
+
+	if len(answer) == 0 {
+		t.Fatal("the server kept waiting for the body")
+	}
 }

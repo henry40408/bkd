@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"strings"
+	"time"
 )
 
 // securityHeaders sets what every response carries, API and static files alike.
@@ -70,11 +71,18 @@ func originMatchesHost(r *http.Request) bool {
 	return found && authority == host
 }
 
+// requestBodyTimeout is how long a request has to deliver its body.
+const requestBodyTimeout = 2 * time.Minute
+
 // limitBody caps what a handler can read. Reading past it fails with
-// *http.MaxBytesError, which the body readers turn into 413.
-func limitBody(limit int64, next http.Handler) http.Handler {
+// *http.MaxBytesError, which the body readers turn into 413. The body also has
+// to arrive within timeout, so a slow upload cannot hold a connection
+// for ever. Only reads are limited: the response, an SSE stream, is not.
+func limitBody(limit int64, timeout time.Duration, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
+		// Unsupported writers (tests) just keep no deadline.
+		_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(timeout))
 		next.ServeHTTP(w, r)
 	})
 }

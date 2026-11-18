@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // sseWriter writes a server-sent event stream. Every write is flushed, so a
@@ -20,6 +21,9 @@ func startSSE(w http.ResponseWriter) (*sseWriter, error) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	stream := &sseWriter{w: w, controller: http.NewResponseController(w)}
+	// The body deadline from limitBody must not end a stream that outlives it:
+	// an expired read deadline would make the server treat the client as gone.
+	_ = stream.controller.SetReadDeadline(time.Time{})
 	return stream, stream.controller.Flush()
 }
 
