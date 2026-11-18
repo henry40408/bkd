@@ -112,7 +112,7 @@ jobs:
   mutation:
     name: mutation
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -130,11 +130,13 @@ jobs:
       - name: Mutate the whole module (push)
         if: github.event_name != 'pull_request'
         run: |
-          # Stream the output so a killed runner still leaves a log. Two
-          # workers keep the whole module within the runner's memory.
+          # Stream the output so a killed runner still leaves a log. One
+          # worker on two CPUs: with two workers the runner killed the job
+          # (SIGTERM, exit 143) after 8 minutes.
+          export GOMAXPROCS=2
           set -o pipefail
           go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash \
-            -E '^e2e/' -E '^vendor/' --workers 2 --threshold-efficacy 95 . \
+            -E '^e2e/' -E '^vendor/' --workers 1 --threshold-efficacy 95 . \
             2>&1 | tee "$RUNNER_TEMP/mutation.log"
       - name: Mutate the changed lines (pull request)
         if: github.event_name == 'pull_request'
@@ -145,11 +147,12 @@ jobs:
           # the workers as in the push run. `--test-cpu` is not used: v0.6.0
           # passes it to `go test` as the single argument "-cpu 2", which
           # fails every mutant's build and counts each one as killed.
+          export GOMAXPROCS=2
           status=0
           set -o pipefail
           go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash \
             --diff "origin/$BASE_REF" \
-            -E '^e2e/' -E '^vendor/' --workers 2 --threshold-efficacy 95 . \
+            -E '^e2e/' -E '^vendor/' --workers 1 --threshold-efficacy 95 . \
             2>&1 | tee "$RUNNER_TEMP/mutation.log" || status=$?
           set +o pipefail
           # A diff with no mutable Go line (docs, CI only) yields zero mutants,
