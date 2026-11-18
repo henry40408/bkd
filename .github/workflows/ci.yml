@@ -101,18 +101,39 @@ jobs:
       - run: go test -mod=vendor -race ./...
 
   # Pushes mutate the whole module; pull requests only the lines changed
-  # against the base branch. `e2e/` is a separate module with no coverage
-  # profile, so gremlins would count its mutants as "not covered". `vendor/` is
-  # not ours to mutate.
+  # against the base branch. The module has about 1300 mutants, too many for
+  # one runner within the timeout, so it is split into shards of about 200-250
+  # each. gremlins v0.6.0 takes a single path, so every shard runs `.` and
+  # `--exclude-files` removes the files outside its slice. The matrix lists the
+  # complement of the slice, as RE2 has no lookahead. Every shard still runs
+  # the whole module's tests for coverage, so a mutant covered only by another
+  # package's tests is not miscounted as not covered. `e2e/` (a separate module
+  # with no coverage profile) and `vendor/` are excluded in every shard. A new
+  # package must be added to a shard, or no shard mutates it.
   #
-  # Locally, run it with `GOMAXPROCS=4` and `--workers 2` under `nice -n 15`, so
-  # the machine stays usable. Never pass `--test-cpu`: gremlins v0.6.0 hands
-  # `go test` the single argument "-cpu 2", which fails every mutant's build,
-  # and a failed build counts as KILLED.
-  mutation:
-    name: mutation
+  # Locally, run `GOMAXPROCS=4 nice -n 15 go run
+  # github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --workers 2 .`
+  # (the threshold and the e2e/vendor exclusions come from `.gremlins.yaml`).
+  mutation-shard:
+    name: mutation-shard (${{ matrix.shard.name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - name: server-api
+            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|auth|backgroundcheck|bookmarks|db|dbtest|importer|linkcheck|netscape|search|users|version|views)/|^internal/server/(pages|forms|guard|routes|app|cookie|sse|middleware|pageerror)'
+          - name: server-pages
+            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|auth|backgroundcheck|bookmarks|db|dbtest|importer|linkcheck|netscape|search|users|version|views)/|^internal/server/(api|service|json|request)'
+          - name: auth-users-db
+            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|backgroundcheck|bookmarks|dbtest|importer|linkcheck|netscape|search|server|version|views)/'
+          - name: linkcheck
+            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|auth|bookmarks|db|dbtest|importer|netscape|search|server|users|version|views)/'
+          - name: bookmarks-netscape-search
+            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|auth|backgroundcheck|db|dbtest|linkcheck|server|users|version|views)/'
+          - name: views-cmd
+            exclude: '^(e2e|vendor)/|^internal/(auth|backgroundcheck|bookmarks|db|importer|linkcheck|netscape|search|server|users)/'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -127,37 +148,36 @@ jobs:
       # "times out", which the efficacy score ignores: the job would pass
       # without testing anything.
       - run: go clean -testcache
-      - name: Mutate the whole module (push)
+      # Never pass `--test-cpu`: gremlins v0.6.0 builds a single `-cpu 2`
+      # argument from it, so every mutant's `go test` fails and counts as
+      # killed. GOMAXPROCS limits the CPUs instead.
+      - name: Mutate the shard (push)
         if: github.event_name != 'pull_request'
+        env:
+          GOMAXPROCS: "2"
+          SHARD_EXCLUDE: ${{ matrix.shard.exclude }}
         run: |
-          # Stream the output so a killed runner still leaves a log. One
-          # worker on two CPUs: with two workers the runner killed the job
-          # (SIGTERM, exit 143) after 8 minutes.
-          export GOMAXPROCS=2
+          # Stream the output so a killed runner still leaves a log.
           set -o pipefail
           go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash \
-            -E '^e2e/' -E '^vendor/' --workers 1 --threshold-efficacy 95 . \
-            2>&1 | tee "$RUNNER_TEMP/mutation.log"
-      - name: Mutate the changed lines (pull request)
+            --workers 1 --exclude-files "$SHARD_EXCLUDE" . 2>&1 | tee "$RUNNER_TEMP/mutation.log"
+      - name: Mutate the changed lines of the shard (pull request)
         if: github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.base_ref }}
+          GOMAXPROCS: "2"
+          SHARD_EXCLUDE: ${{ matrix.shard.exclude }}
         run: |
-          # Stream the output so a killed runner still leaves a log, and limit
-          # the workers as in the push run. `--test-cpu` is not used: v0.6.0
-          # passes it to `go test` as the single argument "-cpu 2", which
-          # fails every mutant's build and counts each one as killed.
-          export GOMAXPROCS=2
           status=0
           set -o pipefail
           go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash \
-            --diff "origin/$BASE_REF" \
-            -E '^e2e/' -E '^vendor/' --workers 1 --threshold-efficacy 95 . \
-            2>&1 | tee "$RUNNER_TEMP/mutation.log" || status=$?
+            --workers 1 --exclude-files "$SHARD_EXCLUDE" \
+            --diff "origin/$BASE_REF" . 2>&1 | tee "$RUNNER_TEMP/mutation.log" || status=$?
           set +o pipefail
-          # A diff with no mutable Go line (docs, CI only) yields zero mutants,
-          # which gremlins scores as 0% and so fails the threshold. That is not
-          # a low score, so treat it as a pass.
+          # A shard whose diff has no mutable Go line (docs, CI only, or other
+          # shards' files) yields zero mutants, which gremlins scores as 0% and
+          # so fails the threshold. That is not a low score, so treat it as a
+          # pass.
           if [ "$status" -ne 0 ] \
             && grep -q '^Killed: 0, Lived: 0, Not covered: 0$' "$RUNNER_TEMP/mutation.log" \
             && grep -q '^Timed out: 0, ' "$RUNNER_TEMP/mutation.log"; then
@@ -165,6 +185,29 @@ jobs:
             exit 0
           fi
           exit "$status"
+      - name: Upload the mutation log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutation-${{ matrix.shard.name }}
+          path: ${{ runner.temp }}/mutation.log
+          if-no-files-found: ignore
+
+  # The one required check: branch protection names `mutation`, so shards can
+  # be added or renamed without touching it. `always()` makes it run (and fail)
+  # when a shard fails or is cancelled instead of being skipped.
+  mutation:
+    name: mutation
+    runs-on: ubuntu-latest
+    needs: mutation-shard
+    if: always()
+    steps:
+      - name: Require every shard to pass
+        env:
+          SHARDS_RESULT: ${{ needs.mutation-shard.result }}
+        run: |
+          echo "mutation shards: $SHARDS_RESULT"
+          [ "$SHARDS_RESULT" = success ]
 
   # Root module only: `e2e/` is its own module, so it is not measured.
   coverage:
