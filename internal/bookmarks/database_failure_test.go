@@ -143,3 +143,32 @@ func expectRefusedWritesToFail(t *testing.T, table string) {
 	}
 	assertEqual(t, listTitles(t, store, user), []string{"existing"})
 }
+
+// titleIs is a filter as the search package builds them: SQL conditions with
+// bind arguments.
+type titleIs string
+
+func (f titleIs) SQL() (string, []any) { return " AND bookmarks.title = ?", []any{string(f)} }
+
+func TestListAndRandomApplyTheFilterTheyAreGiven(t *testing.T) {
+	store, pool := newStore(t)
+	user := dbtest.InsertUser(t, pool, "alice")
+	create(t, store, user, valid(t, "keep"), 1)
+	create(t, store, user, valid(t, "drop"), 2)
+
+	list, err := store.List(bg, user, titleIs("keep"), NewPage(nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Title != "keep" {
+		t.Fatalf("List = %+v, want only the bookmark named keep", list)
+	}
+	random, found, err := store.Random(bg, user, titleIs("drop"))
+	if err != nil || !found || random.Title != "drop" {
+		t.Fatalf("Random = %+v, %v, %v, want the bookmark named drop", random, found, err)
+	}
+	_, found, err = store.Random(bg, user, titleIs("nothing"))
+	if err != nil || found {
+		t.Fatalf("Random with no match: found = %v, err = %v", found, err)
+	}
+}

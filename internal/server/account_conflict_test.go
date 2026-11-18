@@ -101,3 +101,36 @@ func TestConfirmAndPasswordChangeShareTheLoginRateLimit(t *testing.T) {
 	change := put("/api/account/password", map[string]any{"current": testPassword, "new": "a brand new secret"}).as(token)
 	assertStatus(t, app.send(change), http.StatusTooManyRequests)
 }
+
+func TestSignInAndSetupAnswer500WhenTheUserTableFails(t *testing.T) {
+	app := awaitingSetupApp(t)
+	app.breakTable("users")
+	expectEvery500(t, app, "", []sent{
+		post("/api/login", map[string]any{"username": "alice", "password": testPassword}),
+		formPost("/login", "username=alice&password=correct+horse+battery"),
+		post("/api/setup", setupBody(app, app.setupDisplay, "henry", testPassword)),
+		formPost("/setup", "token="+app.setupDisplay+"&username=henry&password=correct+horse+battery"),
+	})
+}
+
+func TestLoggingOutWithoutASessionIsAQuietSuccess(t *testing.T) {
+	app := runningApp(t)
+
+	assertStatus(t, app.send(post("/api/logout", nil)), http.StatusNoContent)
+	assertStatus(t, app.send(formPost("/logout", "")), http.StatusSeeOther)
+}
+
+func TestASingleSignOnUserIsRefusedTheAccountPagesThatNeedAPassword(t *testing.T) {
+	app := newTestApp(t, forwardAuthConfig(t))
+	passwords := passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")
+	for _, request := range []sent{
+		get("/account"),
+		formPost("/account/password", passwords),
+		formPost("/confirm", "password=correct+horse+battery"),
+	} {
+		r := app.send(viaProxy(request, "alice"))
+		if r.status != http.StatusForbidden || !strings.Contains(r.text, "single sign-on") {
+			t.Errorf("%s %s: status = %d, body %q", request.method, request.uri, r.status, r.text)
+		}
+	}
+}
