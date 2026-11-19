@@ -107,8 +107,6 @@ func StartServer(binary string) (*Server, error) {
 
 func (s *Server) launch(binary, address string) error {
 	cmd := exec.Command(binary, "--db", s.DBPath, "--addr", address)
-	// No ANSI codes, so the setup token parses cleanly out of the log.
-	cmd.Env = append(os.Environ(), "NO_COLOR=1")
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return err

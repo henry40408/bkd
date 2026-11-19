@@ -20,8 +20,7 @@ func parseLogLevel(text string) (slog.Level, error) {
 	return 0, fmt.Errorf("unknown log level %q (want debug, info, warn or error)", text)
 }
 
-// newLogger writes to w, which is stderr like the Rust server's log. There is
-// no colour to turn off, so NO_COLOR needs no handling.
+// newLogger writes to w, which is stderr like the Rust server's log.
 func newLogger(w io.Writer, level slog.Level) *slog.Logger {
 	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: level}))
 }
