@@ -216,7 +216,7 @@ func TestGoldensWithBookmarks(t *testing.T) {
 		get("home-huge-page", "/?page=99999999", a),
 		get("home-bob-empty", "/", b),
 		get("random", "/random", b),
-		step{golden: "random-signed-in", method: "GET", path: "/random", as: a, statusOnly: true},
+		{golden: "random-signed-in", method: "GET", path: "/random", as: a, statusOnly: true},
 		get("edit-form", "/bookmarks/1/edit", a),
 		get("edit-form-missing", "/bookmarks/999/edit", a),
 		get("edit-form-not-mine", "/bookmarks/1/edit", b),

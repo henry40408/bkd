@@ -126,17 +126,17 @@ func isPublicV4(addr netip.Addr) bool {
 	relayAnycast := a == 192 && b == 88 && c == 99
 	reserved := a >= 240
 	thisNetwork := a == 0
-	return !(addr.IsLoopback() ||
-		addr.IsPrivate() ||
-		addr.IsLinkLocalUnicast() ||
-		addr.IsMulticast() ||
-		documentation ||
-		sharedAddressSpace ||
-		protocolAssignments ||
-		benchmarking ||
-		relayAnycast ||
-		reserved ||
-		thisNetwork)
+	return !addr.IsLoopback() &&
+		!addr.IsPrivate() &&
+		!addr.IsLinkLocalUnicast() &&
+		!addr.IsMulticast() &&
+		!documentation &&
+		!sharedAddressSpace &&
+		!protocolAssignments &&
+		!benchmarking &&
+		!relayAnycast &&
+		!reserved &&
+		!thisNetwork
 }
 
 func isPublicV6(addr netip.Addr) bool {
@@ -151,5 +151,5 @@ func isPublicV6(addr netip.Addr) bool {
 	documentation := (first == 0x2001 && second == 0x0db8) || (first == 0x3fff && second < 0x1000)
 	// This one embeds an IPv4 address that a gateway may forward to.
 	sixToFour := first == 0x2002
-	return globalUnicast && !(teredoAndSpecial || documentation || sixToFour)
+	return globalUnicast && !teredoAndSpecial && !documentation && !sixToFour
 }

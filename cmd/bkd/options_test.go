@@ -28,7 +28,7 @@ func mustParse(t *testing.T, args []string, env map[string]string) options {
 	return opts
 }
 
-func mustFail(t *testing.T, args []string, env map[string]string) error {
+func mustFail(t *testing.T, args []string, env map[string]string) {
 	t.Helper()
 	_, err := parseOptions(args, envOf(env), io.Discard)
 	if err == nil {
@@ -38,7 +38,6 @@ func mustFail(t *testing.T, args []string, env map[string]string) error {
 	if !errors.As(err, &usage) {
 		t.Fatalf("error %v is not a usage error", err)
 	}
-	return err
 }
 
 func TestDefaults(t *testing.T) {

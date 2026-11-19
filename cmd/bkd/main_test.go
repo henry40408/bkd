@@ -223,7 +223,7 @@ func (s *runningServer) wait(t *testing.T) int {
 	done := make(chan error, 1)
 	go func() { done <- s.cmd.Wait() }()
 	select {
-	case <-done:
+	case <-done: //nolint:errcheck // a non-zero exit is expected; the code is read from ProcessState
 	case <-time.After(logWait):
 		t.Fatalf("the server never exited; logs:\n%s", s.joined())
 	}
