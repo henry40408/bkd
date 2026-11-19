@@ -4,6 +4,7 @@
 package bookmarks
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -105,7 +106,7 @@ func Fitted(url, title, note string, tags []string) Input {
 	kept := make([]string, 0, len(tags))
 	for _, raw := range tags {
 		tag, err := NormalizeTag(raw)
-		if err != nil || tag == "" || contains(kept, tag) {
+		if err != nil || tag == "" || slices.Contains(kept, tag) {
 			continue
 		}
 		kept = append(kept, tag)
@@ -189,7 +190,7 @@ func NormalizeTags(raw []string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if tag == "" || contains(tags, tag) {
+		if tag == "" || slices.Contains(tags, tag) {
 			continue
 		}
 		tags = append(tags, tag)
@@ -198,15 +199,6 @@ func NormalizeTags(raw []string) ([]string, error) {
 		return nil, ValidationError("too many tags")
 	}
 	return tags, nil
-}
-
-func contains(list []string, item string) bool {
-	for _, existing := range list {
-		if existing == item {
-			return true
-		}
-	}
-	return false
 }
 
 func truncateRunes(text string, limit int) string {
