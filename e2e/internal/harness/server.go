@@ -156,7 +156,7 @@ func forwardLogAndFindSetupToken(stderr io.Reader) <-chan string {
 func (s *Server) Stop() {
 	if s.cmd != nil && s.exited != nil {
 		_ = s.cmd.Process.Kill()
-		<-s.exited
+		<-s.exited //nolint:errcheck // the process was just killed, so its exit error is expected
 		s.cmd = nil
 	}
 	_ = os.RemoveAll(s.tempDir)

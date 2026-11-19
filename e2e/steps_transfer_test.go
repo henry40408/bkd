@@ -53,9 +53,9 @@ func (w *world) importBrowserFile() error {
 		return err
 	}
 	// The browser reads the file when the form is submitted, so it must outlive the click.
-	defer os.Remove(file.Name())
+	defer func() { _ = os.Remove(file.Name()) }()
 	if _, err := file.WriteString(browserFile); err != nil {
-		file.Close()
+		_ = file.Close() // the write error is the one to report
 		return err
 	}
 	if err := file.Close(); err != nil {
