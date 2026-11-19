@@ -154,6 +154,7 @@ Feature: Bookmarks
     And I have the bookmark "https://b.test" titled "Beta"
     When I open the site
     And I search for "beta"
+    And the address is "/?q=beta"
     And I choose Random
     Then the pick shows "Beta"
     When I search for "alpha"
@@ -163,6 +164,7 @@ Feature: Bookmarks
     Given I have the bookmark "https://a.test" titled "Alpha"
     When I open the site
     And I search for "zzz"
+    And the address is "/?q=zzz"
     And I choose Random
     Then I am told "Nothing to pick from here."
 
