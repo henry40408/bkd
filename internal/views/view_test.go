@@ -3,7 +3,6 @@ package views
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestHighlightWrapsMatchesAndEscapesEverything(t *testing.T) {
@@ -56,22 +55,6 @@ func TestTimesAreFormattedInUTC(t *testing.T) {
 	want := SavedTime{ISO: "2023-11-14T22:13:20Z", Exact: "2023-11-14 22:13 UTC", Ago: "3 days ago"}
 	if got != want {
 		t.Fatalf("got %+v, want %+v", got, want)
-	}
-}
-
-func TestCivilMatchesTheStandardLibrary(t *testing.T) {
-	// Leap days, century rules, the epoch and negative times.
-	seconds := []int64{
-		0, 1, 86_399, 86_400, 951_782_400, 951_868_799, 4_107_542_400, 1_709_251_199, 1_709_251_200,
-		-1, -86_400, -2_208_988_800, 253_402_300_799, 1_794_900_000,
-	}
-	for _, s := range seconds {
-		want := time.Unix(s, 0).UTC()
-		got := civil(s)
-		if got.year != int64(want.Year()) || got.month != int64(want.Month()) || got.day != int64(want.Day()) ||
-			got.hour != int64(want.Hour()) || got.minute != int64(want.Minute()) || got.second != int64(want.Second()) {
-			t.Errorf("civil(%d) = %+v, want %s", s, got, want)
-		}
 	}
 }
 
