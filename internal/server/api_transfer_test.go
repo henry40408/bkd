@@ -83,4 +83,5 @@ func TestImportAcceptsAFileThatIsNotUTF8(t *testing.T) {
 	if r.json()["added"] != float64(1) {
 		t.Fatalf("report = %s", r.text)
 	}
+	mustContain(t, app.send(get("/api/bookmarks").as(token)), "\"title\":\"caf\uFFFD\"")
 }
