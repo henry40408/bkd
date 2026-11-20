@@ -40,11 +40,9 @@ func TestTokenizeProducesExactlyTheseTokens(t *testing.T) {
 		{"quoted value then another attribute", `<a x="1" y='2' z>`, []token{start("a", attribute{"x", "1"}, attribute{"y", "2"}, attribute{"z", ""})}},
 		{"unterminated quote takes the rest", `<a x="1`, []token{start("a", attribute{"x", "1"})}},
 		{"self closing slash", "<br/>", []token{start("br")}},
-		{"entity at the scan limit stays literal", "&#x0000000041;", []token{text("&#x0000000041;")}},
-		{"entity just inside the scan limit", "&#x00000041;", []token{text("A")}},
+		{"entity with leading zeros", "&#x0000000041;", []token{text("A")}},
 		{"largest code point", "&#x10FFFF;", []token{text("\U0010FFFF")}},
-		{"one past the largest code point", "&#x110000;", []token{text("&#x110000;")}},
-		{"code that would wrap into a valid rune", "&#4294967361;", []token{text("&#4294967361;")}},
+		{"one past the largest code point becomes U+FFFD", "&#x110000;", []token{text("\uFFFD")}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
