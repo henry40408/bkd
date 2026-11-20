@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -89,9 +90,9 @@ func renderExport(format string, list []bookmarks.Bookmark) ([]byte, error) {
 			Tags: bookmark.Tags, CreatedAt: bookmark.CreatedAt,
 		})
 	}
-	return marshalJSON(struct {
+	return json.MarshalIndent(struct {
 		Bookmarks []exportedBookmark `json:"bookmarks"`
-	}{exported}, "  ")
+	}{exported}, "", "  ")
 }
 
 // decodeLossy reads a file that may not be UTF-8, giving each invalid sequence one

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,10 +9,8 @@ import (
 	"strings"
 )
 
-// writeJSON writes the compact form serde_json produced, without the newline an
-// Encoder appends and without escaping < > & (bookmark text is shown as typed).
 func writeJSON(w http.ResponseWriter, status int, value any) {
-	body, err := marshalJSON(value, "")
+	body, err := json.Marshal(value)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -21,19 +18,6 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write(body)
-}
-
-// marshalJSON indents by two spaces when indent is not empty, like serde_json's
-// to_string_pretty.
-func marshalJSON(value any, indent string) ([]byte, error) {
-	var buffer bytes.Buffer
-	encoder := json.NewEncoder(&buffer)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", indent)
-	if err := encoder.Encode(value); err != nil {
-		return nil, err
-	}
-	return bytes.TrimSuffix(buffer.Bytes(), []byte("\n")), nil
 }
 
 // textError is a plain-text rejection like the ones axum's extractors send. The
