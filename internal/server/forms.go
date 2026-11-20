@@ -99,7 +99,7 @@ func (f formFields) integer(name string) (int64, *textError) {
 	if err != nil {
 		return 0, &textError{
 			http.StatusUnprocessableEntity,
-			"Failed to deserialize form body: " + name + ": " + integerWording(value, err),
+			"Failed to deserialize form body: " + name + ": " + integerWording(err),
 		}
 	}
 	return parsed, nil

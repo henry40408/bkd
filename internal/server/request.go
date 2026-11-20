@@ -52,23 +52,18 @@ func optionalUint32(r *http.Request, name string) (*uint32, *textError) {
 	if err != nil {
 		return nil, &textError{
 			http.StatusBadRequest,
-			"Failed to deserialize query string: " + name + ": " + integerWording(values[0], err),
+			"Failed to deserialize query string: " + name + ": " + integerWording(err),
 		}
 	}
 	value := uint32(parsed)
 	return &value, nil
 }
 
-// integerWording words a failed integer parse the way Rust's parser does, which
-// the 400 and 422 texts quote.
-func integerWording(raw string, err error) string {
-	switch {
-	case raw == "":
-		return "cannot parse integer from empty string"
-	case errors.Is(err, strconv.ErrRange) && strings.HasPrefix(raw, "-"):
-		return "number too small to fit in target type"
-	case errors.Is(err, strconv.ErrRange):
-		return "number too large to fit in target type"
+// integerWording words a failed integer parse for the 400 text. The syntax case
+// keeps the phrase the query-invalid sample pins byte for byte.
+func integerWording(err error) string {
+	if errors.Is(err, strconv.ErrRange) {
+		return "number out of range"
 	}
 	return "invalid digit found in string"
 }

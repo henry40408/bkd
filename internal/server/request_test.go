@@ -5,13 +5,13 @@ import (
 	"testing"
 )
 
-func TestIntegerQueryErrorsUseRustWording(t *testing.T) {
+func TestIntegerQueryErrorsNameTheParameter(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
 	cases := map[string]string{
-		"":            "cannot parse integer from empty string",
+		"":            "invalid digit found in string",
 		"x":           "invalid digit found in string",
-		"99999999999": "number too large to fit in target type",
+		"99999999999": "number out of range",
 		"-1":          "invalid digit found in string",
 	}
 	for value, wording := range cases {
