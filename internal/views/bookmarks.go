@@ -223,11 +223,14 @@ func searchBar(view BookmarksView) node {
 		selectLink = quiet("on", list.WithoutSelect().Href(), "Done")
 	}
 	bar := el("form", []attr{classes("bar"), a("role", "search"), a("method", "get"), a("action", "/")},
-		void("input", a("type", "search"), a("name", "q"), a("value", list.Q), a("aria-label", "Search bookmarks"),
-			a("aria-describedby", "search-hint"), a("placeholder", "Search title, note, URL, or tag")),
+		el("div", []attr{classes("bar-search")},
+			void("input", a("type", "search"), a("name", "q"), a("value", list.Q), a("aria-label", "Search bookmarks"),
+				a("aria-describedby", "search-hint"), a("placeholder", "Search title, note, URL, or tag")),
+			el("button", []attr{a("type", "submit")}, text("Search")),
+		),
+		// After the field: the address is built from the form in this order (?q=..&tag=..).
 		maybe(list.Tag != "", func() node { return hidden("tag", list.Tag) }),
 		maybe(list.Status != "", func() node { return hidden("status", list.Status) }),
-		el("button", []attr{a("type", "submit")}, text("Search")),
 		quiet("", list.WithoutSelect().HrefTo("/random"), "Random"),
 		selectLink,
 	)
@@ -283,6 +286,11 @@ func bulkPanel(view BookmarksView) node {
 		hidden("q", list.Q), hidden("tag", list.Tag), hidden("status", list.Status),
 		hidden("page", strconv.FormatUint(uint64(list.Page), 10)),
 		el("div", []attr{classes("bulk"), a("role", "region"), a("aria-label", "Bulk actions")},
+			el("div", []attr{classes("bulk-head")},
+				el("p", []attr{classes("bulk-count"), a("id", "bulk-count"), a("aria-live", "polite")}),
+				el("p", []attr{classes("bulk-all")},
+					el("a", []attr{classes("quiet"), a("href", list.WithAll(!list.All).Href())}, text(toggle))),
+			),
 			// Shows the tags row on a narrow screen; a refused action keeps it open.
 			void("input", a("id", "bulk-tags-toggle"), a("type", "checkbox"),
 				when(view.Bulk.Error != "" || view.Bulk.Tags != "", flag("checked"))),
@@ -298,9 +306,6 @@ func bulkPanel(view BookmarksView) node {
 				submit([]string{"quiet", "danger"}, "delete", "Delete"),
 				errorLine(view.Bulk.Error),
 			),
-			el("p", []attr{classes("bulk-count"), a("id", "bulk-count"), a("aria-live", "polite")}),
-			el("p", []attr{classes("bulk-all")},
-				el("a", []attr{classes("quiet"), a("href", list.WithAll(!list.All).Href())}, text(toggle))),
 			el("p", []attr{classes("hint")}, text("Tick the bookmarks you want, then choose an action.")),
 		),
 	)
