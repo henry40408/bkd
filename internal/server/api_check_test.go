@@ -379,3 +379,11 @@ func TestStoppingTheServerEndsARunningCheckStream(t *testing.T) {
 		t.Fatal("the stream outlived the stop")
 	}
 }
+
+func ids(n int) []int {
+	out := make([]int, n)
+	for i := range out {
+		out[i] = i + 1
+	}
+	return out
+}

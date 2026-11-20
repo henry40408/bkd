@@ -45,7 +45,6 @@ Gherkin scenarios (`e2e/features/*.feature`) run through godog and drive the Go 
 - Unit and integration tests sit beside the code. `internal/dbtest.Open` gives a throwaway migrated database; `internal/server/harness_test.go` builds the app with `httptest`.
 - Fixtures captured from the last Rust server are never regenerated from Go output; change one only on purpose and say why in the commit message:
   - `internal/views/testdata/*.golden.html`: exact markup of every page (see its `README.txt`).
-  - `internal/server/testdata/api/*.txt`: API request and response samples, replayed by `api_samples_test.go`.
   - `internal/db/testdata/`: a database created by the Rust server, its schema and its migration records; the store must open it unchanged.
   - `internal/auth/testdata/rust-phc.txt`: password hashes from the Rust server that must verify.
   - `internal/search/testdata/search_syntax.json`: search syntax cases from the Rust parser.
