@@ -229,6 +229,8 @@ a.button { font-weight: 600; background: var(--ink); color: var(--paper); border
 .bulk-panel input { flex: 1 1 12rem; width: auto; min-width: 0; }
 .bulk-panel .err, .bulk-panel .ask { flex-basis: 100%; }
 .bulk-panel .ask { color: var(--danger); font-weight: 600; }
+/* The link keeps its tap padding, but its text lines up with the count and the hint. */
+.bulk a.quiet { margin-left: calc(var(--s2) * -1); }
 .bulk .hint { color: var(--ink-soft); font-size: .85rem; margin: 0; }
 @media (hover: none) { .bulk .hint { display: none; } }
 
