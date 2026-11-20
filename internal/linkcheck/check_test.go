@@ -230,6 +230,13 @@ func TestARedirectedDetailHasTheNormalizedFinalAddress(t *testing.T) {
 	assertEqual(t, got, Verdict{StatusRedirected, "https://b.test/"})
 }
 
+func TestAHomoglyphRedirectTargetIsStoredAsPunycode(t *testing.T) {
+	requested := mustParseURL(t, "https://a.test/")
+	// The first letter is Cyrillic U+0430; it must not display like Latin "a".
+	got := verdictFor(requested, answer{status: 200, finalURL: mustParseURL(t, "https://\u0430pple.test/")})
+	assertEqual(t, got, Verdict{StatusRedirected, "https://xn--pple-43d.test/"})
+}
+
 func TestARetryAfterBeyondThirtyTwoBitsIsKept(t *testing.T) {
 	beyond32Bits := retryAfter("4294967296")
 	if beyond32Bits == nil || *beyond32Bits != 4294967296*time.Second {

@@ -8,6 +8,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"strings"
 
 	"github.com/henry40408/bkd/internal/auth"
 	"github.com/henry40408/bkd/internal/importer"
@@ -161,7 +162,7 @@ func (a *App) pageImport(w http.ResponseWriter, r *http.Request, user auth.Sessi
 		view := views.TransferView{Error: "Choose a file first."}
 		return a.writeTransferPage(r.Context(), w, http.StatusBadRequest, user, view)
 	}
-	report, fault := a.importBookmarks(r.Context(), user, decodeLossy(file))
+	report, fault := a.importBookmarks(r.Context(), user, strings.ToValidUTF8(string(file), "\uFFFD"))
 	if fault != nil {
 		return fromAPI(fault)
 	}

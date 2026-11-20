@@ -19,7 +19,7 @@ func add(t *testing.T, pool *sql.DB, name string, isAdmin bool) int64 {
 	var id int64
 	err := pool.QueryRow(
 		`INSERT INTO users (username, password_hash, is_admin, created_at)
-         VALUES (?1, 'hash', ?2, 0) RETURNING id`, name, boolToInt(isAdmin)).Scan(&id)
+         VALUES (?1, 'hash', ?2, 0) RETURNING id`, name, isAdmin).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
 	}

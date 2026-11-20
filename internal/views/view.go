@@ -2,40 +2,12 @@ package views
 
 import (
 	"fmt"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
-	"unicode"
+	"time"
 )
-
-// fold maps a character to its lowercase form for matching. Rust takes the
-// first character of the full lowercase mapping; unicode.ToLower is the
-// single-character mapping, which differs only for a few special cases
-// (final sigma).
-func fold(r rune) rune { return unicode.ToLower(r) }
-
-// matchLength is how many characters of text from `from` the longest matching
-// term covers, or 0 when no term matches there.
-func matchLength(text []rune, from int, terms [][]rune) int {
-	longest := 0
-	for _, term := range terms {
-		if len(term) == 0 || from+len(term) > len(text) || len(term) <= longest {
-			continue
-		}
-		if equalFolded(text[from:from+len(term)], term) {
-			longest = len(term)
-		}
-	}
-	return longest
-}
-
-func equalFolded(left, right []rune) bool {
-	for i := range left {
-		if fold(left[i]) != fold(right[i]) {
-			return false
-		}
-	}
-	return true
-}
 
 type run struct {
 	matched bool
@@ -43,25 +15,45 @@ type run struct {
 }
 
 // splitMatches cuts text into runs; matched marks a run that matches a term,
-// ignoring case.
+// ignoring case. At each position the longest term wins and matches that touch
+// share one run.
 func splitMatches(s string, terms []string) []run {
-	termRunes := make([][]rune, len(terms))
-	for i, term := range terms {
-		termRunes[i] = []rune(term)
+	var quoted []string
+	for _, term := range terms {
+		if term != "" {
+			quoted = append(quoted, regexp.QuoteMeta(term))
+		}
 	}
-	characters := []rune(s)
+	if s == "" {
+		return nil
+	}
+	if len(quoted) == 0 {
+		return []run{{text: s}}
+	}
+	pattern, err := regexp.Compile("(?i)" + strings.Join(quoted, "|"))
+	if err != nil {
+		// A term with invalid UTF-8 does not compile; show the text unhighlighted.
+		return []run{{text: s}}
+	}
+	pattern.Longest()
 	var runs []run
-	for at := 0; at < len(characters); {
-		length := matchLength(characters, at, termRunes)
-		matched, step := length > 0, max(length, 1)
-		piece := string(characters[at : at+step])
-		at += step
+	add := func(matched bool, piece string) {
+		if piece == "" {
+			return
+		}
 		if last := len(runs) - 1; last >= 0 && runs[last].matched == matched {
 			runs[last].text += piece
-			continue
+			return
 		}
 		runs = append(runs, run{matched: matched, text: piece})
 	}
+	end := 0
+	for _, span := range pattern.FindAllStringIndex(s, -1) {
+		add(false, s[end:span[0]])
+		add(true, s[span[0]:span[1]])
+		end = span[1]
+	}
+	add(false, s[end:])
 	return runs
 }
 
@@ -127,51 +119,11 @@ type SavedTime struct {
 
 // NewSavedTime formats unixSeconds relative to now.
 func NewSavedTime(now, unixSeconds int64) SavedTime {
-	c := civil(unixSeconds)
+	t := time.Unix(unixSeconds, 0).UTC()
 	return SavedTime{
-		ISO: fmt.Sprintf("%04d-%02d-%02dT%02d:%02d:%02dZ",
-			c.year, c.month, c.day, c.hour, c.minute, c.second),
-		Exact: fmt.Sprintf("%04d-%02d-%02d %02d:%02d UTC",
-			c.year, c.month, c.day, c.hour, c.minute),
-		Ago: timeAgo(now, unixSeconds),
-	}
-}
-
-type civilTime struct{ year, month, day, hour, minute, second int64 }
-
-func floorDiv(a, b int64) int64 {
-	q := a / b
-	if a%b != 0 && (a < 0) != (b < 0) {
-		q--
-	}
-	return q
-}
-
-func floorMod(a, b int64) int64 { return a - floorDiv(a, b)*b }
-
-// civil converts Unix seconds to a UTC calendar time (Howard Hinnant's
-// civil_from_days).
-func civil(unixSeconds int64) civilTime {
-	days := floorDiv(unixSeconds, 86_400)
-	secondsOfDay := floorMod(unixSeconds, 86_400)
-	shifted := days + 719_468
-	era := floorDiv(shifted, 146_097)
-	dayOfEra := floorMod(shifted, 146_097)
-	yearOfEra := (dayOfEra - dayOfEra/1_460 + dayOfEra/36_524 - dayOfEra/146_096) / 365
-	dayOfYear := dayOfEra - (365*yearOfEra + yearOfEra/4 - yearOfEra/100)
-	monthIndex := (5*dayOfYear + 2) / 153
-	day := dayOfYear - (153*monthIndex+2)/5 + 1
-	month := monthIndex - 9
-	if monthIndex < 10 {
-		month = monthIndex + 3
-	}
-	year := yearOfEra + era*400
-	if month <= 2 {
-		year++
-	}
-	return civilTime{
-		year: year, month: month, day: day,
-		hour: secondsOfDay / 3_600, minute: secondsOfDay % 3_600 / 60, second: secondsOfDay % 60,
+		ISO:   t.Format("2006-01-02T15:04:05Z"),
+		Exact: t.Format("2006-01-02 15:04") + " UTC",
+		Ago:   timeAgo(now, unixSeconds),
 	}
 }
 
@@ -184,7 +136,7 @@ func plural(count int64, unit string) string {
 }
 
 func timeAgo(now, then int64) string {
-	hours := floorDiv(now-then, 3_600)
+	hours := (now - then) / 3_600
 	if hours < 1 {
 		return "just now"
 	}
@@ -282,26 +234,13 @@ func WithQuery(path string, pairs [][2]string) string {
 			hasQuery = true
 		}
 		b.WriteString(pair[0] + "=")
-		percentEncode(&b, pair[1])
+		b.WriteString(escapeValue(pair[1]))
 	}
 	return b.String()
 }
 
-func percentEncode(b *strings.Builder, value string) {
-	const hex = "0123456789ABCDEF"
-	for i := 0; i < len(value); i++ {
-		c := value[i]
-		if isUnreserved(c) {
-			b.WriteByte(c)
-			continue
-		}
-		b.WriteByte('%')
-		b.WriteByte(hex[c>>4])
-		b.WriteByte(hex[c&0x0f])
-	}
-}
-
-func isUnreserved(c byte) bool {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
-		c == '-' || c == '_' || c == '.' || c == '~'
+// escapeValue is QueryEscape with %20 for a space: the pages put the result in a
+// URL query, and a space is never written as +.
+func escapeValue(value string) string {
+	return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
 }

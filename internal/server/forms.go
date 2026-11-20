@@ -95,11 +95,11 @@ func (f formFields) integer(name string) (int64, *textError) {
 	if !present {
 		return 0, missingFormField(name)
 	}
-	parsed, err := strconv.ParseInt(strings.TrimPrefix(value, "+"), 10, 64)
+	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return 0, &textError{
 			http.StatusUnprocessableEntity,
-			"Failed to deserialize form body: " + name + ": " + integerWording(value, err),
+			"Failed to deserialize form body: " + name + ": " + integerWording(err),
 		}
 	}
 	return parsed, nil

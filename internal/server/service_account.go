@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/henry40408/bkd/internal/auth"
+	"github.com/henry40408/bkd/internal/truncate"
 	"github.com/henry40408/bkd/internal/users"
 )
 
@@ -31,15 +32,14 @@ func (a *App) callerOf(r *http.Request) caller {
 // sessionStart says where a session starts, for the session list. A client can send
 // any User-Agent, so it is cut short: it is displayed, never trusted.
 func (c caller) sessionStart(userID int64) auth.SessionStart {
-	userAgent := []rune(c.userAgent)
-	if len(userAgent) > maxUserAgentChars {
-		userAgent = userAgent[:maxUserAgentChars]
-	}
+	// The round trip through runes turns every invalid byte into U+FFFD even
+	// when the value is short, so a stored User-Agent is always valid UTF-8.
+	userAgent := truncate.Runes(string([]rune(c.userAgent)), maxUserAgentChars)
 	return auth.SessionStart{
 		UserID:    userID,
 		Now:       auth.UnixNow(),
 		IP:        c.addr.String(),
-		UserAgent: string(userAgent),
+		UserAgent: userAgent,
 	}
 }
 

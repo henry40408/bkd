@@ -100,7 +100,7 @@ func insertForwarded(ctx context.Context, pool *sql.DB, logger *slog.Logger, acc
 			`INSERT INTO users (username, password_hash, is_admin, created_at)
              VALUES (?1, ?2, COALESCE(?3, NOT EXISTS (SELECT 1 FROM users)), ?4)
              ON CONFLICT (username) DO NOTHING RETURNING id, is_admin`,
-			account.Username, noPassword, optionalBool(account.IsAdmin), account.Now).Scan(&id, &isAdmin)
+			account.Username, noPassword, account.IsAdmin, account.Now).Scan(&id, &isAdmin)
 		if errors.Is(scanErr, sql.ErrNoRows) {
 			return nil
 		}
@@ -114,22 +114,6 @@ func insertForwarded(ctx context.Context, pool *sql.DB, logger *slog.Logger, acc
 		logger.Info("account created from forward auth", "user_id", id, "is_admin", isAdmin)
 	}
 	return nil
-}
-
-// optionalBool binds nil as NULL and a bool as 0 or 1, the only values the
-// STRICT is_admin column takes.
-func optionalBool(value *bool) any {
-	if value == nil {
-		return nil
-	}
-	return boolToInt(*value)
-}
-
-func boolToInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
 }
 
 type forwardedRow struct {
@@ -204,7 +188,7 @@ func changeForwardedRole(ctx context.Context, pool *sql.DB, id int64, isAdmin bo
 				return err
 			}
 		}
-		_, err := conn.ExecContext(ctx, "UPDATE users SET is_admin = ?1 WHERE id = ?2", boolToInt(isAdmin), id)
+		_, err := conn.ExecContext(ctx, "UPDATE users SET is_admin = ?1 WHERE id = ?2", isAdmin, id)
 		changed = err == nil
 		return err
 	})
@@ -255,7 +239,7 @@ func queryFlag(ctx context.Context, pool *sql.DB, query string, id int64) (bool,
 
 func SetLinkCheckEnabled(ctx context.Context, pool *sql.DB, id int64, enabled bool) error {
 	_, err := pool.ExecContext(ctx,
-		"UPDATE users SET link_check_enabled = ?2 WHERE id = ?1", id, boolToInt(enabled))
+		"UPDATE users SET link_check_enabled = ?2 WHERE id = ?1", id, enabled)
 	if err != nil {
 		return fmt.Errorf("set link check: %w", err)
 	}
@@ -340,7 +324,7 @@ func Create(ctx context.Context, pool *sql.DB, caller int64, account NewAccount)
 		scanErr := conn.QueryRowContext(ctx,
 			`INSERT INTO users (username, password_hash, is_admin, created_at)
              VALUES (?1, ?2, ?3, ?4) ON CONFLICT (username) DO NOTHING RETURNING id`,
-			account.Username, account.PasswordHash, boolToInt(account.IsAdmin), account.Now).Scan(&record.ID)
+			account.Username, account.PasswordHash, account.IsAdmin, account.Now).Scan(&record.ID)
 		if errors.Is(scanErr, sql.ErrNoRows) {
 			change = ChangeUsernameTaken
 			return nil
@@ -388,7 +372,7 @@ func SetAdmin(ctx context.Context, pool *sql.DB, caller, id int64, isAdmin bool)
 		target:       id,
 		removesAdmin: !isAdmin,
 		apply: func(conn *sql.Conn) error {
-			_, err := conn.ExecContext(ctx, "UPDATE users SET is_admin = ?1 WHERE id = ?2", boolToInt(isAdmin), id)
+			_, err := conn.ExecContext(ctx, "UPDATE users SET is_admin = ?1 WHERE id = ?2", isAdmin, id)
 			return err
 		},
 	})
@@ -402,7 +386,7 @@ func SetDisabled(ctx context.Context, pool *sql.DB, caller, id int64, disabledAt
 		target:       id,
 		removesAdmin: disabledAt != nil,
 		apply: func(conn *sql.Conn) error {
-			if _, err := conn.ExecContext(ctx, "UPDATE users SET disabled_at = ?1 WHERE id = ?2", optionalInt(disabledAt), id); err != nil {
+			if _, err := conn.ExecContext(ctx, "UPDATE users SET disabled_at = ?1 WHERE id = ?2", disabledAt, id); err != nil {
 				return err
 			}
 			if disabledAt == nil {
@@ -411,13 +395,6 @@ func SetDisabled(ctx context.Context, pool *sql.DB, caller, id int64, disabledAt
 			return auth.RevokeAllForUser(ctx, conn, id)
 		},
 	})
-}
-
-func optionalInt(value *int64) any {
-	if value == nil {
-		return nil
-	}
-	return *value
 }
 
 // ResetPassword replaces the password and ends every session, so a stolen

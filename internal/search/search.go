@@ -26,6 +26,7 @@ import (
 	"unicode"
 
 	"github.com/henry40408/bkd/internal/bookmarks"
+	"github.com/henry40408/bkd/internal/truncate"
 )
 
 const (
@@ -229,16 +230,8 @@ func buildTerm(parts termParts) (Term, bool) {
 		// typed, not a filter.
 		term = Term{Field: Any, Text: parts.typed}
 	}
-	term.Text = truncateRunes(term.Text, maxTermChars)
+	term.Text = truncate.Runes(term.Text, maxTermChars)
 	return term, true
-}
-
-func truncateRunes(text string, limit int) string {
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text
-	}
-	return string(runes[:limit])
 }
 
 // exactTag is the stored form of a tag, or a lowercase fallback for one that

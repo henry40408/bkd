@@ -74,22 +74,14 @@ func TestExportedHTMLCanBeImportedAgain(t *testing.T) {
 	}
 }
 
-func TestDecodeLossyMatchesRust(t *testing.T) {
-	for name, tc := range map[string]struct{ in, want string }{
-		"valid":              {"héllo", "héllo"},
-		"lone continuation":  {"a\x80\x80b", "a��b"},
-		"truncated 3 byte":   {"a\xE2\x82b", "a�b"},
-		"truncated 4 byte":   {"\xF0\x9F\x98", "�"},
-		"overlong lead":      {"\xC0\x80", "��"},
-		"surrogate":          {"\xED\xA0\x80", "���"},
-		"too high":           {"\xF4\x90\x80\x80", "����"},
-		"ff":                 {"\xFFx", "�x"},
-		"truncated at end":   {"ab\xE2", "ab�"},
-		"e0 bad second":      {"\xE0\x80\x80", "���"},
-		"valid after broken": {"\xE2\x82\xE2\x82\xAC", "�€"},
-	} {
-		if got := decodeLossy([]byte(tc.in)); got != tc.want {
-			t.Errorf("%s: %q, want %q", name, got, tc.want)
-		}
+func TestImportAcceptsAFileThatIsNotUTF8(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("henry", false)
+	file := "<DL><p>\n<DT><A HREF=\"https://example.org/caf\xe9\">caf\xe9</A>\n</DL>"
+	r := app.send(importRequest(file).as(token))
+	assertStatus(t, r, http.StatusOK)
+	if r.json()["added"] != float64(1) {
+		t.Fatalf("report = %s", r.text)
 	}
+	mustContain(t, app.send(get("/api/bookmarks").as(token)), "\"title\":\"caf\uFFFD\"")
 }

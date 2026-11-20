@@ -85,9 +85,7 @@ func (c *Checker) StartPaced(ctx context.Context, targets []Target, pause time.D
 	slots := make(chan struct{}, maxHostsPerCheck)
 	var workers sync.WaitGroup
 	for host, group := range groupByHost(targets) {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+		workers.Go(func() {
 			select {
 			case slots <- struct{}{}:
 				defer func() { <-slots }()
@@ -96,7 +94,7 @@ func (c *Checker) StartPaced(ctx context.Context, targets []Target, pause time.D
 			}
 			run := shared
 			run.checkHostSurvivingPanic(ctx, host, group)
-		}()
+		})
 	}
 	go func() {
 		workers.Wait()

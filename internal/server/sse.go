@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -29,7 +30,7 @@ func startSSE(w http.ResponseWriter) (*sseWriter, error) {
 
 // event writes one event; data is sent as compact JSON.
 func (s *sseWriter) event(name string, data any) error {
-	encoded, err := marshalJSON(data, "")
+	encoded, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}

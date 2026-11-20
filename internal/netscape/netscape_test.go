@@ -93,6 +93,16 @@ func TestEntitiesQuotesAndOddMarkupAreHandled(t *testing.T) {
 	assertEqual(t, link.Added, seconds(5))
 }
 
+func TestRawAmpersandsInAURLStayAsTyped(t *testing.T) {
+	link := only(t, `<A HREF="https://shop.test/p?id=1&currency=USD&section=2&not=3">x</A>`)
+	assertEqual(t, link.URL, "https://shop.test/p?id=1&currency=USD&section=2&not=3")
+}
+
+func TestEntitiesWithoutASemicolonInTextStayAsTyped(t *testing.T) {
+	link := only(t, `<A HREF="https://a.test/">&copy 2024 &not this &amp; &#38; done</A>`)
+	assertEqual(t, link.Title, "&copy 2024 &not this & & done")
+}
+
 func TestAGreaterThanInsideAnAttributeDoesNotEndTheTag(t *testing.T) {
 	link := only(t, `<A HREF="https://a.test/?q=a>b">t</A>`)
 	assertEqual(t, link.URL, "https://a.test/?q=a>b")

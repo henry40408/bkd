@@ -58,32 +58,7 @@ func (a *App) Handler() http.Handler {
 	a.mountPages(mux)
 	fallback := a.page(maxBodyBytes, http.HandlerFunc(a.handleNotFound))
 	mux.Handle("/", fallback)
-	return a.securityHeaders(refuseUncleanPaths(mux, fallback))
-}
-
-// refuseUncleanPaths answers a path with //, . or .. in it with the not-found
-// answer. ServeMux would redirect it to the cleaned path with a 301; axum, which
-// the Rust server ran on, matched the path as sent and found nothing.
-func refuseUncleanPaths(mux, fallback http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isUncleanPath(r.URL.Path) {
-			fallback.ServeHTTP(w, r)
-			return
-		}
-		mux.ServeHTTP(w, r)
-	})
-}
-
-func isUncleanPath(path string) bool {
-	if strings.Contains(path, "//") {
-		return true
-	}
-	for segment := range strings.SplitSeq(path, "/") {
-		if segment == "." || segment == ".." {
-			return true
-		}
-	}
-	return false
+	return a.securityHeaders(mux)
 }
 
 // handleNotFound: the JSON API keeps the empty 404 it always had; any other
