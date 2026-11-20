@@ -70,19 +70,20 @@ func TestHighlightTreatsRegexpMetacharactersAsText(t *testing.T) {
 	})
 }
 
-// Special case folding: unicode.ToLower maps one rune to one rune, so these
-// follow that mapping rather than full Unicode case folding.
+// Special case folding follows the regexp package's simple case folding: every
+// letter in a fold orbit (sigma, final sigma, capital sigma; s, long s;
+// k, Kelvin sign) matches the others, and a dotted capital I matches only itself.
 func TestHighlightSpecialCaseFolding(t *testing.T) {
 	runHighlightCases(t, []highlightCase{
-		{"capital sigma against final sigma", "ΟΔΟΣ", []string{"οδος"}, "ΟΔΟΣ"},
+		{"capital sigma against final sigma", "ΟΔΟΣ", []string{"οδος"}, "<mark>ΟΔΟΣ</mark>"},
 		{"capital sigma against sigma", "ΟΔΟΣ", []string{"οδοσ"}, "<mark>ΟΔΟΣ</mark>"},
-		{"final sigma against sigma", "οδος", []string{"οδοσ"}, "οδος"},
+		{"final sigma against sigma", "οδος", []string{"οδοσ"}, "<mark>οδος</mark>"},
 		{"final sigma against itself", "οδος", []string{"οδος"}, "<mark>οδος</mark>"},
-		{"long s against s", "ſ", []string{"s"}, "ſ"},
-		{"s against long s", "s", []string{"ſ"}, "s"},
+		{"long s against s", "ſ", []string{"s"}, "<mark>ſ</mark>"},
+		{"s against long s", "s", []string{"ſ"}, "<mark>s</mark>"},
 		{"kelvin sign against k", "K", []string{"k"}, "<mark>K</mark>"},
 		{"k against kelvin sign", "k", []string{"K"}, "<mark>k</mark>"},
-		{"dotted capital i against i", "İ", []string{"i"}, "<mark>İ</mark>"},
-		{"i against dotted capital i", "i", []string{"İ"}, "<mark>i</mark>"},
+		{"dotted capital i against i", "İ", []string{"i"}, "İ"},
+		{"i against dotted capital i", "i", []string{"İ"}, "i"},
 	})
 }

@@ -3,41 +3,11 @@ package views
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 )
-
-// fold maps a character to its lowercase form for matching. Rust takes the
-// first character of the full lowercase mapping; unicode.ToLower is the
-// single-character mapping, which differs only for a few special cases
-// (final sigma).
-func fold(r rune) rune { return unicode.ToLower(r) }
-
-// matchLength is how many characters of text from `from` the longest matching
-// term covers, or 0 when no term matches there.
-func matchLength(text []rune, from int, terms [][]rune) int {
-	longest := 0
-	for _, term := range terms {
-		if len(term) == 0 || from+len(term) > len(text) || len(term) <= longest {
-			continue
-		}
-		if equalFolded(text[from:from+len(term)], term) {
-			longest = len(term)
-		}
-	}
-	return longest
-}
-
-func equalFolded(left, right []rune) bool {
-	for i := range left {
-		if fold(left[i]) != fold(right[i]) {
-			return false
-		}
-	}
-	return true
-}
 
 type run struct {
 	matched bool
@@ -45,25 +15,41 @@ type run struct {
 }
 
 // splitMatches cuts text into runs; matched marks a run that matches a term,
-// ignoring case.
+// ignoring case. At each position the longest term wins and matches that touch
+// share one run.
 func splitMatches(s string, terms []string) []run {
-	termRunes := make([][]rune, len(terms))
-	for i, term := range terms {
-		termRunes[i] = []rune(term)
+	var quoted []string
+	for _, term := range terms {
+		if term != "" {
+			quoted = append(quoted, regexp.QuoteMeta(term))
+		}
 	}
-	characters := []rune(s)
+	if s == "" {
+		return nil
+	}
+	if len(quoted) == 0 {
+		return []run{{text: s}}
+	}
+	pattern := regexp.MustCompile("(?i)" + strings.Join(quoted, "|"))
+	pattern.Longest()
 	var runs []run
-	for at := 0; at < len(characters); {
-		length := matchLength(characters, at, termRunes)
-		matched, step := length > 0, max(length, 1)
-		piece := string(characters[at : at+step])
-		at += step
+	add := func(matched bool, piece string) {
+		if piece == "" {
+			return
+		}
 		if last := len(runs) - 1; last >= 0 && runs[last].matched == matched {
 			runs[last].text += piece
-			continue
+			return
 		}
 		runs = append(runs, run{matched: matched, text: piece})
 	}
+	end := 0
+	for _, span := range pattern.FindAllStringIndex(s, -1) {
+		add(false, s[end:span[0]])
+		add(true, s[span[0]:span[1]])
+		end = span[1]
+	}
+	add(false, s[end:])
 	return runs
 }
 
