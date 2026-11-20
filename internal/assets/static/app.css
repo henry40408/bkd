@@ -100,8 +100,8 @@ form.stack:has(> div > .danger-button) > div > :focus-visible { outline-offset: 
 .item.confirming > .when { display: none; }
 .inline-form .inline-title { margin: 0 0 var(--s2); font-weight: 600; }
 .inline-form form { padding: 0; }
-/* The bulk delete question sits above the bulk bar and must not touch it. */
-.inline-form + .bulk-form { margin-top: var(--s4); }
+/* The bulk delete question closes the bulk bar, set off by a rule. */
+.bulk > .inline-form { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--rule); }
 .domain { color: var(--ink-soft); font-size: .85rem; overflow-wrap: anywhere; }
 .title { font: 600 1.1rem/1.3 var(--serif); color: var(--link); overflow-wrap: anywhere; }
 .note { margin: var(--s2) 0 0; color: var(--ink-soft); max-width: 60ch; overflow-wrap: anywhere; }

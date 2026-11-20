@@ -340,7 +340,7 @@
     await showCheckEnd(ids, failure || checkSummary(run, ids.length));
   }
 
-  // ---- Inline forms: edit and delete open in their row, a bulk delete above the list ----
+  // ---- Inline forms: edit and delete open in their row, a bulk delete at the foot of the bulk bar ----
 
   const ROW_ACTION = /^\/bookmarks\/\d+\/(edit|delete)$/;
   // The form of an edit page or of a delete question, whichever the page has.
@@ -438,12 +438,12 @@
 
   const isBulkDelete = (form, data) => form.classList.contains("bulk-form") && data.get("action") === "delete";
 
-  // The server answers a bulk delete with a question page; it goes above the list.
+  // The server answers a bulk delete with a question page; it goes at the foot of the bulk bar.
   function askBulkDelete({ form, submitter, url, data }) {
     const showQuestion = (doc) => {
       const node = panelFrom(doc);
       if (!node) return false;
-      showPanel(node, submitter, (panel) => form.before(panel));
+      showPanel(node, submitter, (panel) => form.querySelector(".bulk").append(panel));
       return true;
     };
     return enhance(
@@ -454,7 +454,7 @@
 
   // The question holds the ticks it was asked with, so a change to the ticks withdraws it.
   document.addEventListener("change", (event) => {
-    const changed = event.target instanceof Element && event.target.closest(".bulk-form");
+    const changed = event.target instanceof Element && event.target.closest(".bulk-form") && !event.target.closest(".inline-form");
     if (changed && inlinePanel && !inlinePanel.node.closest(".item")) closeInlinePanel({ refocus: false });
   });
 
