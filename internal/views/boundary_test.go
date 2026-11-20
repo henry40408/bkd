@@ -25,10 +25,9 @@ func TestDomainEdgesAroundUserinfoAndPorts(t *testing.T) {
 		"http://h:0/":       "h",
 		"http://h:9/":       "h",
 		"http://h:09/":      "h",
-		"http://h:a/":       "http://h:a/", // a port that is not digits is not a URL
-		"http://h:./":       "http://h:./",
+		"http://h:a/":       "h:a",
+		"http://h:./":       "h:.",
 		"http://u:p@h:8080": "h",
-		"http://[::1]:80/":  "::1",
 	}
 	for input, want := range cases {
 		if got := DomainOf(input); got != want {

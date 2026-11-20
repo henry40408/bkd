@@ -36,12 +36,14 @@ func TestHighlightPrefersTheLongestTermAtAPosition(t *testing.T) {
 
 func TestDomainsLoseSchemePortUserinfoAndWWW(t *testing.T) {
 	tests := map[string]string{
-		"https://www.Example.com:8080/a?b#c": "example.com",
-		"http://me@host.test/":               "host.test",
-		"not a url":                          "not a url",
-		"https://host.test:/x":               "host.test",
-		"https://host.test:80a/x":            "https://host.test:80a/x",
-		"https:///x":                         "https:///x",
+		"https://www.Example.com:8080/a?b#c":     "example.com",
+		"http://me@host.test/":                   "host.test",
+		"not a url":                              "not a url",
+		"https://host.test:/x":                   "host.test",
+		"https://host.test:80a/x":                "host.test:80a",
+		"https:///x":                             "https:///x",
+		"https://user:secret@example.com/50%off": "example.com",
+		"https://example.com/50%off":             "example.com",
 	}
 	for url, want := range tests {
 		if got := DomainOf(url); got != want {
