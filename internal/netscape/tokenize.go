@@ -2,10 +2,13 @@
 // Chrome, Firefox, Safari, Pocket and Raindrop all export. The parser is a
 // tolerant tokenizer, not an HTML parser: the format is a fixed handful of
 // tags and real files are often not well formed.
+//
+// The entity table is deliberately the six named entities plus numeric ones,
+// not html.UnescapeString: the output must match the Rust importer.
 package netscape
 
 import (
-	"html"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -31,17 +34,17 @@ type token struct {
 	text       string
 }
 
-func tokenize(source string) []token {
+func tokenize(html string) []token {
 	var tokens []token
-	rest := source
+	rest := html
 	for rest != "" {
 		open := strings.IndexByte(rest, '<')
 		if open < 0 {
-			tokens = append(tokens, token{kind: textToken, text: html.UnescapeString(rest)})
+			tokens = append(tokens, token{kind: textToken, text: decodeEntities(rest)})
 			break
 		}
 		if open > 0 {
-			tokens = append(tokens, token{kind: textToken, text: html.UnescapeString(rest[:open])})
+			tokens = append(tokens, token{kind: textToken, text: decodeEntities(rest[:open])})
 		}
 		rest = rest[open:]
 		markup, consumed := readMarkup(rest)
@@ -139,7 +142,7 @@ func parseAttributes(input string) []attribute {
 			continue
 		}
 		value, remaining := readAttributeValue(strings.TrimLeftFunc(afterEquals, unicode.IsSpace))
-		attributes = append(attributes, attribute{name: name, value: html.UnescapeString(value)})
+		attributes = append(attributes, attribute{name: name, value: decodeEntities(value)})
 		input = remaining
 	}
 }
@@ -158,6 +161,94 @@ func readAttributeValue(input string) (value, remaining string) {
 		return body, ""
 	}
 	return body[:end], body[end+1:]
+}
+
+func decodeEntities(text string) string {
+	var decoded strings.Builder
+	decoded.Grow(len(text))
+	rest := text
+	for {
+		amp := strings.IndexByte(rest, '&')
+		if amp < 0 {
+			break
+		}
+		decoded.WriteString(rest[:amp])
+		rest = rest[amp:]
+		character, consumed, ok := decodeOneEntity(rest)
+		if !ok {
+			decoded.WriteByte('&')
+			rest = rest[1:]
+			continue
+		}
+		decoded.WriteRune(character)
+		rest = rest[consumed:]
+	}
+	decoded.WriteString(rest)
+	return decoded.String()
+}
+
+// maxEntityScan is how far a stray `&` looks for its `;`, in characters.
+const maxEntityScan = 12
+
+// decodeOneEntity decodes the entity at the start of input, which begins with `&`.
+func decodeOneEntity(input string) (character rune, consumed int, ok bool) {
+	end := -1
+	scanned := 0
+	for index, c := range input {
+		if scanned == maxEntityScan {
+			break
+		}
+		scanned++
+		if c == ';' {
+			end = index
+			break
+		}
+	}
+	if end < 0 {
+		return 0, 0, false
+	}
+	character, ok = namedOrNumeric(input[1:end])
+	return character, end + 1, ok
+}
+
+func namedOrNumeric(name string) (rune, bool) {
+	switch name {
+	case "amp":
+		return '&', true
+	case "lt":
+		return '<', true
+	case "gt":
+		return '>', true
+	case "quot":
+		return '"', true
+	case "apos":
+		return '\'', true
+	case "nbsp":
+		return ' ', true
+	}
+	number, ok := strings.CutPrefix(name, "#")
+	if !ok {
+		return 0, false
+	}
+	code, ok := parseCode(number)
+	if !ok || !utf8.ValidRune(rune(code)) || code > utf8.MaxRune {
+		return 0, false
+	}
+	return rune(code), true
+}
+
+// parseCode reads decimal digits, or hex digits after x or X. Like Rust's
+// integer parsing it accepts one leading plus sign.
+func parseCode(number string) (uint64, bool) {
+	base := 10
+	if hex, ok := strings.CutPrefix(number, "x"); ok {
+		number, base = hex, 16
+	} else if hex, ok := strings.CutPrefix(number, "X"); ok {
+		number, base = hex, 16
+	}
+	number = strings.TrimPrefix(number, "+")
+	code, err := strconv.ParseUint(number, base, 32)
+	return code, err == nil
 }
 
 func asciiLower(text string) string {

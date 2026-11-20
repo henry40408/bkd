@@ -125,10 +125,11 @@ func TestGarbageAndTruncatedInputDoNotPanic(t *testing.T) {
 	}
 }
 
-func TestEntitiesAreDecodedLikeHTML(t *testing.T) {
-	title := only(t, `<A HREF="https://a.test/?a=1&amp;b=2">&amp;&lt;&#65;&#x42;&copy;&hellip;</A>`).Title
-	assertEqual(t, title, "&<AB\u00a9\u2026")
-	assertEqual(t, only(t, `<A HREF="https://a.test/?a=1&amp;b=2">x</A>`).URL, "https://a.test/?a=1&b=2")
+func TestNumericEntityEdges(t *testing.T) {
+	assertEqual(t, decodeEntities("&#+65;&#x41;&#X42;&#xD800;&#;&#x;"), "AAB&#xD800;&#;&#x;")
+	assertEqual(t, decodeEntities("&amp;&lt;&gt;&quot;&apos;&nbsp;"), `&<>"' `)
+	// The semicolon must come within 12 characters.
+	assertEqual(t, decodeEntities("&aaaaaaaaaaaa;"), "&aaaaaaaaaaaa;")
 }
 
 func TestExportedBookmarksReadBackTheSame(t *testing.T) {
