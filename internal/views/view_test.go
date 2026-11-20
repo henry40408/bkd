@@ -142,6 +142,31 @@ func TestSelectModeTicksTheChosenRows(t *testing.T) {
 	}
 }
 
+func TestTagsRowOpensOnlyForARefusalOrTypedTags(t *testing.T) {
+	const closed = `<input id="bulk-tags-toggle" type="checkbox">`
+	const open = `<input id="bulk-tags-toggle" type="checkbox" checked>`
+	cases := []struct {
+		name string
+		bulk BulkState
+		want string
+	}{
+		{"nothing to show", BulkState{}, closed},
+		{"a refusal", BulkState{Error: "Choose an action."}, open},
+		{"typed tags", BulkState{Tags: "a"}, open},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			view := BookmarksView{
+				Shell: emptyShell("alice", false), List: ListView{Page: 1, Select: true}, Now: goldenNow,
+				Rows: pageRows(1, 1), Bulk: tc.bulk,
+			}
+			if page := BookmarksPage(view); !strings.Contains(page, tc.want) {
+				t.Errorf("page lacks %s", tc.want)
+			}
+		})
+	}
+}
+
 func TestAddFormOpensWithItsError(t *testing.T) {
 	view := BookmarksView{
 		Shell: emptyShell("alice", false), List: listView(1),
