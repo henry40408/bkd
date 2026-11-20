@@ -2,6 +2,7 @@ package views
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"unicode"
@@ -282,26 +283,13 @@ func WithQuery(path string, pairs [][2]string) string {
 			hasQuery = true
 		}
 		b.WriteString(pair[0] + "=")
-		percentEncode(&b, pair[1])
+		b.WriteString(escapeValue(pair[1]))
 	}
 	return b.String()
 }
 
-func percentEncode(b *strings.Builder, value string) {
-	const hex = "0123456789ABCDEF"
-	for i := 0; i < len(value); i++ {
-		c := value[i]
-		if isUnreserved(c) {
-			b.WriteByte(c)
-			continue
-		}
-		b.WriteByte('%')
-		b.WriteByte(hex[c>>4])
-		b.WriteByte(hex[c&0x0f])
-	}
-}
-
-func isUnreserved(c byte) bool {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
-		c == '-' || c == '_' || c == '.' || c == '~'
+// escapeValue is QueryEscape with %20 for a space: the pages put the result in a
+// URL query, and a space is never written as +.
+func escapeValue(value string) string {
+	return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
 }
