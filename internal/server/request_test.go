@@ -24,12 +24,15 @@ func TestIntegerQueryErrorsUseRustWording(t *testing.T) {
 	}
 }
 
-func TestUncleanPathsGetTheNotFoundAnswer(t *testing.T) {
+func TestUncleanPathsAreRedirectedToTheCleanPath(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
 	for _, path := range []string{"/api//state", "/api/./state", "/api/x/../state"} {
 		r := app.send(get(path).as(token))
-		assertStatus(t, r, http.StatusNotFound)
+		assertStatus(t, r, http.StatusTemporaryRedirect)
+		if got := r.headers.Get("Location"); got != "/api/state" {
+			t.Errorf("%s: Location = %q", path, got)
+		}
 	}
 	assertStatus(t, app.send(get("/api/state").as(token)), http.StatusOK)
 }
