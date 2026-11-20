@@ -160,7 +160,9 @@ main.login { max-width: none; padding: 0; display: flex; overflow-y: auto; posit
 .toast { position: fixed; bottom: var(--s5); left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: var(--s3) var(--s4); border-radius: 6px; z-index: 10; max-width: 90vw; width: max-content; overflow-wrap: anywhere; }
 
 .topbar, .backdrop { display: none; }
-.menu { background: none; color: var(--ink); border: 1px solid var(--rule); font-size: 1.25rem; line-height: 1; touch-action: manipulation; padding: var(--s2) var(--s3); }
+.menu { background: none; color: var(--ink); border: 1px solid var(--rule); touch-action: manipulation; padding: var(--s2) var(--s3); }
+/* Three bars drawn in CSS: a font glyph sits off-centre in its line box. */
+.menu::before { content: ""; width: 1.1rem; height: .875rem; background: linear-gradient(currentColor 0 2px, transparent 2px 6px, currentColor 6px 8px, transparent 8px 12px, currentColor 12px 14px); }
 @media (max-width: 900px) and (prefers-reduced-motion: no-preference) {
   /* Visibility flips after the slide when closing and before it when opening, so the drawer is never cut off. */
   .side { transition: transform .15s ease-out, visibility 0s linear .15s; }
@@ -279,7 +281,9 @@ main[aria-busy="true"] { cursor: progress; }
   input, textarea { font-size: 16px; }
 
   /* Search: the field and its button take a full row; Random and Select sit under it. The syntax hint is dropped to save the height. */
+  /* One rhythm: s2 inside a group, s4 between groups. */
   .bar { margin-bottom: var(--s4); }
+  details.add, .bulk { margin-bottom: var(--s4); }
   .bar-search { flex-basis: 100%; }
   .bar input[type="search"], .bar-search button { min-height: 44px; }
   .search-hint { display: none; }
@@ -298,10 +302,11 @@ main[aria-busy="true"] { cursor: progress; }
   /* Bulk bar: the count and Select all on one line, then Tags / Check links / Delete; the tags row opens above them. */
   .bulk { top: var(--topbar-h); padding: var(--s2) var(--s3); }
   .bulk-count { flex: 1; }
+  .bulk-all a.quiet { margin-right: calc(var(--s2) * -1); } /* the link text lines up with the right edge of the buttons */
   .bulk .hint { display: none; }
   .bulk button { min-height: 44px; }
   .bulk-panel { min-width: 0; }
-  .bulk-panel > button, .bulk-tags-toggle { flex: 1; min-width: 0; }
+  .bulk-panel > button, .bulk-tags-toggle { flex: 1 1 0; min-width: 0; padding: var(--s2); white-space: nowrap; } /* equal widths, whatever the label */
   .bulk-tags-toggle { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; border: 1px solid var(--rule); border-radius: 4px; color: var(--link); font-weight: 500; cursor: pointer; }
   .bulk-tags-toggle::after { content: "\00a0\25be"; }
   #bulk-tags-toggle:checked ~ .bulk-panel .bulk-tags-toggle::after { content: "\00a0\25b4"; }

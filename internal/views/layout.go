@@ -65,7 +65,7 @@ func framed(title string, shell Shell, content node) string {
 	body := el("div", []attr{classes("app")},
 		void("input", classes("sr-only"), a("id", "menu-toggle"), a("type", "checkbox")),
 		el("header", []attr{classes("topbar")},
-			el("label", []attr{classes("menu"), a("for", "menu-toggle"), a("aria-label", "Open menu")}, text("☰")),
+			el("label", []attr{classes("menu"), a("for", "menu-toggle"), a("aria-label", "Open menu")}),
 			el("p", []attr{classes("brand")}, el("a", []attr{a("href", "/")}, text("bkd"))),
 		),
 		el("label", []attr{classes("backdrop"), a("for", "menu-toggle")}),
