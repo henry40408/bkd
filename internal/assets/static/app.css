@@ -235,8 +235,11 @@ a.button { font-weight: 600; background: var(--ink); color: var(--paper); border
 .bulk-panel .ask { color: var(--danger); font-weight: 600; }
 /* The link keeps its tap padding, but its text lines up with the count and the hint. */
 .bulk a.quiet { margin-left: calc(var(--s2) * -1); }
-.bulk .hint { color: var(--ink-soft); font-size: .85rem; margin: 0; }
+.bulk .hint, .bulk .bulk-all { color: var(--ink-soft); font-size: .85rem; margin: 0; }
+/* Only a narrow screen folds the tags row away; elsewhere the toggle is hidden and the row flows with the buttons. */
 @media (hover: none) { .bulk .hint { display: none; } }
+#bulk-tags-toggle, .bulk-tags-toggle { display: none; }
+.bulk-tags { display: contents; }
 
 .list.selecting .item { grid-template-columns: 1.75rem 8.5rem minmax(0, 1fr) auto; padding-left: var(--s3); padding-right: var(--s3); column-gap: var(--s3); }
 .list.selecting .actions { display: none; }
@@ -245,9 +248,28 @@ a.button { font-weight: 600; background: var(--ink); color: var(--paper); border
 .pick-box input { width: 1.1rem; height: 1.1rem; margin: 0; accent-color: var(--ink); cursor: pointer; color-scheme: light dark; }
 @media (max-width: 760px) {
   /* The sticky topbar is about 69px tall (44px button, 2 x .75rem padding, 1px border). */
-  .bulk { top: 69px; }
+  .bulk { top: 69px; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s3); padding: var(--s2) var(--s3); }
   .bulk-actions { margin-left: 0; }
   .bulk button { min-height: 44px; }
+  .bulk-count { order: 1; flex: 1; margin: 0; }
+  .bulk-all { order: 2; }
+  .bulk .hint { display: none; }
+  .bulk-panel { order: 3; flex-basis: 100%; min-width: 0; }
+  /* What the script adds to the bar (the delete question, the link check progress) goes last, on its own row. */
+  .bulk > .inline-form, .bulk > .check-progress { order: 4; flex-basis: 100%; }
+  /* The toggle's own box stays out of sight but reachable by keyboard; its label is the visible control. */
+  #bulk-tags-toggle { display: block; position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .bulk-panel > button, .bulk-tags-toggle { flex: 1; min-width: 0; }
+  .bulk-tags button { flex: 1; white-space: nowrap; }
+  .bulk-tags input { flex: 1 1 100%; }
+  .bulk-tags-toggle { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; box-sizing: border-box; border: 1px solid var(--rule); border-radius: 4px; color: var(--link); font-weight: 500; cursor: pointer; }
+  .bulk-tags-toggle::after { content: "\00a0\25be"; }
+  #bulk-tags-toggle:checked ~ .bulk-panel .bulk-tags-toggle::after { content: "\00a0\25b4"; }
+  #bulk-tags-toggle:focus-visible ~ .bulk-panel .bulk-tags-toggle { outline: 2px solid var(--link); outline-offset: 2px; }
+  .bulk-tags { display: none; flex-basis: 100%; flex-wrap: wrap; gap: var(--s2); min-width: 0; }
+  #bulk-tags-toggle:checked ~ .bulk-panel .bulk-tags { display: flex; }
+  /* The search field sits in the topbar, beside the brand, instead of taking a row of its own. */
+  .bar input[type="search"] { position: fixed; top: .75rem; left: 8.25rem; right: var(--s4); width: auto; height: 44px; z-index: 3; }
   .list.selecting .item { grid-template-columns: 1.75rem minmax(0, 1fr); }
   .list.selecting .item > :not(.pick-box) { grid-column: 2; }
 }

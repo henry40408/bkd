@@ -454,7 +454,7 @@
 
   // The question holds the ticks it was asked with, so a change to the ticks withdraws it.
   document.addEventListener("change", (event) => {
-    const changed = event.target instanceof Element && event.target.closest(".bulk-form") && !event.target.closest(".inline-form");
+    const changed = event.target instanceof Element && event.target.closest(".pick-box");
     if (changed && inlinePanel && !inlinePanel.node.closest(".item")) closeInlinePanel({ refocus: false });
   });
 
