@@ -92,6 +92,10 @@ form.stack.flush { padding: 0; }
 .item:last-child { border-bottom: 1px solid var(--rule); }
 .item.editing { display: block; background: var(--sheet); padding: var(--s4); border-radius: 6px; border: 1px solid var(--rule); margin: var(--s2) 0; }
 .item.editing form { padding: 0; }
+.item.confirming { display: block; background: var(--sheet); padding: var(--s4); border-radius: 6px; border: 1px solid var(--rule); margin: var(--s2) 0; }
+.inline-form { margin-top: var(--s2); }
+.inline-form .inline-title { margin: 0 0 var(--s2); font-weight: 600; }
+.inline-form form { padding: 0; }
 .domain { color: var(--ink-soft); font-size: .85rem; overflow-wrap: anywhere; }
 .title { font: 600 1.1rem/1.3 var(--serif); color: var(--link); overflow-wrap: anywhere; }
 .note { margin: var(--s2) 0 0; color: var(--ink-soft); max-width: 60ch; overflow-wrap: anywhere; }
