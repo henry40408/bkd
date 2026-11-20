@@ -400,6 +400,8 @@
     const item = link.closest(".item");
     if (request !== rowPanelRequest || !item.isConnected) return false;
     const state = url.pathname.endsWith("/edit") ? "editing" : "confirming";
+    // The row already says what is edited, and the question already names what is deleted.
+    node.querySelector(state === "editing" ? ".inline-title" : ".summary").remove();
     showPanel(node, link, (panel) => {
       item.classList.add(state);
       item.append(panel);
