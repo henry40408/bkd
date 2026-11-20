@@ -50,5 +50,6 @@ ENV BKD_ADDR=0.0.0.0:8080
 
 EXPOSE 8080
 
-# bkd has no health endpoint, so there is no HEALTHCHECK.
+# GET /healthz is the health endpoint, but this image has no shell or curl, so
+# there is no HEALTHCHECK; probe it from the orchestrator or proxy.
 ENTRYPOINT ["/bkd"]
