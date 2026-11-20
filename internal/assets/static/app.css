@@ -76,6 +76,8 @@ label.inline { display: flex; align-items: center; gap: var(--s2); font-weight: 
 label.inline.strong { font-weight: 600; }
 /* A form that sits in a section under a heading, so it lines up with the heading. */
 form.stack.flush { padding: 0; }
+/* The delete confirmation puts its buttons right under the heading and summary, so they line up with them. */
+.summary + form.stack { padding: 0; }
 .err { color: var(--danger); font-size: .9rem; margin: 0; }
 
 .summary { color: var(--ink-soft); font-size: .85rem; margin: 0 0 var(--s2); }
