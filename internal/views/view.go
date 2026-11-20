@@ -30,7 +30,11 @@ func splitMatches(s string, terms []string) []run {
 	if len(quoted) == 0 {
 		return []run{{text: s}}
 	}
-	pattern := regexp.MustCompile("(?i)" + strings.Join(quoted, "|"))
+	pattern, err := regexp.Compile("(?i)" + strings.Join(quoted, "|"))
+	if err != nil {
+		// A term with invalid UTF-8 does not compile; show the text unhighlighted.
+		return []run{{text: s}}
+	}
 	pattern.Longest()
 	var runs []run
 	add := func(matched bool, piece string) {

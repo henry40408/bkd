@@ -18,6 +18,13 @@ func runHighlightCases(t *testing.T, cases []highlightCase) {
 	}
 }
 
+func TestHighlightWithInvalidUTF8TermDoesNotPanic(t *testing.T) {
+	got := highlight("a<b", []string{"\xff"})
+	if string(got) != "a&lt;b" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestHighlightOrdinaryText(t *testing.T) {
 	runHighlightCases(t, []highlightCase{
 		{"ascii any case", "Hello World hello", []string{"HELLO"}, "<mark>Hello</mark> World <mark>hello</mark>"},
