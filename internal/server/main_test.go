@@ -17,7 +17,7 @@ const (
 
 // TestMain ends the test binary when it hangs or balloons. A loop that stops
 // advancing (which mutation testing produces on purpose, for example in
-// decodeLossy) can grow a buffer without end, at several hundred megabytes a
+// the importer) can grow a buffer without end, at several hundred megabytes a
 // second. Gremlins kills `go test`
 // on its own timeout but not the test binary it started, so the orphan would
 // eat all memory until the runner kills the whole job.

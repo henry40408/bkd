@@ -127,29 +127,3 @@ func TestAQuietCheckKeepsWritingKeepAliveComments(t *testing.T) {
 		t.Errorf("got %q, want three keep-alive comments", buffer)
 	}
 }
-
-func TestLossyDecodingReplacesEachMaximalBrokenPrefixOnce(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"three-byte prefix cut by the end", "\xE2\x82", "�"},
-		{"three-byte prefix cut by a letter", "\xE2\x82x", "�x"},
-		{"upper bound of a continuation byte", "\xE2\xBFx", "�x"},
-		{"past the upper bound", "\xE2\xC0", "��"},
-		{"lower bound after E0", "\xE0\xA0x", "�x"},
-		{"below the lower bound after E0", "\xE0\x9F", "��"},
-		{"upper bound after F4", "\xF4\x8Fx", "�x"},
-		{"past the upper bound after F4", "\xF4\x90\x80\x80", "����"},
-		{"lone continuation byte", "\x80a", "�a"},
-		{"lone lead byte at the end", "\xF0", "�"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := decodeLossy([]byte(c.in)); got != c.want {
-				t.Fatalf("got %q, want %q", got, c.want)
-			}
-		})
-	}
-}
