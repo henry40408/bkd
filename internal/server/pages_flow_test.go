@@ -10,7 +10,7 @@ import (
 )
 
 // Ported from the page tests of the Rust server (src/web/tests.rs and
-// pages/support.rs). The goldens pin the markup; these pin the behaviour.
+// pages/support.rs).
 
 const bulkContext = "q=&tag=&status=&page=1"
 

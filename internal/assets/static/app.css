@@ -76,6 +76,14 @@ label.inline { display: flex; align-items: center; gap: var(--s2); font-weight: 
 label.inline.strong { font-weight: 600; }
 /* A form that sits in a section under a heading, so it lines up with the heading. */
 form.stack.flush { padding: 0; }
+/* The delete confirmation puts its buttons right under the heading and summary, so they line up with them. */
+.summary + form.stack:has(> div > .danger-button) { padding: 0; }
+.summary + form.stack:has(> div > .danger-button) > div { display: flex; align-items: stretch; gap: var(--s3); }
+.summary + form.stack:has(> div > .danger-button) > div > * { display: inline-flex; align-items: center; padding: var(--s2) var(--s4); box-sizing: border-box; border: 2px solid; }
+.summary + form.stack:has(> div > .danger-button) > div > .danger-button { border-color: var(--danger); }
+.summary + form.stack:has(> div > .danger-button) > div > .quiet-link { border-color: var(--link); }
+/* The focus ring sits on the border, so the focused Keep stays the size of Delete. */
+.summary + form.stack:has(> div > .danger-button) > div > :focus-visible { outline-offset: -2px; }
 .err { color: var(--danger); font-size: .9rem; margin: 0; }
 
 .summary { color: var(--ink-soft); font-size: .85rem; margin: 0 0 var(--s2); }

@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## Overview
 
-bkd is a single-binary, multi-user bookmark manager (Go, standard library `net/http`, pure-Go SQLite): a web front end rendered on the server, a JSON API under `/api`, a link checker, browser bookmark import and export, and sign-in through a reverse proxy (forward auth). It was rewritten from Rust; the Rust server's behaviour is the specification, pinned by golden files and captured fixtures (see Tests). `ARCHITECTURE.md` describes the design in depth and the README is the user documentation; read the section of `ARCHITECTURE.md` for the area you touch before changing security-related code.
+bkd is a single-binary, multi-user bookmark manager (Go, standard library `net/http`, pure-Go SQLite): a web front end rendered on the server, a JSON API under `/api`, a link checker, browser bookmark import and export, and sign-in through a reverse proxy (forward auth). It was rewritten from Rust; the Rust server's behaviour was the specification; the fixtures captured from it that remain are listed under Tests. `ARCHITECTURE.md` describes the design in depth and the README is the user documentation; read the section of `ARCHITECTURE.md` for the area you touch before changing security-related code.
 
 ## Commands
 
@@ -44,8 +44,6 @@ Gherkin scenarios (`e2e/features/*.feature`) run through godog and drive the Go 
 
 - Unit and integration tests sit beside the code. `internal/dbtest.Open` gives a throwaway migrated database; `internal/server/harness_test.go` builds the app with `httptest`.
 - Fixtures captured from the last Rust server are never regenerated from Go output; change one only on purpose and say why in the commit message:
-  - `internal/views/testdata/*.golden.html`: exact markup of every page (see its `README.txt`).
-  - `internal/server/testdata/api/*.txt`: API request and response samples, replayed by `api_samples_test.go`.
   - `internal/db/testdata/`: a database created by the Rust server, its schema and its migration records; the store must open it unchanged.
   - `internal/auth/testdata/rust-phc.txt`: password hashes from the Rust server that must verify.
   - `internal/search/testdata/search_syntax.json`: search syntax cases from the Rust parser.

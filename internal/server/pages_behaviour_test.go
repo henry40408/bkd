@@ -1,0 +1,237 @@
+package server
+
+import (
+	"fmt"
+	"net/http"
+	"net/url"
+	"testing"
+)
+
+func idOf(bookmark map[string]any) int64 { return int64(bookmark["id"].(float64)) }
+
+func TestBookmarkPages(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("olga", false)
+	intruder := app.signIn("ivan", false)
+
+	t.Run("another user's bookmark answers 404", func(t *testing.T) {
+		id := idOf(app.createBookmark(token, "secret"))
+		edit := fmt.Sprintf("/bookmarks/%d/edit", id)
+		requests := map[string]sent{
+			"edit form":   get(edit),
+			"delete form": get(fmt.Sprintf("/bookmarks/%d/delete", id)),
+			"edit submit": formPost(edit, "url=https%3A%2F%2Fevil.example"),
+		}
+		for name, request := range requests {
+			if got := app.send(request.as(intruder)).status; got != http.StatusNotFound {
+				t.Errorf("%s: status = %d, want 404", name, got)
+			}
+		}
+	})
+	t.Run("the edit form shows the bookmark escaped", func(t *testing.T) {
+		app.saveThroughForm(token, "url=https%3A%2F%2Fexample.com%2Fedit&title="+url.QueryEscape("<b>bold</b>")+"&tags=a,b")
+		id := app.newestBookmarkID(token)
+		r := app.send(get(fmt.Sprintf("/bookmarks/%d/edit?back=%%2F%%3Ftag%%3Da", id)).as(token))
+		assertStatus(t, r, http.StatusOK)
+		mustContain(t, r, fmt.Sprintf(`action="/bookmarks/%d/edit"`, id), "&lt;b&gt;bold&lt;/b&gt;", "a, b", "https://example.com/edit")
+		mustLack(t, r, "<b>bold</b>")
+	})
+	t.Run("a submitted edit is saved and redirects back", func(t *testing.T) {
+		id := idOf(app.createBookmark(token, "first"))
+		edit := fmt.Sprintf("/bookmarks/%d/edit", id)
+		r := app.send(formPost(edit, "url=https%3A%2F%2Fexample.org&title=renamed&back=%2F%3Fpage%3D2").as(token))
+		assertStatus(t, r, http.StatusSeeOther)
+		mustContain(t, reply{text: locationOf(r)}, "page=2", "bookmark-saved")
+		mustContain(t, app.send(get("/").as(token)), "renamed")
+	})
+	t.Run("a bad URL shows the error and keeps the input", func(t *testing.T) {
+		id := idOf(app.createBookmark(token, "kept-original"))
+		edit := fmt.Sprintf("/bookmarks/%d/edit", id)
+		r := app.send(formPost(edit, "url=not-a-url&title=kept").as(token))
+		assertStatus(t, r, http.StatusBadRequest)
+		mustContain(t, r, fmt.Sprintf(`action="%s"`, edit), "kept", "url must start with http")
+	})
+	t.Run("the create form keeps the input on error", func(t *testing.T) {
+		r := app.send(formPost("/bookmarks", "url=not-a-url&title=typed").as(token))
+		assertStatus(t, r, http.StatusBadRequest)
+		mustContain(t, r, "typed", "not-a-url", "url must start with http")
+	})
+	t.Run("the delete confirmation names the bookmark", func(t *testing.T) {
+		app.saveThroughForm(token, "url=https%3A%2F%2Fexample.com%2Fdoomed&title="+url.QueryEscape("doomed <i>"))
+		id := app.newestBookmarkID(token)
+		r := app.send(get(fmt.Sprintf("/bookmarks/%d/delete?back=%%2F%%3Fpage%%3D3", id)).as(token))
+		assertStatus(t, r, http.StatusOK)
+		mustContain(t, r, "Delete this bookmark?", `action="/bookmarks/delete"`, fmt.Sprintf(`name="id" value="%d"`, id), "doomed &lt;i&gt;")
+		mustLack(t, r, "doomed <i>")
+	})
+	t.Run("a confirmed delete removes the bookmark", func(t *testing.T) {
+		id := idOf(app.createBookmark(token, "removable"))
+		r := app.send(formPost("/bookmarks/delete", fmt.Sprintf("id=%d&back=%%2F", id)).as(token))
+		assertStatus(t, r, http.StatusSeeOther)
+		mustContain(t, reply{text: locationOf(r)}, "bookmark-deleted")
+		mustLack(t, app.send(get("/").as(token)), "removable")
+	})
+}
+
+func (a *testApp) newestBookmarkID(token string) int64 {
+	a.t.Helper()
+	list := a.send(get("/api/bookmarks?limit=1").as(token)).json()["bookmarks"].([]any)
+	return idOf(list[0].(map[string]any))
+}
+
+func TestListPageFiltersByTagAndSearchAndPicksRandom(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("olga", false)
+	app.createBookmark(token, "alpha", "x")
+	app.createBookmark(token, "beta")
+	const alphaLink, betaLink = "https://example.com/alpha", "https://example.com/beta"
+
+	byTag := app.send(get("/?tag=x").as(token))
+	mustContain(t, byTag, alphaLink)
+	mustLack(t, byTag, betaLink)
+	bySearch := app.send(get("/?q=beta&page=1").as(token))
+	mustContain(t, bySearch, betaLink)
+	mustLack(t, bySearch, alphaLink)
+
+	picked := app.send(get("/random?tag=x").as(token))
+	assertStatus(t, picked, http.StatusOK)
+	mustContain(t, picked, `aria-label="Random bookmark"`, alphaLink)
+	mustLack(t, picked, betaLink)
+	empty := app.send(get("/random?tag=missing").as(token))
+	assertStatus(t, empty, http.StatusOK)
+	mustContain(t, empty, "Nothing to pick from here.")
+}
+
+func TestAccountPages(t *testing.T) {
+	app := runningApp(t)
+	admin := app.signIn("root", true)
+
+	t.Run("pages need a session", func(t *testing.T) {
+		for _, uri := range []string{"/settings", "/account", "/bookmarks/1/edit", "/bookmarks/1/delete", "/confirm"} {
+			r := app.send(get(uri))
+			assertStatus(t, r, http.StatusSeeOther)
+			mustContain(t, reply{text: locationOf(r)}, "/login")
+		}
+	})
+	t.Run("settings save the link check choice", func(t *testing.T) {
+		assertStatus(t, app.send(get("/settings").as(admin)), http.StatusOK)
+		r := app.send(formPost("/settings", "link_check_enabled=on").as(admin))
+		mustRedirect(t, r, "/settings?notice=settings-saved")
+		mustContain(t, app.send(get("/settings?notice=settings-saved").as(admin)), "checked")
+		if app.send(get("/api/settings").as(admin)).json()["link_check_enabled"] != true {
+			t.Fatal("setting not saved")
+		}
+		mustRedirect(t, app.send(formPost("/settings", "").as(admin)), "/settings?notice=settings-saved")
+		if app.send(get("/api/settings").as(admin)).json()["link_check_enabled"] != false {
+			t.Error("unticked box did not turn the setting off")
+		}
+	})
+	t.Run("a signed in user skips the login page", func(t *testing.T) {
+		mustRedirect(t, app.send(get("/login?next=%2Fsettings").as(admin)), "/settings")
+	})
+	t.Run("the login page keeps next", func(t *testing.T) {
+		r := app.send(get("/login?notice=session-ended&next=%2Faccount"))
+		assertStatus(t, r, http.StatusOK)
+		mustContain(t, r, `value="/account"`)
+	})
+	t.Run("the confirm form asks for the password", func(t *testing.T) {
+		r := app.send(get("/confirm").as(admin))
+		assertStatus(t, r, http.StatusOK)
+		mustContain(t, r, `type="password"`)
+	})
+}
+
+func TestLoginPageSendsToSetupWhileSetupIsOpen(t *testing.T) {
+	app := awaitingSetupApp(t)
+	mustRedirect(t, app.send(get("/login")), "/setup")
+}
+
+func TestBulkActions(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("olga", false)
+	bulk := func(body string) reply { return app.send(formPost("/bookmarks/bulk", body).as(token)) }
+
+	t.Run("page field parsing", func(t *testing.T) {
+		id := idOf(app.createBookmark(token, "one"))
+		selected := fmt.Sprintf("id-%d=1&action=add_tags&tags=t", id)
+		tests := []struct{ name, body, wantLocation string }{
+			{"bad page falls back to one", selected + "&page=x", "/?notice=bulk-done"},
+			{"page beyond the limit is clamped", selected + "&page=5000000", "/?page=1000000&notice=bulk-done"},
+			{"page too large for a number falls back to one", selected + "&page=99999999999", "/?notice=bulk-done"},
+			{"stray and bad ids are ignored", "id-x=1&other=1&action=add_tags&tags=t", "/?select=1&notice=nothing-selected"},
+		}
+		for _, test := range tests {
+			if r := bulk(test.body); r.status != http.StatusSeeOther || locationOf(r) != test.wantLocation {
+				t.Errorf("%s: got %d to %q, want 303 to %q", test.name, r.status, locationOf(r), test.wantLocation)
+			}
+		}
+	})
+	t.Run("tags are added then removed", func(t *testing.T) {
+		id := idOf(app.createBookmark(token, "two"))
+		body := func(action string) string {
+			return fmt.Sprintf("id-%d=1&action=%s&tags=fresh&%s", id, action, bulkContext)
+		}
+		mustRedirect(t, bulk(body("add_tags")), "/?notice=bulk-done")
+		mustRedirect(t, bulk(body("remove_tags")), "/?notice=bulk-done")
+		r := bulk(body("remove_tags"))
+		assertStatus(t, r, http.StatusBadRequest)
+		mustContain(t, r, "None of the selected bookmarks has that tag.")
+	})
+	t.Run("a confirmed delete removes the rows", func(t *testing.T) {
+		id := idOf(app.createBookmark(token, "three"))
+		selected := fmt.Sprintf("id-%d=1&", id)
+		mustRedirect(t, bulk(selected+"action=delete&confirm=yes&"+bulkContext), "/?notice=bulk-done")
+		stale := bulk(selected + "action=add_tags&tags=t&" + bulkContext)
+		assertStatus(t, stale, http.StatusNotFound)
+		mustContain(t, stale, staleSelectionMessage)
+	})
+}
+
+func TestAdminPages(t *testing.T) {
+	app, admin, member := adminWithMember(t)
+	plain := sessionToken(t, app.login("mei", testPassword))
+	app.createBookmark(admin, "one")
+
+	t.Run("the users page lists accounts for an admin only", func(t *testing.T) {
+		r := app.send(get("/users").as(admin))
+		assertStatus(t, r, http.StatusOK)
+		mustContain(t, r, "root", "mei", `action="/users"`)
+		assertStatus(t, app.send(get("/users").as(plain)), http.StatusForbidden)
+	})
+	t.Run("forms refuse malformed values", func(t *testing.T) {
+		role := fmt.Sprintf("/users/%d/role", member)
+		tests := []struct {
+			name    string
+			request sent
+			want    int
+		}{
+			{"page is not a number", get("/?page=x"), http.StatusBadRequest},
+			{"id is not a number", formPost("/bookmarks/delete", "id=x"), http.StatusUnprocessableEntity},
+			{"id is missing", formPost("/bookmarks/delete", ""), http.StatusUnprocessableEntity},
+			{"role is not a boolean", formPost(role, "is_admin=maybe"), http.StatusUnprocessableEntity},
+			{"role is missing", formPost(role, ""), http.StatusUnprocessableEntity},
+		}
+		for _, test := range tests {
+			if got := app.send(test.request.as(admin)).status; got != test.want {
+				t.Errorf("%s: status = %d, want %d", test.name, got, test.want)
+			}
+		}
+	})
+}
+
+func TestShellPagesAnswer500WhenTheBookmarkCountsFail(t *testing.T) {
+	app, admin, member := adminWithMember(t)
+	app.createBookmark(admin, "one")
+	app.breakTable("bookmarks")
+	user := fmt.Sprintf("/users/%d", member)
+	requests := []sent{
+		get("/confirm"), get("/settings"), get("/account"), get("/users"),
+		get(user + "/password"), get(user + "/delete"),
+		formPost("/bookmarks/bulk", "id-1=1&action=delete&"+bulkContext),
+	}
+	for _, request := range requests {
+		t.Run(request.uri, func(t *testing.T) {
+			assertStatus(t, app.send(request.as(admin)), http.StatusInternalServerError)
+		})
+	}
+}
