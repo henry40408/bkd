@@ -135,6 +135,10 @@ Under "Import and export" in the sidebar, choose the bookmarks file your browser
 
 Over the API: send the file to `POST /api/import` with `Content-Type: text/html` and your session cookie, and read `GET /api/export?format=html|json`.
 
+## Health check
+
+`GET /healthz` needs no sign-in and answers `200 ok` while the database responds, `503 unavailable` otherwise. The Docker image has no shell or `curl`, so it sets no `HEALTHCHECK`; point your orchestrator or proxy at the endpoint and allow a few failures in a row before restarting.
+
 ## Develop
 
 ```sh

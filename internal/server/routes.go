@@ -55,6 +55,7 @@ func (a *App) Handler() http.Handler {
 	for _, route := range assets.Routes {
 		mux.Handle(route.Path, byMethod(onGet(assets.Handler(route))))
 	}
+	mux.Handle("/healthz", byMethod(onGet(http.HandlerFunc(a.handleHealthz))))
 	a.mountPages(mux)
 	fallback := a.page(maxBodyBytes, http.HandlerFunc(a.handleNotFound))
 	mux.Handle("/", fallback)

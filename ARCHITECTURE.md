@@ -71,6 +71,8 @@ JSON under `/api`. Handlers are thin: `api_*.go` call the `service_*.go` functio
 | `PUT /api/users/{id}/password` | confirmed admin | `{password}` reset; ends all sessions of that user |
 | `DELETE /api/users/{id}` | confirmed admin | delete the account with its bookmarks and sessions |
 
+`GET /healthz` (outside `/api`, no auth) runs a database ping (`select 1` on a pooled connection): 200 `ok`, or 503 `unavailable` when it fails within 3 seconds, for example while every pooled connection is busy. It shows the pool is alive, not that the storage is healthy; allow a few failures in a row before restarting on it. The distroless image has no shell or `curl`, so the Dockerfile sets no `HEALTHCHECK`; probe it from the orchestrator or proxy.
+
 ### Import and export (`internal/netscape`, `internal/importer`, `internal/server/api_transfer.go`)
 
 - **Format.** Import reads the Netscape bookmark HTML that Chrome, Firefox, Safari, Pocket and Raindrop export. `internal/netscape` is a small tolerant tokenizer, not an HTML parser: it knows `A`, `H3`, `DL`, `DD` and `BR`, decodes entities, and survives unclosed tags and truncated input. This avoids a large HTML dependency for a fixed, tiny grammar.
