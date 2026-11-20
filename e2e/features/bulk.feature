@@ -112,9 +112,8 @@ Feature: Bulk actions
     Then the address is "/?select=1"
     And the list shows "Alpha"
     And the account has exactly 3 bookmarks
-    When I tick "Alpha"
-    And I tick "Beta"
-    And I start deleting the selection
+    And the selection count says "2 selected"
+    When I start deleting the selection
     And I confirm the deletion
     Then I am told "Done."
     And the list does not show "Alpha"

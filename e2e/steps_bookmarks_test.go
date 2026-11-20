@@ -16,6 +16,8 @@ const (
 	searchBar = "[role=search]"
 	addForm   = "#add form"
 	editForm  = ".edit-form"
+	// keepLink is Keep in a delete question, inline or on its own page.
+	keepLink = "form:has(.danger-button) a.quiet-link"
 )
 
 func registerBookmarkSteps(sc *godog.ScenarioContext, w *world) {
@@ -44,13 +46,26 @@ func registerBookmarkActionSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^I press Enter twice to add `+quoted+` titled `+quoted+`$`, withTwoStrings(w.submitAddFormTwice))
 	sc.Step(`^I start editing `+quoted+`$`, withString(w.startEditing))
 	sc.Step(`^I edit `+quoted+` to the title `+quoted+`$`, withTwoStrings(w.editBookmark))
+	sc.Step(`^I save the edit with the URL `+quoted+`$`, withString(w.saveEditWithURL))
+	sc.Step(`^the edit form holds `+quoted+` as the title$`, withString(func(title string) error {
+		return w.titleFieldHolds(editForm, title)
+	}))
+	sc.Step(`^the edit form is closed$`, func() error {
+		return harness.Eventually("the edit form is closed", func() (bool, error) {
+			forms, err := w.browser.All(harness.CSS(editForm))
+			return len(forms) == 0, err
+		})
+	})
 	sc.Step(`^I cancel editing$`, func() error { return w.click(editForm + " a.quiet-link") })
 	sc.Step(`^I start deleting `+quoted+`$`, withString(func(title string) error {
 		return w.clickRowAction(title, "Delete")
 	}))
-	sc.Step(`^I keep it$`, func() error { return w.click("main a.quiet-link") })
+	sc.Step(`^I keep it$`, func() error { return w.click(keepLink) })
 	sc.Step(`^I confirm the deletion$`, func() error { return w.click("main button.danger-button") })
 	sc.Step(`^I am asked `+quoted+`$`, withString(func(question string) error {
+		return w.textContains(".inline-title", question)
+	}))
+	sc.Step(`^I am asked `+quoted+` on its own page$`, withString(func(question string) error {
 		return w.textContains("main h1", question)
 	}))
 	sc.Step(`^I choose the tag `+quoted+`$`, withString(w.chooseSidebarFilter))
@@ -85,7 +100,7 @@ func registerNavigationSteps(sc *godog.ScenarioContext, w *world) {
 		return w.textLacks("section.pick", text)
 	}))
 	sc.Step(`^there is no pick$`, w.noPick)
-	sc.Step(`^the add form holds `+quoted+` as the title$`, withString(w.addFormHoldsTitle))
+	sc.Step(`^the add form holds `+quoted+` as the title$`, withString(func(title string) error { return w.titleFieldHolds(addForm, title) }))
 	sc.Step(`^I am told `+quoted+`$`, withString(w.expectText))
 	sc.Step(`^the pager offers `+quoted+`$`, withString(func(label string) error { return w.pagerOffers(label, true) }))
 	sc.Step(`^the pager does not offer `+quoted+`$`, withString(func(label string) error { return w.pagerOffers(label, false) }))
@@ -205,6 +220,13 @@ func (w *world) editBookmark(oldTitle, newTitle string) error {
 	return w.click(editForm + " button[type=submit]")
 }
 
+func (w *world) saveEditWithURL(url string) error {
+	if err := w.fill(editForm+" input[name=url]", url); err != nil {
+		return err
+	}
+	return w.click(editForm + " button[type=submit]")
+}
+
 func (w *world) searchFor(query string) error {
 	// The page may still be swapping in the previous answer, which makes the bar go stale.
 	return harness.Eventually("the search bar takes the search", func() (bool, error) {
@@ -278,8 +300,8 @@ func (w *world) noPick() error {
 	})
 }
 
-func (w *world) addFormHoldsTitle(expected string) error {
-	field, err := w.element(addForm + " input[name=title]")
+func (w *world) titleFieldHolds(form, expected string) error {
+	field, err := w.element(form + " input[name=title]")
 	if err != nil {
 		return err
 	}

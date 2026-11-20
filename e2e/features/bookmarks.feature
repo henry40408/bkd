@@ -44,6 +44,31 @@ Feature: Bookmarks
     And the list shows "New title"
     And the list does not show "Old title"
 
+  Scenario: Editing opens in the row without leaving the list
+    Given I have the bookmark "https://a.test" titled "Zebra"
+    And I have the bookmark "https://b.test" titled "Other"
+    When I open the site
+    And I start editing "Zebra"
+    Then the address is "/"
+    And the list shows "Other"
+
+  Scenario: A refused edit stays in the row and keeps what was typed
+    Given I have the bookmark "https://a.test" titled "Zebra"
+    When I open the site
+    And I start editing "Zebra"
+    And the browser's own form checks are switched off
+    And I save the edit with the URL "example.com"
+    Then I see the error "must start with http"
+    And the edit form holds "Zebra" as the title
+    And the address is "/"
+
+  Scenario: Escape closes the edit form
+    Given I have the bookmark "https://a.test" titled "Zebra"
+    When I open the site
+    And I start editing "Zebra"
+    And I press Escape
+    Then the edit form is closed
+
   Scenario: Cancelling an edit returns to the list I came from
     Given I have the bookmark "https://a.test" titled "Zebra" tagged "stripes"
     And I have the bookmark "https://b.test" titled "Other" tagged "plain"

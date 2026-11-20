@@ -12,16 +12,16 @@ Feature: Keyboard focus
   Scenario: Asking to delete puts the focus on Keep
     When I open the site
     And I start deleting "Alpha"
-    Then the focus is on "main a.quiet-link"
+    Then the focus is on "form:has(.danger-button) a.quiet-link"
 
   Scenario: Keeping a bookmark by keyboard leaves the focus on the page
     When I open the site
     And I start deleting "Alpha"
-    Then the focus is on "main a.quiet-link"
+    Then the focus is on "form:has(.danger-button) a.quiet-link"
     When I press Enter
     Then the address is "/"
     And the list shows "Alpha"
-    And the focus is on "#main"
+    And the focus is on "a[aria-label='Delete Alpha']"
 
   Scenario: Deleting a bookmark does not drop the focus to the top of the page
     When I open the site

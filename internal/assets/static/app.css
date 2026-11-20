@@ -14,6 +14,8 @@
   --serif: "Iowan Old Style", "Charter", "Georgia", serif;
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   /* One spacing scale for the whole page. */
+  --stack-gap: var(--s3);
+  --topbar-h: 69px; /* the phone topbar: 44px button, 12px above and below, 1px border */
   --s1: .25rem; --s2: .5rem; --s3: .75rem; --s4: 1rem; --s5: 1.5rem; --s6: 2rem;
 }
 @media (prefers-color-scheme: dark) {
@@ -52,7 +54,10 @@ mark { background: var(--marker); color: #17243a; padding: 0 .15em; border-radiu
 main:focus { outline: none; }
 main { padding: var(--s5) clamp(var(--s4), 4vw, var(--s6)); max-width: 56rem; }
 main h1 { font: 700 1.5rem/1.2 var(--serif); margin: 0 0 var(--s4); }
-.bar { display: flex; gap: var(--s3); margin-bottom: var(--s2); }
+/* The search field and its button stay together; Random and Select wrap below them when the row is full. */
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); margin-bottom: var(--s2); }
+.bar-search { display: flex; gap: var(--s3); flex: 1 1 24rem; min-width: 0; }
+.bar-search input { flex: 1; min-width: 0; }
 .search-hint { margin: 0 0 var(--s5); color: var(--ink-soft); font-size: .85rem; }
 .search-hint code { font: inherit; color: var(--ink); }
 .pick { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: var(--s4); margin-bottom: var(--s5); display: grid; gap: var(--s2); }
@@ -61,7 +66,6 @@ main h1 { font: 700 1.5rem/1.2 var(--serif); margin: 0 0 var(--s4); }
 .pick .actions { display: flex; gap: var(--s2); opacity: 1; margin: 0 0 0 calc(var(--s2) * -1); }
 input, textarea { font: inherit; color: inherit; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: var(--s2) var(--s3); width: 100%; }
 input[type=checkbox] { width: auto; }
-.bar input { flex: 1; }
 button { font: inherit; font-weight: 600; background: var(--ink); color: var(--paper); border: 0; border-radius: 4px; padding: var(--s2) var(--s4); cursor: pointer; }
 button.quiet { background: none; color: var(--link); padding: var(--s1) var(--s2); font-weight: 500; }
 button.link { background: none; color: var(--link); padding: 0; font-weight: 500; text-decoration: underline; }
@@ -76,14 +80,14 @@ label.inline { display: flex; align-items: center; gap: var(--s2); font-weight: 
 label.inline.strong { font-weight: 600; }
 /* A form that sits in a section under a heading, so it lines up with the heading. */
 form.stack.flush { padding: 0; }
-/* The delete confirmation puts its buttons right under the heading and summary, so they line up with them. */
-.summary + form.stack:has(> div > .danger-button) { padding: 0; }
-.summary + form.stack:has(> div > .danger-button) > div { display: flex; align-items: stretch; gap: var(--s3); }
-.summary + form.stack:has(> div > .danger-button) > div > * { display: inline-flex; align-items: center; padding: var(--s2) var(--s4); box-sizing: border-box; border: 2px solid; }
-.summary + form.stack:has(> div > .danger-button) > div > .danger-button { border-color: var(--danger); }
-.summary + form.stack:has(> div > .danger-button) > div > .quiet-link { border-color: var(--link); }
+/* The delete confirmation puts its buttons right under the heading (and summary), so they line up with them. */
+form.stack:has(> div > .danger-button) { padding: 0; }
+form.stack:has(> div > .danger-button) > div { display: flex; align-items: stretch; gap: var(--s3); }
+form.stack:has(> div > .danger-button) > div > * { display: inline-flex; align-items: center; padding: var(--s2) var(--s4); box-sizing: border-box; border: 2px solid; }
+form.stack:has(> div > .danger-button) > div > .danger-button { border-color: var(--danger); }
+form.stack:has(> div > .danger-button) > div > .quiet-link { border-color: var(--link); }
 /* The focus ring sits on the border, so the focused Keep stays the size of Delete. */
-.summary + form.stack:has(> div > .danger-button) > div > :focus-visible { outline-offset: -2px; }
+form.stack:has(> div > .danger-button) > div > :focus-visible { outline-offset: -2px; }
 .err { color: var(--danger); font-size: .9rem; margin: 0; }
 
 .summary { color: var(--ink-soft); font-size: .85rem; margin: 0 0 var(--s2); }
@@ -92,6 +96,16 @@ form.stack.flush { padding: 0; }
 .item:last-child { border-bottom: 1px solid var(--rule); }
 .item.editing { display: block; background: var(--sheet); padding: var(--s4); border-radius: 6px; border: 1px solid var(--rule); margin: var(--s2) 0; }
 .item.editing form { padding: 0; }
+.item.confirming { display: block; background: var(--sheet); padding: var(--s4); border-radius: 6px; border: 1px solid var(--rule); margin: var(--s2) 0; }
+.inline-form { margin-top: var(--s2); }
+/* An edit form replaces the row; a delete question keeps the row but not its actions. */
+.item.editing > :not(.inline-form) { display: none; }
+.item.editing .inline-form { margin-top: 0; }
+.item.confirming > .when { display: none; }
+.inline-form .inline-title { margin: 0 0 var(--s2); font-weight: 600; }
+.inline-form form { padding: 0; }
+/* The bulk delete question closes the bulk bar, set off by a rule. */
+.bulk > .inline-form { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--rule); }
 .domain { color: var(--ink-soft); font-size: .85rem; overflow-wrap: anywhere; }
 .title { font: 600 1.1rem/1.3 var(--serif); color: var(--link); overflow-wrap: anywhere; }
 .note { margin: var(--s2) 0 0; color: var(--ink-soft); max-width: 60ch; overflow-wrap: anywhere; }
@@ -114,19 +128,6 @@ form.stack.flush { padding: 0; }
 .confirm { color: var(--danger); white-space: normal; width: 11rem; margin: 0 calc(var(--s2) * -1) 0 0;
   display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
 .confirm-text { flex-basis: 100%; padding: 0 var(--s2); text-align: right; }
-@media (max-width: 760px) {
-  .item { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
-  .when { text-align: left; } /* --tap-slack is the blank space a 44px button adds above and below one line of its text. */
-  .when { --tap-slack: calc((44px - 1.5em) / 2); --actions-gap: calc(var(--s1) * 1.5 - var(--tap-slack)); }
-  .actions { opacity: 1; margin: var(--actions-gap) 0 calc(var(--tap-slack) * -1) calc(var(--s2) * -1); }
-  .confirm { width: auto; margin: 0 0 calc(var(--tap-slack) * -1) calc(var(--s2) * -1); justify-content: flex-start; }
-  .confirm button { margin-top: var(--actions-gap); }
-  .confirm-text { text-align: left; }
-  .user-row { row-gap: var(--s2); }
-  .user-actions, .user-confirm { --tap-slack: calc((44px - 1.5em) / 2); flex-basis: 100%; margin: calc(var(--tap-slack) * -1) 0 calc(var(--tap-slack) * -1) calc(var(--s2) * -1); }
-  .user-actions { min-height: 44px; }
-  .user-actions:empty { display: none; }
-}
 
 .empty { border: 1px dashed var(--rule); border-radius: 6px; padding: var(--s6); text-align: center; color: var(--ink-soft); }
 
@@ -159,31 +160,11 @@ main.login { max-width: none; padding: 0; display: flex; overflow-y: auto; posit
 .toast:empty { display: none; }
 .toast { position: fixed; bottom: var(--s5); left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: var(--s3) var(--s4); border-radius: 6px; z-index: 10; max-width: 90vw; width: max-content; overflow-wrap: anywhere; }
 
-/* Mobile overrides stay last so they win over the base rules above. */
 .topbar, .backdrop { display: none; }
-.menu { background: none; color: var(--ink); border: 1px solid var(--rule); font-size: 1.25rem; line-height: 1; touch-action: manipulation; padding: var(--s2) var(--s3); }
-@media (max-width: 760px) {
-  .app { grid-template-columns: minmax(0, 1fr); }
-  .topbar { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--rule); position: sticky; top: 0; background: var(--paper); z-index: 3; }
-  .topbar .brand { margin: 0; }
-  .backdrop { display: block; position: fixed; inset: 0; background: rgb(0 0 0 / .45); z-index: 4; opacity: 0; visibility: hidden; }
-  #menu-toggle:checked ~ .backdrop { opacity: 1; visibility: visible; }
-  .side { position: fixed; top: 0; left: 0; bottom: 0; width: min(18rem, 85vw); background: var(--paper); z-index: 5; transform: translateX(-100%); visibility: hidden; overscroll-behavior: contain; }
-  #menu-toggle:checked ~ .side { transform: none; visibility: visible; }
-  /* Touch targets: about 44px for controls, 32px for the small tag pills. */
-  .menu { min-width: 44px; min-height: 44px; }
-  button.quiet, .side li a, .me a, .me button { display: inline-flex; align-items: center; min-height: 44px; }
-  .side li a { display: flex; }
-  .me a, .me button { justify-self: start; }
-  .side { padding-bottom: var(--s1); }
-  .me { padding-top: var(--s1); }
-  .me > span { padding-block: calc((44px - 1.5em) / 2); }
-  button.tag { display: inline-flex; align-items: center; min-height: 32px; }
-  details.add summary { min-height: 44px; display: flex; align-items: center; }
-  /* iOS Safari zooms the page when a field under 16px gets focus. */
-  input, textarea { font-size: 16px; }
-}
-@media (max-width: 760px) and (prefers-reduced-motion: no-preference) {
+.menu { background: none; color: var(--ink); border: 1px solid var(--rule); touch-action: manipulation; padding: var(--s2) var(--s3); }
+/* Three bars drawn in CSS: a font glyph sits off-centre in its line box. */
+.menu::before { content: ""; width: 1.1rem; height: .875rem; background: linear-gradient(currentColor 0 2px, transparent 2px 6px, currentColor 6px 8px, transparent 8px 12px, currentColor 12px 14px); }
+@media (max-width: 900px) and (prefers-reduced-motion: no-preference) {
   /* Visibility flips after the slide when closing and before it when opening, so the drawer is never cut off. */
   .side { transition: transform .15s ease-out, visibility 0s linear .15s; }
   #menu-toggle:checked ~ .side { transition: transform .15s ease-out, visibility 0s; }
@@ -206,7 +187,6 @@ form.stack.password-form { background: var(--sheet); border: 1px solid var(--rul
 .import-result ul { margin: 0 0 var(--s2); padding-left: var(--s5); }
 .downloads { display: flex; flex-wrap: wrap; gap: var(--s3); margin: 0; }
 a.button { font-weight: 600; background: var(--ink); color: var(--paper); border-radius: 4px; padding: var(--s2) var(--s4); text-decoration: none; }
-@media (max-width: 760px) { a.button { min-height: 44px; display: inline-flex; align-items: center; } }
 
 /* Bulk actions. Select mode puts a checkbox in front of each row and a sticky bar above the list. */
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -215,30 +195,26 @@ a.button { font-weight: 600; background: var(--ink); color: var(--paper); border
 /* Sticks to the top of the viewport so the actions stay reachable in a long list. Below the topbar (3), the backdrop (4) and the drawer (5). */
 .bulk { position: sticky; top: 0; z-index: 2; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px;
   padding: var(--s3) var(--s4); margin-bottom: var(--s3); display: grid; gap: var(--s2); }
-.bulk-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
-.bulk-count { font-weight: 700; margin-right: var(--s2); font-variant-numeric: tabular-nums; }
-.bulk-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-left: auto; }
+.bulk-head { display: flex; align-items: center; gap: var(--s3); }
+.bulk-count { font-weight: 700; font-variant-numeric: tabular-nums; }
 .bulk button:disabled { opacity: .4; cursor: not-allowed; }
 .bulk-panel { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
 .bulk-panel input { flex: 1 1 12rem; width: auto; min-width: 0; }
 .bulk-panel .err, .bulk-panel .ask { flex-basis: 100%; }
 .bulk-panel .ask { color: var(--danger); font-weight: 600; }
-.bulk .hint { color: var(--ink-soft); font-size: .85rem; margin: 0; }
+/* The link keeps its tap padding, but its text lines up with the count and the hint. */
+.bulk a.quiet { margin-left: calc(var(--s2) * -1); }
+.bulk .hint, .bulk .bulk-all { color: var(--ink-soft); font-size: .85rem; margin: 0; }
+/* Only a narrow screen folds the tags row away; elsewhere the toggle is hidden and the row flows with the buttons. */
 @media (hover: none) { .bulk .hint { display: none; } }
+#bulk-tags-toggle, .bulk-tags-toggle { display: none; }
+.bulk-tags { display: contents; }
 
 .list.selecting .item { grid-template-columns: 1.75rem 8.5rem minmax(0, 1fr) auto; padding-left: var(--s3); padding-right: var(--s3); column-gap: var(--s3); }
 .list.selecting .actions { display: none; }
 /* Centres the box on the first title line: (1.1rem * 1.3 line - 1.1rem box) / 2. */
 .pick-box { align-self: start; padding: .165rem .5rem .5rem 0; margin: 0 0 -.5rem -.25rem; }
 .pick-box input { width: 1.1rem; height: 1.1rem; margin: 0; accent-color: var(--ink); cursor: pointer; color-scheme: light dark; }
-@media (max-width: 760px) {
-  /* The sticky topbar is about 69px tall (44px button, 2 x .75rem padding, 1px border). */
-  .bulk { top: 69px; }
-  .bulk-actions { margin-left: 0; }
-  .bulk button { min-height: 44px; }
-  .list.selecting .item { grid-template-columns: 1.75rem minmax(0, 1fr); }
-  .list.selecting .item > :not(.pick-box) { grid-column: 2; }
-}
 
 /* Link check result under a bookmark; a bookmark never checked shows nothing. The icon sits in a box one text line tall, so it centres on the first line even when the text wraps. */
 .link-note { --line: 1.45; margin: var(--s2) 0 0; font-size: .9rem; line-height: var(--line); display: flex; gap: .4rem; align-items: flex-start; overflow-wrap: anywhere; }
@@ -282,7 +258,67 @@ main[aria-busy="true"] { cursor: progress; }
 .pick-box { cursor: pointer; }
 .item .actions a { white-space: nowrap; }
 @media (hover: none), (pointer: coarse) { .actions { opacity: 1; } }
-@media (max-width: 760px) {
+
+/* Phones and small tablets. One block, last, so it wins over the rules above. */
+@media (max-width: 900px) {
+  .app { grid-template-columns: minmax(0, 1fr); align-content: start; } /* start: a short page must not stretch the topbar row */
+  .topbar { display: flex; align-items: center; gap: var(--s3); padding: 0 var(--s4); height: var(--topbar-h); border-bottom: 1px solid var(--rule); position: sticky; top: 0; background: var(--paper); z-index: 3; }
+  .topbar .brand { margin: 0; }
+  .backdrop { display: block; position: fixed; inset: 0; background: rgb(0 0 0 / .45); z-index: 4; opacity: 0; visibility: hidden; }
+  #menu-toggle:checked ~ .backdrop { opacity: 1; visibility: visible; }
+  .side { position: fixed; top: 0; left: 0; bottom: 0; width: min(18rem, 85vw); background: var(--paper); z-index: 5; transform: translateX(-100%); visibility: hidden; overscroll-behavior: contain; padding-bottom: var(--s1); }
+  #menu-toggle:checked ~ .side { transform: none; visibility: visible; }
+  /* Touch targets: about 44px for controls, 32px for the small tag pills. */
+  .menu { min-width: 44px; min-height: 44px; }
+  button.quiet, .side li a, .me a, .me button, a.button { display: inline-flex; align-items: center; min-height: 44px; }
   a.quiet, a.quiet-link { min-height: 44px; align-items: center; display: inline-flex; }
-  .bar { flex-wrap: wrap; }
+  .side li a { display: flex; }
+  .me a, .me button { justify-self: start; }
+  .me { padding-top: var(--s1); }
+  .me > span { padding-block: calc((44px - 1.5em) / 2); }
+  button.tag { display: inline-flex; align-items: center; min-height: 32px; }
+  details.add summary { min-height: 44px; display: flex; align-items: center; }
+  /* iOS Safari zooms the page when a field under 16px gets focus. */
+  input, textarea { font-size: 16px; }
+
+  /* Search: the field and its button take a full row; Random and Select sit under it. The syntax hint is dropped to save the height. */
+  /* One gap between every block: the topbar, the search rows, Add bookmark and the bulk bar. */
+  main { padding-top: var(--stack-gap); }
+  .bar { row-gap: var(--stack-gap); margin-bottom: var(--stack-gap); }
+  details.add, .bulk { margin-bottom: var(--stack-gap); }
+  .bar-search { flex-basis: 100%; }
+  .bar input[type="search"], .bar-search button { min-height: 44px; }
+  .search-hint { display: none; }
+
+  .item { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
+  .when { text-align: left; --tap-slack: calc((44px - 1.5em) / 2); --actions-gap: calc(var(--s1) * 1.5 - var(--tap-slack)); } /* --tap-slack is the blank space a 44px button adds above and below one line of its text. */
+  .actions { opacity: 1; margin: var(--actions-gap) 0 calc(var(--tap-slack) * -1) calc(var(--s2) * -1); }
+  .confirm { width: auto; margin: 0 0 calc(var(--tap-slack) * -1) calc(var(--s2) * -1); justify-content: flex-start; }
+  .confirm button { margin-top: var(--actions-gap); }
+  .confirm-text { text-align: left; }
+  .user-row { row-gap: var(--s2); }
+  .user-actions, .user-confirm { --tap-slack: calc((44px - 1.5em) / 2); flex-basis: 100%; margin: calc(var(--tap-slack) * -1) 0 calc(var(--tap-slack) * -1) calc(var(--s2) * -1); }
+  .user-actions { min-height: 44px; }
+  .user-actions:empty { display: none; }
+
+  /* Bulk bar: the count and Select all on one line, then Tags / Check links / Delete; the tags row opens above them. */
+  .bulk { top: var(--topbar-h); padding: var(--s2) var(--s3); }
+  .bulk-count { flex: 1; }
+  .bulk-all a.quiet { margin-right: calc(var(--s2) * -1); } /* the link text lines up with the right edge of the buttons */
+  .bulk .hint { display: none; }
+  .bulk button { min-height: 44px; }
+  .bulk-panel { min-width: 0; }
+  .bulk-panel > button, .bulk-tags-toggle { flex: 1 1 0; min-width: 0; padding: var(--s2); white-space: nowrap; } /* equal widths, whatever the label */
+  .bulk-tags-toggle { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; border: 1px solid var(--rule); border-radius: 4px; color: var(--link); font-weight: 500; cursor: pointer; }
+  .bulk-tags-toggle::after { content: "\00a0\25be"; }
+  #bulk-tags-toggle:checked ~ .bulk-panel .bulk-tags-toggle::after { content: "\00a0\25b4"; }
+  /* The checkbox is the state; its label is the visible control. */
+  #bulk-tags-toggle { display: block; position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  #bulk-tags-toggle:focus-visible ~ .bulk-panel .bulk-tags-toggle { outline: 2px solid var(--link); outline-offset: 2px; }
+  .bulk-tags { display: none; flex-basis: 100%; flex-wrap: wrap; gap: var(--s2); min-width: 0; }
+  #bulk-tags-toggle:checked ~ .bulk-panel .bulk-tags { display: flex; }
+  .bulk-tags input { flex: 1 1 100%; }
+  .bulk-tags button { flex: 1; white-space: nowrap; }
+  .list.selecting .item { grid-template-columns: 1.75rem minmax(0, 1fr); }
+  .list.selecting .item > :not(.pick-box) { grid-column: 2; }
 }

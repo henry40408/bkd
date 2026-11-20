@@ -46,7 +46,7 @@ Feature: Managing users
     Given the member "mei" exists
     When I open Manage users
     And I start deleting the user "mei"
-    Then I am asked "Delete mei?"
+    Then I am asked "Delete mei?" on its own page
     When I keep it
     Then the address is "/users"
     And the user list shows "mei"

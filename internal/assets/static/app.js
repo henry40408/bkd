@@ -8,6 +8,8 @@
   let inFlight = null;
   // The link check that is running, if any: { controller, done, broken }.
   let checkRun = null;
+  // The inline form that is open, if any: { node, opener }.
+  let inlinePanel = null;
 
   const sameOrigin = (url) => url.origin === location.origin;
 
@@ -41,6 +43,7 @@
   // Replaces the page's content with the one in `doc`. The signed-in frame keeps its
   // menu toggle and top bar, so only the sidebar and `main` change.
   function swapIn(doc) {
+    inlinePanel = null;
     document.title = doc.title;
     const framed = document.querySelector(".app") && doc.querySelector(".app");
     if (framed) {
@@ -66,7 +69,9 @@
 
   // `history`: "push" for a new page, "replace" for the same address, "none" for back/forward.
   // Answers whether the page was swapped in (false when a newer load took over).
-  async function load(url, init, history) {
+  // `keepInline(doc)` gets an answer that is not a redirect and answers true when it
+  // showed that answer itself, so the page is not swapped.
+  async function load(url, init, history, keepInline) {
     abortCheck();
     if (inFlight) inFlight.abort();
     const controller = new AbortController();
@@ -77,6 +82,7 @@
     const doc = new DOMParser().parseFromString(await response.text(), "text/html");
     if (inFlight !== controller) return false;
     inFlight = null;
+    if (keepInline && !response.redirected && keepInline(doc)) return true;
     const finalUrl = new URL(response.url);
     if (history === "push") {
       // A POST answered without a redirect has no address of its own to come back to.
@@ -334,6 +340,124 @@
     await showCheckEnd(ids, failure || checkSummary(run, ids.length));
   }
 
+  // ---- Inline forms: edit and delete open in their row, a bulk delete at the foot of the bulk bar ----
+
+  const ROW_ACTION = /^\/bookmarks\/\d+\/(edit|delete)$/;
+  // The form of an edit page or of a delete question, whichever the page has.
+  const INLINE_FORM = "main form.edit-form, main form:has(.danger-button)";
+
+  function closeInlinePanel({ refocus }) {
+    if (!inlinePanel) return;
+    const { node, opener } = inlinePanel;
+    inlinePanel = null;
+    const item = node.closest(".item");
+    if (item) item.classList.remove("editing", "confirming");
+    node.remove();
+    if (refocus && opener.isConnected) opener.focus();
+  }
+
+  function focusPanel(node) {
+    const target = node.querySelector("[autofocus]") || node.querySelector("input, textarea, button");
+    if (target) target.focus();
+  }
+
+  // The panel that holds the form of a full page: its heading, summary and form.
+  // Answers null when the page has no such form (a refusal, an error page).
+  function panelFrom(doc) {
+    const form = doc.querySelector(INLINE_FORM);
+    if (!form) return null;
+    const node = document.createElement("div");
+    node.className = "inline-form";
+    const title = document.createElement("p");
+    title.className = "inline-title";
+    title.textContent = doc.querySelector("main h1").textContent;
+    node.append(title);
+    const summary = doc.querySelector("main .summary");
+    if (summary) node.append(document.importNode(summary, true));
+    node.append(document.importNode(form, true));
+    return node;
+  }
+
+  function showPanel(node, opener, place) {
+    closeInlinePanel({ refocus: false });
+    place(node);
+    inlinePanel = { node, opener };
+    focusPanel(node);
+  }
+
+  // Counts the row panels asked for, so only the newest answer is shown.
+  let rowPanelRequest = 0;
+
+  async function openRowPanel(link, url) {
+    // A form cannot sit inside the select-mode form, so those rows keep the page jump.
+    if (link.closest("form")) throw new Error("inside a form");
+    const request = ++rowPanelRequest;
+    const response = await fetch(url, { credentials: "same-origin" });
+    const type = response.headers.get("content-type") || "";
+    if (!response.ok || !type.startsWith("text/html")) throw new Error("not a form");
+    const node = panelFrom(new DOMParser().parseFromString(await response.text(), "text/html"));
+    if (!node) throw new Error("not a form");
+    const item = link.closest(".item");
+    if (request !== rowPanelRequest || !item.isConnected) return false;
+    const state = url.pathname.endsWith("/edit") ? "editing" : "confirming";
+    // The row already says what is edited, and the question already names what is deleted.
+    node.querySelector(state === "editing" ? ".inline-title" : ".summary").remove();
+    showPanel(node, link, (panel) => {
+      item.classList.add(state);
+      item.append(panel);
+    });
+    return true;
+  }
+
+  // A refused edit shows its reason in the open panel, with what was typed kept.
+  function keepRefusalInPanel(panel) {
+    return (doc) => {
+      const node = panelFrom(doc);
+      if (!node) return false;
+      panel.replaceWith(node);
+      inlinePanel = { node, opener: inlinePanel ? inlinePanel.opener : node };
+      focusPanel(node);
+      return true;
+    };
+  }
+
+  function submitInline({ form, url, data }) {
+    const panel = form.closest(".inline-form");
+    const scrolled = window.scrollY;
+    // The row the user worked on is likely far down the list, so the page stays where it is.
+    const loadKeepingScroll = async () => {
+      const swapped = await load(url, { method: "POST", body: new URLSearchParams(data) }, "push", keepRefusalInPanel(panel));
+      if (swapped) window.scrollTo(0, scrolled);
+      return swapped;
+    };
+    return enhance(
+      loadKeepingScroll,
+      (error) => (error instanceof TypeError ? HTMLFormElement.prototype.submit.call(form) : location.reload()),
+    );
+  }
+
+  const isBulkDelete = (form, data) => form.classList.contains("bulk-form") && data.get("action") === "delete";
+
+  // The server answers a bulk delete with a question page; it goes at the foot of the bulk bar.
+  function askBulkDelete({ form, submitter, url, data }) {
+    const showQuestion = (doc) => {
+      const node = panelFrom(doc);
+      if (!node) return false;
+      showPanel(node, submitter, (panel) => form.querySelector(".bulk").append(panel));
+      return true;
+    };
+    return enhance(
+      () => load(url, { method: "POST", body: new URLSearchParams(data) }, "push", showQuestion),
+      () => submitNatively(form, submitter),
+    );
+  }
+
+  // The question holds the ticks it was asked with, so a change to the ticks withdraws it.
+  document.addEventListener("change", (event) => {
+    const changed = event.target instanceof Element && event.target.closest(".pick-box");
+    if (changed && inlinePanel && !inlinePanel.node.closest(".item")) closeInlinePanel({ refocus: false });
+  });
+
   // ---- Forms ----
 
   function setBusy(form, submitter, busy) {
@@ -353,21 +477,23 @@
   // The server may have handled a POST whose answer was not a page: submitting it
   // again could repeat it, so only reload. A request that never got through is
   // sent the ordinary way, with the pressed button's name and value kept.
+  // A native submit() leaves out the submitter's name and value, so they go in a hidden field.
+  function submitNatively(form, submitter) {
+    if (submitter && submitter.name) {
+      const hidden = document.createElement("input");
+      hidden.type = "hidden";
+      hidden.name = submitter.name;
+      hidden.value = submitter.value;
+      form.append(hidden);
+    }
+    HTMLFormElement.prototype.submit.call(form);
+  }
+
   function postForm({ form, submitter, url, data }) {
     const body = form.enctype === "multipart/form-data" ? data : new URLSearchParams(data);
-    const notDelivered = () => {
-      if (submitter && submitter.name) {
-        const hidden = document.createElement("input");
-        hidden.type = "hidden";
-        hidden.name = submitter.name;
-        hidden.value = submitter.value;
-        form.append(hidden);
-      }
-      HTMLFormElement.prototype.submit.call(form);
-    };
     return enhance(
       () => load(url, { method: "POST", body }, "push"),
-      (error) => (error instanceof TypeError ? notDelivered() : location.reload()),
+      (error) => (error instanceof TypeError ? submitNatively(form, submitter) : location.reload()),
     );
   }
 
@@ -388,6 +514,24 @@
   document.addEventListener("click", (event) => {
     if (wantsBrowserDefault(event)) return;
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+    if (!link) return;
+    if (link.closest(".inline-form") && link.classList.contains("quiet-link")) {
+      event.preventDefault();
+      closeInlinePanel({ refocus: true });
+      return;
+    }
+    const url = new URL(link.href);
+    if (!link.closest(".item .actions") || !sameOrigin(url) || !ROW_ACTION.test(url.pathname)) return;
+    event.preventDefault();
+    enhance(
+      () => openRowPanel(link, url),
+      () => location.assign(url),
+    );
+  });
+
+  document.addEventListener("click", (event) => {
+    if (wantsBrowserDefault(event)) return;
+    const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
     if (!link || link.target || link.hasAttribute("download")) return;
     const url = new URL(link.href);
     if (!isPagePath(url)) return;
@@ -397,6 +541,13 @@
       () => location.assign(url),
     );
   });
+
+  function finished(form, submitter, ids, url, data) {
+    if (ids.length > 0) return runLinkCheck(form, ids);
+    if (form.closest(".inline-form")) return submitInline({ form, url, data });
+    if (isBulkDelete(form, data)) return askBulkDelete({ form, submitter, url, data });
+    return postForm({ form, submitter, url, data });
+  }
 
   document.addEventListener("submit", (event) => {
     if (event.defaultPrevented) return;
@@ -423,8 +574,7 @@
     if (form.getAttribute("aria-busy") === "true") return;
     const ids = data.get("action") === "check" ? tickedIds(data) : [];
     setBusy(form, submitter, true);
-    const finished = ids.length > 0 ? runLinkCheck(form, ids) : postForm({ form, submitter, url, data });
-    finished.finally(() => setBusy(form, submitter, false));
+    finished(form, submitter, ids, url, data).finally(() => setBusy(form, submitter, false));
   });
 
   // Escape in a text field belongs to the field (clearing a search, closing suggestions);
@@ -435,6 +585,10 @@
 
   // Escape closes the menu on a narrow screen; in select mode it leaves select mode.
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !event.defaultPrevented && inlinePanel && inlinePanel.node.contains(event.target)) {
+      closeInlinePanel({ refocus: true });
+      return;
+    }
     if (event.key !== "Escape" || event.defaultPrevented || isTextEntry(event.target)) return;
     const toggle = document.getElementById("menu-toggle");
     if (toggle && toggle.checked) {

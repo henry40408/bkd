@@ -73,7 +73,7 @@ Feature: The pages work without a script
     And I enter select mode
     And I tick "Alpha"
     And I start deleting the selection
-    Then I am asked "Delete 1 bookmark?"
+    Then I am asked "Delete 1 bookmark?" on its own page
     When I confirm the deletion
     Then I am told "Done."
     And the list does not show "Alpha"
