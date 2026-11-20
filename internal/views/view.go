@@ -81,41 +81,13 @@ func highlight(s string, terms []string) node {
 }
 
 // DomainOf is the host of a URL without www., or the text itself when it has
-// no host.
-func DomainOf(url string) string {
-	rest := url
-	if _, after, ok := strings.Cut(url, "://"); ok {
-		rest = after
+// no host or cannot be parsed.
+func DomainOf(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Hostname() == "" {
+		return rawURL
 	}
-	authority := rest
-	if end := strings.IndexAny(rest, "/?#"); end >= 0 {
-		authority = rest[:end]
-	}
-	if at := strings.LastIndexByte(authority, '@'); at >= 0 {
-		authority = authority[at+1:]
-	}
-	host := dropPort(authority)
-	host = strings.ToLower(host)
-	if rest, ok := strings.CutPrefix(host, "www."); ok {
-		return rest
-	}
-	if host == "" {
-		return url
-	}
-	return host
-}
-
-func dropPort(host string) string {
-	colon := strings.LastIndexByte(host, ':')
-	if colon < 0 {
-		return host
-	}
-	for _, c := range host[colon+1:] {
-		if c < '0' || c > '9' {
-			return host
-		}
-	}
-	return host[:colon]
+	return strings.TrimPrefix(strings.ToLower(parsed.Hostname()), "www.")
 }
 
 // SavedTime is a saved time as the page shows it. The server cannot know the

@@ -40,7 +40,7 @@ func TestDomainsLoseSchemePortUserinfoAndWWW(t *testing.T) {
 		"http://me@host.test/":               "host.test",
 		"not a url":                          "not a url",
 		"https://host.test:/x":               "host.test",
-		"https://host.test:80a/x":            "host.test:80a",
+		"https://host.test:80a/x":            "https://host.test:80a/x",
 		"https:///x":                         "https:///x",
 	}
 	for url, want := range tests {
