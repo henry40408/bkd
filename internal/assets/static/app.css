@@ -78,6 +78,8 @@ label.inline.strong { font-weight: 600; }
 form.stack.flush { padding: 0; }
 /* The delete confirmation puts its buttons right under the heading and summary, so they line up with them. */
 .summary + form.stack { padding: 0; }
+.summary + form.stack > div { display: flex; align-items: stretch; gap: var(--s3); }
+.summary + form.stack > div > * { display: inline-flex; align-items: center; padding: var(--s2) var(--s4); box-sizing: border-box; }
 .err { color: var(--danger); font-size: .9rem; margin: 0; }
 
 .summary { color: var(--ink-soft); font-size: .85rem; margin: 0 0 var(--s2); }
