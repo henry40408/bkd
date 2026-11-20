@@ -28,6 +28,10 @@ func TestDomainEdgesAroundUserinfoAndPorts(t *testing.T) {
 		"http://h:a/":       "h:a",
 		"http://h:./":       "h:.",
 		"http://u:p@h:8080": "h",
+		// url.Parse rejects these, but validateURL accepts them: the
+		// credentials must still be dropped.
+		"https://user:secret@example.com/50%off": "example.com",
+		"https://example.com/50%off":             "example.com",
 	}
 	for input, want := range cases {
 		if got := DomainOf(input); got != want {
