@@ -14,6 +14,7 @@
   --serif: "Iowan Old Style", "Charter", "Georgia", serif;
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   /* One spacing scale for the whole page. */
+  --stack-gap: var(--s3);
   --topbar-h: 69px; /* the phone topbar: 44px button, 12px above and below, 1px border */
   --s1: .25rem; --s2: .5rem; --s3: .75rem; --s4: 1rem; --s5: 1.5rem; --s6: 2rem;
 }
@@ -281,9 +282,10 @@ main[aria-busy="true"] { cursor: progress; }
   input, textarea { font-size: 16px; }
 
   /* Search: the field and its button take a full row; Random and Select sit under it. The syntax hint is dropped to save the height. */
-  /* One rhythm: s2 inside a group, s4 between groups. */
-  .bar { margin-bottom: var(--s4); }
-  details.add, .bulk { margin-bottom: var(--s4); }
+  /* One gap between every block: the topbar, the search rows, Add bookmark and the bulk bar. */
+  main { padding-top: var(--stack-gap); }
+  .bar { row-gap: var(--stack-gap); margin-bottom: var(--stack-gap); }
+  details.add, .bulk { margin-bottom: var(--stack-gap); }
   .bar-search { flex-basis: 100%; }
   .bar input[type="search"], .bar-search button { min-height: 44px; }
   .search-hint { display: none; }
