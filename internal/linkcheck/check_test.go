@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -205,29 +204,10 @@ func TestFiveRedirectsAreFollowedAndSixAreNot(t *testing.T) {
 	assertVerdict(t, inspect(t, loopbackChecker(0), server.URL+"/6"), StatusBroken, "Too many redirects")
 }
 
-func TestARedirectDetailIsWrittenLikeTheWHATWGParserDoes(t *testing.T) {
-	for location, want := range map[string]string{
-		"https://Example.COM":          "https://example.com/",
-		"https://example.com:443/a?b":  "https://example.com/a?b",
-		"http://example.com:80":        "http://example.com/",
-		"https://example.com:8443/x#f": "https://example.com:8443/x#f",
-		"https://bücher.example/":      "https://xn--bcher-kva.example/",
-		"https://[::1]:443/":           "https://[::1]/",
-	} {
-		address, err := url.Parse(location)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := serialize(address); got != want {
-			t.Errorf("%s: got %s, want %s", location, got, want)
-		}
-	}
-}
-
-func TestARedirectedDetailHasTheNormalizedFinalAddress(t *testing.T) {
+func TestARedirectedDetailIsTheFinalAddressAsGoWritesIt(t *testing.T) {
 	requested := mustParseURL(t, "https://a.test/")
 	got := verdictFor(requested, answer{status: 200, finalURL: mustParseURL(t, "https://B.test:443")})
-	assertEqual(t, got, Verdict{StatusRedirected, "https://b.test/"})
+	assertEqual(t, got, Verdict{StatusRedirected, "https://B.test:443"})
 }
 
 func TestARetryAfterBeyondThirtyTwoBitsIsKept(t *testing.T) {

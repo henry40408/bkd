@@ -155,7 +155,7 @@ func fromAnswer(requested *url.URL, reply answer) Inspection {
 	inspection := Inspection{Verdict: verdictFor(requested, reply), Answered: true}
 	if reply.asksToWait() {
 		// The site that answered, which after a redirect is not the one that was asked.
-		inspection.Backoff = &Backoff{Host: HostOf(serialize(reply.finalURL)), RetryAfter: reply.retryAfter}
+		inspection.Backoff = &Backoff{Host: HostOf(reply.finalURL.String()), RetryAfter: reply.retryAfter}
 	}
 	return inspection
 }
@@ -168,7 +168,7 @@ func verdictFor(requested *url.URL, reply answer) Verdict {
 		if normalizeForCompare(requested) == normalizeForCompare(reply.finalURL) {
 			return Verdict{StatusOK, ""}
 		}
-		return Verdict{StatusRedirected, serialize(reply.finalURL)}
+		return Verdict{StatusRedirected, reply.finalURL.String()}
 	}
 	detail := "HTTP " + strconv.Itoa(reply.status)
 	if isInconclusive(reply.status) {
@@ -215,19 +215,6 @@ func normalizeForCompare(address *url.URL) string {
 		normalized += "?" + address.RawQuery
 	}
 	return normalized
-}
-
-// serialize writes an address the way the WHATWG URL parser does, so the detail
-// stored for a redirect matches what the Rust server stored: host in lower case
-// and punycode, no default port, an empty path as "/".
-func serialize(address *url.URL) string {
-	canonical := *address
-	canonical.Scheme = strings.ToLower(address.Scheme)
-	canonical.Host = canonicalAuthority(address)
-	if canonical.Path == "" && canonical.RawPath == "" {
-		canonical.Path = "/"
-	}
-	return canonical.String()
 }
 
 // canonicalHost is the lower-case punycode form of a host name, the spelling
