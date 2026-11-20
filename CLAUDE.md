@@ -66,6 +66,7 @@ Thin binary (`cmd/bkd`) over internal packages, so tests build the handler direc
 | `internal/bookmarks` | `Store` (create, update, list, tags, counts), validation, bulk actions |
 | `internal/search` | The search syntax: `Parse`, `Filter`, SQL and highlights |
 | `internal/netscape`, `internal/importer` | Netscape bookmark HTML parser and renderer; import into the store |
+| `internal/truncate` | `Runes`: cut a text to a number of characters, shared by bookmarks, search, importer and server |
 | `internal/linkcheck` | The link checker and its SSRF guard (public addresses only) |
 | `internal/backgroundcheck` | The periodic background link check |
 | `internal/server` | `App`, `Config`, routes, middleware, JSON API (`api_*.go`), pages (`pages_*.go`), shared `service_*.go`, SSE |

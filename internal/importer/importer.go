@@ -5,10 +5,10 @@ package importer
 import (
 	"context"
 	"fmt"
-	"unicode/utf8"
 
 	"github.com/henry40408/bkd/internal/bookmarks"
 	"github.com/henry40408/bkd/internal/netscape"
+	"github.com/henry40408/bkd/internal/truncate"
 )
 
 const (
@@ -70,16 +70,9 @@ func toEntry(link netscape.Link, now int64) (bookmarks.ImportEntry, *InvalidLink
 	input := bookmarks.Fitted(link.URL, link.Title, link.Note, link.Tags)
 	bookmark, err := input.Validate()
 	if err != nil {
-		return bookmarks.ImportEntry{}, &InvalidLink{URL: firstRunes(link.URL, maxExampleChars), Reason: err.Error()}
+		return bookmarks.ImportEntry{}, &InvalidLink{URL: truncate.Runes(link.URL, maxExampleChars), Reason: err.Error()}
 	}
 	return bookmarks.ImportEntry{Bookmark: bookmark, CreatedAt: createdAt(link.Added, now)}, nil
-}
-
-func firstRunes(text string, limit int) string {
-	if utf8.RuneCountInString(text) <= limit {
-		return text
-	}
-	return string([]rune(text)[:limit])
 }
 
 // createdAt: a missing, zero, negative or future date means the exporter did

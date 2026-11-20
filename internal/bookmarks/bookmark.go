@@ -8,6 +8,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/henry40408/bkd/internal/truncate"
 )
 
 const (
@@ -116,8 +118,8 @@ func Fitted(url, title, note string, tags []string) Input {
 	}
 	return Input{
 		URL:   url,
-		Title: truncateRunes(title, maxTitleChars),
-		Note:  truncateRunes(note, maxNoteChars),
+		Title: truncate.Runes(title, maxTitleChars),
+		Note:  truncate.Runes(note, maxNoteChars),
 		Tags:  kept,
 	}
 }
@@ -199,13 +201,6 @@ func NormalizeTags(raw []string) ([]string, error) {
 		return nil, ValidationError("too many tags")
 	}
 	return tags, nil
-}
-
-func truncateRunes(text string, limit int) string {
-	if utf8.RuneCountInString(text) <= limit {
-		return text
-	}
-	return string([]rune(text)[:limit])
 }
 
 // asciiLower must not touch non-ASCII letters, unlike strings.ToLower.
