@@ -9,7 +9,7 @@ import (
 	"github.com/henry40408/bkd/e2e/internal/harness"
 )
 
-const importForm = ".import-form"
+const importForm = "form[action='/transfer/import']"
 
 // browserFile is what Firefox writes: a folder, two web links (one with a note
 // and a tag) and a smart bookmark that is not a web link.

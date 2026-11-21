@@ -181,30 +181,29 @@ form.stack { display: grid; gap: var(--sp-3); }
 .bulk > .inline-form { background: none; border: 0; border-top: 1px solid var(--soft); border-radius: 0; padding: var(--sp-3) 0 0; margin: 0; }
 .bulk .inline-form .summary { color: inherit; }
 
-/* ---- Other screens ---- */
-form.stack.flush { max-width: var(--form-w); }
-label.inline.strong { font-weight: var(--strong); }
-form.password-form, form.import-form, form.new-user { max-width: var(--form-w); background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius); padding: var(--sp-4); }
-form.new-user { margin-top: var(--sp-5); }
-.import-result { background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius); margin-top: var(--sp-3); padding: var(--sp-3) var(--sp-4); overflow-wrap: anywhere; }
+/* ---- Other screens: forms on a sheet, sign-in ---- */
+.sheet { max-width: var(--form-w); display: grid; gap: var(--sp-5); }
+.sheet section { display: grid; gap: var(--sp-3); padding-top: var(--sp-4); border-top: 1px solid var(--rule); }
+.sheet section:first-of-type { border-top: 2px solid var(--ink); }
+.sheet h2 { margin: 0; }
+.sheet p { max-width: 65ch; }
+.people li, .sessions li { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); align-items: center; padding: var(--sp-2) 0; border-bottom: 1px solid var(--rule); }
+.people form, .sessions form { margin: 0; }
+.people .who, .sessions .who { margin-right: auto; overflow-wrap: anywhere; font-weight: var(--strong); }
+.who .hint { display: block; font-weight: var(--regular); }
+.badge { font-size: var(--fs-1); font-weight: var(--strong); padding: 0 var(--sp-2); border: 1px solid currentColor; border-radius: var(--radius-pill); color: var(--soft); }
+.badge.admin { color: var(--link); }
+.drop { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); border: 2px dashed var(--rule); border-radius: var(--radius); padding: var(--sp-3); background: var(--sheet); }
+.drop .field { flex: 1 1 var(--sp-7); min-width: 0; }
+.drop .hint, .drop .err { flex-basis: 100%; margin: 0; }
+.drop.over { border-color: var(--ribbon); }
+.import-result { background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius); padding: var(--sp-3) var(--sp-4); overflow-wrap: anywhere; }
 .import-result p { margin-bottom: var(--sp-2); }
 .import-result ul { margin-bottom: var(--sp-2); padding-left: var(--sp-5); list-style: disc; }
-.user-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-4); padding: var(--sp-2) 0; border-bottom: 1px solid var(--rule); max-width: var(--form-w); }
-.user-list, .session-list { border-top: 2px solid var(--ink); max-width: var(--form-w); }
-.user-row .name { font-weight: var(--strong); margin-right: auto; min-width: 0; overflow-wrap: anywhere; }
-.user-row .meta { color: var(--soft); font-size: var(--fs-1); }
-.user-row.off .name { text-decoration: line-through; color: var(--soft); }
-.here { margin-left: var(--sp-2); color: var(--ok); font-weight: var(--regular); font-size: var(--fs-1); }
-.user-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); }
-.user-actions .btn, .user-row .btn { min-height: 0; }
-.user-actions form, .user-row form { margin: 0; display: inline; }
-.user-list + .summary { margin-top: var(--sp-2); }
-
-main.login { max-width: none; padding: 0; display: flex; overflow-y: auto; position: fixed; inset: 0; background: var(--paper); z-index: 5; }
-.login .card { margin: auto; display: grid; gap: var(--sp-4); width: min(100%, var(--auth-w)); padding: var(--sp-5); }
-.login h1 { font: var(--strong) var(--fs-5)/var(--lh-tight) var(--serif); margin: 0; }
-.login h1::before { content: ""; display: inline-block; width: .44em; height: 1.1em; margin-right: .3em; background: var(--ribbon); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%); }
-.login .ok-hint { color: var(--soft); font-size: var(--fs-1); }
+main.auth { max-width: none; min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: var(--sp-5); }
+.auth > * { width: min(100%, var(--auth-w)); display: grid; gap: var(--sp-4); }
+.auth h1 { margin: 0; }
+.auth .brand { font-size: var(--fs-5); justify-self: start; }
 
 /* ---- Narrow screens: the rail becomes a drawer, the site column folds into the row ---- */
 @media (max-width: 860px) {

@@ -182,7 +182,8 @@ func TestIconsAllHaveAPathAndRender(t *testing.T) {
 		}
 	}
 	for _, name := range []iconName{iconOK, iconBroken, iconRedirected, iconUnknown, iconEdit, iconTrash, iconPlus,
-		iconShuffle, iconSelect, iconAll, iconTagAdd, iconTagRemove, iconLink, iconSearch, iconMenu} {
+		iconShuffle, iconSelect, iconAll, iconTagAdd, iconTagRemove, iconLink, iconSearch, iconMenu,
+		iconUpload, iconDownload, iconSignOut, iconSignIn, iconKey, iconUserAdd, iconBan} {
 		if _, ok := iconPaths[name]; !ok {
 			t.Errorf("icon %q is not drawn", name)
 		}
@@ -260,9 +261,10 @@ func TestAccountPageListsSessions(t *testing.T) {
 	}
 	page := AccountPage(view)
 	for _, want := range []string{
-		`<span class="name">Firefox &lt;1&gt;<span class="here">This browser</span></span>`,
-		`<span class="meta">10.0.0.1 · last used <time datetime="2020-01-01T00:00:00Z" title="2020-01-01 00:00 UTC">6 years ago</time></span>`,
-		`<form method="post" action="/account/sessions/def/revoke"><button class="btn quiet danger-text" type="submit" aria-label="Sign out Unknown browser">Sign out</button></form>`,
+		`<span class="who"><b>Firefox &lt;1&gt;</b><span class="hint">10.0.0.1 · last used <time datetime="2020-01-01T00:00:00Z" title="2020-01-01 00:00 UTC">6 years ago</time></span></span><span class="badge admin">This browser</span>`,
+		`<form method="post" action="/account/sessions/def/revoke"><button class="btn ico" type="submit" title="Sign out" aria-label="Sign out Unknown browser"><svg viewBox="0 0 16 16" aria-hidden="true">`,
+		`<span class="lbl">Sign out</span></button></form>`,
+		`At least 12 characters, without your username. Changing it signs you out everywhere else.`,
 		`action="/account/sessions/revoke-others"`,
 		`<input type="password" name="new" autocomplete="new-password" minlength="12" required>`,
 		`<input type="password" name="again" autocomplete="new-password" required>`,
@@ -299,10 +301,6 @@ func TestInactiveUserRowsHideTheirActionsForYourself(t *testing.T) {
 	view := UsersView{Shell: alice(SectionUsers), Now: goldenNow, NewIsAdmin: true,
 		Users: []UserRow{{ID: 7, Username: "me", IsAdmin: true, IsDisabled: true}}}
 	page := UsersPage(view)
-	if strings.Contains(page, "user-actions") {
-		t.Error("your own row must have no buttons")
-	}
-	if !strings.Contains(page, `<div class="user-row off">`) || !strings.Contains(page, `name="is_admin" checked>`) {
-		t.Error("a disabled row needs the off class and the new-user admin box must be ticked")
-	}
+	requireAbsent(t, page, "/users/7/")
+	requireContains(t, page, `<span class="badge admin">Admin</span><span class="badge">Disabled</span>`, `name="is_admin" checked>`)
 }

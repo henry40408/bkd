@@ -22,7 +22,7 @@ Feature: Importing and exporting bookmarks
   Scenario: The browser asks for a file before importing
     When I open Import and export
     And I import without choosing a file
-    Then the browser refuses the field ".import-form input[type=file]"
+    Then the browser refuses the field "form[action='/transfer/import'] input[type=file]"
     And the address is "/transfer"
 
   Scenario: The server explains what to do when no file arrives

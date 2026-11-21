@@ -54,7 +54,7 @@ func document(title string, body node) string {
 
 // bare is a page with no sidebar: sign-in, set-up and errors.
 func bare(title string, content node) string {
-	return document(title, el("main", []attr{classes("login"), a("id", "main")}, content))
+	return document(title, el("main", []attr{classes("auth"), a("id", "main")}, content))
 }
 
 // framed is a signed-in page: the sidebar around content.
@@ -138,6 +138,22 @@ func sidebar(shell Shell) node {
 // submitButton is the main button of a form.
 func submitButton(label string) node {
 	return el("button", []attr{classes("btn", "primary"), a("type", "submit")}, text(label))
+}
+
+// sheet is the narrow column of a form page; its sections are set apart by rules.
+func sheet(sections ...node) node {
+	return el("div", []attr{classes("sheet")}, sections...)
+}
+
+// sheetSection is one section of a sheet, under its heading.
+func sheetSection(heading string, children ...node) node {
+	return el("section", nil, append([]node{el("h2", nil, text(heading))}, children...)...)
+}
+
+// iconSubmitButton is a submit button that keeps its text on every screen
+// size, with an icon in front.
+func iconSubmitButton(name iconName, label string) node {
+	return el("button", []attr{classes("btn", "primary"), a("type", "submit")}, iconLabel(name, label))
 }
 
 // formButtons is the row of buttons under a form.

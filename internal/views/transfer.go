@@ -40,30 +40,44 @@ func importResult(report ImportReport) node {
 	)
 }
 
+func importForm(view TransferView) node {
+	return el("form", []attr{classes("drop"), a("method", "post"), a("action", "/transfer/import"),
+		a("enctype", "multipart/form-data")},
+		field("Bookmarks file ", void("input", a("type", "file"), a("name", "file"),
+			a("accept", ".html,.htm,text/html"), flag("required"))),
+		el("button", []attr{classes("btn", "primary", "ico"), a("type", "submit"), a("title", "Import bookmarks")},
+			iconLabel(iconUpload, "Import bookmarks")),
+		// Dropping on the box needs the script, which shows this line.
+		el("p", []attr{classes("hint"), flag("data-script-only"), flag("hidden")}, text("Or drop the file in this box.")),
+		errorLine(view.Error),
+	)
+}
+
+// downloadLink keeps its text on a narrow screen: the two formats share one icon.
+func downloadLink(format, label string) node {
+	return el("a", []attr{classes("btn"), a("href", "/api/export?format="+format), flag("download")},
+		iconLabel(iconDownload, label))
+}
+
 // TransferPage renders the import and export page.
 func TransferPage(view TransferView) string {
 	result := maybe(view.Report != nil, func() node { return importResult(*view.Report) })
 	content := group(
 		el("h1", nil, text("Import and export")),
-		el("h2", nil, text("Import")),
-		el("p", []attr{classes("summary")},
-			text("Choose a bookmarks file exported from Chrome, Firefox, Safari, Pocket or Raindrop "+
-				"(an .html file). Folders become tags. A link you already saved is skipped.")),
-		el("form", []attr{classes("stack", "import-form"), a("method", "post"), a("action", "/transfer/import"),
-			a("enctype", "multipart/form-data")},
-			labelled("Bookmarks file ", void("input", a("type", "file"), a("name", "file"),
-				a("accept", ".html,.htm,text/html"), flag("required"))),
-			errorLine(view.Error),
-			formButtons(submitButton("Import bookmarks")),
-		),
-		result,
-		el("h2", nil, text("Export")),
-		el("p", []attr{classes("summary")},
-			text("Download all of your bookmarks. Use HTML to move them to a browser or another service, "+
-				"and JSON as a plain backup.")),
-		formButtons(
-			el("a", []attr{classes("btn"), a("href", "/api/export?format=html"), flag("download")}, text("Download HTML")),
-			el("a", []attr{classes("btn"), a("href", "/api/export?format=json"), flag("download")}, text("Download JSON")),
+		sheet(
+			sheetSection("Import",
+				el("p", nil,
+					text("Choose a bookmarks file exported from Chrome, Firefox, Safari, Pocket or Raindrop "+
+						"(an .html file). Folders become tags. A link you already saved is skipped.")),
+				importForm(view),
+				result,
+			),
+			sheetSection("Export",
+				el("p", nil,
+					text("Download all of your bookmarks. Use HTML to move them to a browser or another service, "+
+						"and JSON as a plain backup.")),
+				formButtons(downloadLink("html", "Download HTML"), downloadLink("json", "Download JSON")),
+			),
 		),
 	)
 	return framed("Import and export · bkd", view.Shell, content)

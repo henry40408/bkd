@@ -20,6 +20,13 @@ const (
 	iconLink       iconName = "link"
 	iconSearch     iconName = "search"
 	iconMenu       iconName = "menu"
+	iconUpload     iconName = "upload"
+	iconDownload   iconName = "download"
+	iconSignOut    iconName = "signout"
+	iconSignIn     iconName = "signin"
+	iconKey        iconName = "key"
+	iconUserAdd    iconName = "userAdd"
+	iconBan        iconName = "ban"
 )
 
 // iconPaths is the stroke path of each icon, drawn on a 16x16 grid.
@@ -39,6 +46,13 @@ var iconPaths = map[iconName]string{
 	iconLink:       "M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2-2a2.6 2.6 0 0 0-3.7-3.7l-.8.8M9.2 6.8a2.6 2.6 0 0 0-3.7 0l-2 2a2.6 2.6 0 0 0 3.7 3.7l.8-.8",
 	iconSearch:     "M7 2.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9zM10.4 10.4l3.1 3.1",
 	iconMenu:       "M2.5 4h11M2.5 8h11M2.5 12h11",
+	iconUpload:     "M8 10.5V3M5 5.5l3-3 3 3M3 10.5v2.5h10v-2.5",
+	iconDownload:   "M8 2.5V10M5 7.5l3 3 3-3M3 10.5v2.5h10v-2.5",
+	iconSignOut:    "M6.5 2.5H3v11h3.5M10 5l3 3-3 3M13 8H6.5",
+	iconSignIn:     "M9.5 2.5H13v11H9.5M6.5 5l3 3-3 3M9.5 8h-7",
+	iconKey:        "M5.5 13a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM7.3 8.7L13 3M11 5l1.5 1.5M9.3 6.7l1.2 1.2",
+	iconUserAdd:    "M6.5 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM2 13.5C2 11.3 4 10 6.5 10s4.5 1.3 4.5 3.5M12.5 4.5v4M10.5 6.5h4",
+	iconBan:        "M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM4.1 4.1l7.8 7.8",
 }
 
 func icon(name iconName) node {

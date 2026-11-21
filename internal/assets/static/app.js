@@ -27,6 +27,11 @@
     }
   }
 
+  // The server hides what only works with this script.
+  function showScriptOnly(root) {
+    for (const part of root.querySelectorAll("[data-script-only]")) part.hidden = false;
+  }
+
   function updateSelectionCount() {
     const label = document.getElementById("bulk-count");
     if (!label) return;
@@ -56,6 +61,7 @@
       document.body.replaceChildren(...nodes);
     }
     localizeTimes(document);
+    showScriptOnly(document);
     updateSelectionCount();
     focusNewPage();
   }
@@ -597,6 +603,25 @@
     );
   });
 
+  // Dropping a file on the import box fills its file field, as choosing it would.
+  const dropBoxOf = (event) => (event.target instanceof Element ? event.target.closest(".drop") : null);
+  document.addEventListener("dragover", (event) => {
+    const box = dropBoxOf(event);
+    if (!box) return;
+    event.preventDefault();
+    box.classList.add("over");
+  });
+  document.addEventListener("dragleave", (event) => dropBoxOf(event)?.classList.remove("over"));
+  document.addEventListener("drop", (event) => {
+    const box = dropBoxOf(event);
+    if (!box) return;
+    event.preventDefault();
+    box.classList.remove("over");
+    const input = box.querySelector("input[type=file]");
+    if (input && event.dataTransfer.files.length > 0) input.files = event.dataTransfer.files;
+  });
+
   localizeTimes(document);
+  showScriptOnly(document);
   updateSelectionCount();
 })();

@@ -27,43 +27,43 @@ type UsersView struct {
 	Error      string
 }
 
+// quietIconAttrs is the look of a link-like control that shows only its icon on a narrow screen.
+func quietIconAttrs(label, ariaLabel string, extra ...string) []attr {
+	return []attr{classes(append([]string{"btn", "quiet", "ico"}, extra...)...), a("title", label), a("aria-label", ariaLabel)}
+}
+
 func userActions(user UserRow) node {
-	role, state := "Promote", "Disable"
+	role, state, stateIcon := "Promote", "Disable", iconBan
 	if user.IsAdmin {
 		role = "Demote"
 	}
 	if user.IsDisabled {
-		state = "Enable"
+		state, stateIcon = "Enable", iconOK
 	}
 	id := strconv.FormatInt(user.ID, 10)
-	return el("div", []attr{classes("user-actions")},
+	return group(
 		el("form", []attr{a("method", "post"), a("action", "/users/"+id+"/role")},
 			hidden("is_admin", strconv.FormatBool(!user.IsAdmin)),
 			el("button", []attr{classes("btn", "quiet"), a("type", "submit"), a("aria-label", role+" "+user.Username)}, text(role))),
 		el("form", []attr{a("method", "post"), a("action", "/users/"+id+"/disabled")},
 			hidden("is_disabled", strconv.FormatBool(!user.IsDisabled)),
-			el("button", []attr{classes("btn", "quiet"), a("type", "submit"), a("aria-label", state+" "+user.Username)}, text(state))),
-		el("a", []attr{classes("btn", "quiet"), a("href", "/users/"+id+"/password"),
-			a("aria-label", "Reset password of "+user.Username)}, text("Reset password")),
-		el("a", []attr{classes("btn", "quiet", "danger-text"), a("href", "/users/"+id+"/delete"),
-			a("aria-label", "Delete "+user.Username)}, text("Delete")),
+			el("button", append(quietIconAttrs(state, state+" "+user.Username), a("type", "submit")),
+				iconLabel(stateIcon, state))),
+		el("a", append(quietIconAttrs("Reset password", "Reset password of "+user.Username),
+			a("href", "/users/"+id+"/password")), iconLabel(iconKey, "Reset password")),
+		el("a", append(quietIconAttrs("Delete", "Delete "+user.Username, "danger-text"),
+			a("href", "/users/"+id+"/delete")), iconLabel(iconTrash, "Delete")),
 	)
 }
 
 func userRow(user UserRow, now int64) node {
-	rowClass := []string{"user-row"}
-	if user.IsDisabled {
-		rowClass = append(rowClass, "off")
-	}
-	meta := group(
-		maybe(user.IsAdmin, func() node { return text("Admin · ") }),
-		maybe(user.IsDisabled, func() node { return text("Disabled · ") }),
-		text("Created "),
-		timeTag(NewSavedTime(now, user.CreatedAt)),
-	)
-	return el("div", []attr{classes(rowClass...)},
-		el("span", []attr{classes("name")}, text(user.Username)),
-		el("span", []attr{classes("meta")}, meta),
+	return el("li", nil,
+		el("span", []attr{classes("who")},
+			text(user.Username),
+			el("span", []attr{classes("hint")}, text("Created "), timeTag(NewSavedTime(now, user.CreatedAt))),
+		),
+		maybe(user.IsAdmin, func() node { return el("span", []attr{classes("badge", "admin")}, text("Admin")) }),
+		maybe(user.IsDisabled, func() node { return el("span", []attr{classes("badge")}, text("Disabled")) }),
 		maybe(user.CanChange, func() node { return userActions(user) }),
 	)
 }
@@ -76,16 +76,22 @@ func UsersPage(view UsersView) string {
 	}
 	content := group(
 		el("h1", nil, text("Users")),
-		el("div", []attr{classes("user-list")}, rows...),
-		el("p", []attr{classes("summary")}, text("Deleting a user also deletes all of their bookmarks.")),
-		el("form", []attr{classes("stack", "new-user"), a("method", "post"), a("action", "/users")},
-			labelled("Username ", void("input", a("type", "text"), a("name", "username"), a("value", view.NewName), a("autocomplete", "off"))),
-			labelled("Temporary password ", void("input", a("type", "password"), a("name", "password"), a("autocomplete", "new-password"))),
-			el("label", []attr{classes("inline")},
-				void("input", a("type", "checkbox"), a("name", "is_admin"), when(view.NewIsAdmin, flag("checked"))),
-				text(" Admin (can manage users)")),
-			errorLine(view.Error),
-			formButtons(submitButton("Create user")),
+		sheet(
+			el("section", nil,
+				el("ul", []attr{classes("people")}, rows...),
+				el("p", []attr{classes("hint")}, text("Deleting a user also deletes all of their bookmarks.")),
+			),
+			sheetSection("Create user",
+				el("form", []attr{classes("stack"), a("method", "post"), a("action", "/users")},
+					labelled("Username ", void("input", a("type", "text"), a("name", "username"), a("value", view.NewName), a("autocomplete", "off"))),
+					labelled("Temporary password ", void("input", a("type", "password"), a("name", "password"), a("autocomplete", "new-password"))),
+					el("label", []attr{classes("inline")},
+						void("input", a("type", "checkbox"), a("name", "is_admin"), when(view.NewIsAdmin, flag("checked"))),
+						text(" Admin (can manage users)")),
+					errorLine(view.Error),
+					formButtons(iconSubmitButton(iconUserAdd, "Create user")),
+				),
+			),
 		),
 	)
 	return framed("Users · bkd", view.Shell, content)
@@ -103,16 +109,18 @@ type PasswordView struct {
 func PasswordPage(view PasswordView) string {
 	content := group(
 		el("h1", nil, text("Reset password for "+view.Username)),
-		el("p", []attr{classes("summary")}, text("Their other browsers are signed out when you save.")),
-		el("form", []attr{classes("stack", "password-form"), a("method", "post"), a("action", fmt.Sprintf("/users/%d/password", view.ID))},
-			labelled("New password ", void("input", a("type", "password"), a("name", "password"),
-				a("autocomplete", "new-password"), a("minlength", "12"), flag("required"), flag("autofocus"))),
-			errorLine(view.Error),
-			formButtons(
-				submitButton("Reset password"),
-				el("a", []attr{classes("btn", "quiet-link"), a("href", "/users")}, text("Cancel")),
+		sheet(el("section", nil,
+			el("p", nil, text("Their other browsers are signed out when you save.")),
+			el("form", []attr{classes("stack"), a("method", "post"), a("action", fmt.Sprintf("/users/%d/password", view.ID))},
+				labelled("New password ", void("input", a("type", "password"), a("name", "password"),
+					a("autocomplete", "new-password"), a("minlength", "12"), flag("required"), flag("autofocus"))),
+				errorLine(view.Error),
+				formButtons(
+					iconSubmitButton(iconKey, "Reset password"),
+					el("a", []attr{classes("btn", "quiet-link"), a("href", "/users")}, text("Cancel")),
+				),
 			),
-		),
+		)),
 	)
 	return framed("Reset password · bkd", view.Shell, content)
 }

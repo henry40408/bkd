@@ -14,7 +14,7 @@ const (
 	loginForm     = "form[action='/login']"
 	setupForm     = "form[action='/setup']"
 	confirmForm   = "form[action='/confirm']"
-	passwordForm  = ".password-form"
+	passwordForm  = "form[action$='/password']"
 	searchBoxPath = "[role=search] input[name=q]"
 )
 
@@ -50,7 +50,7 @@ func registerSessionSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^I change my password from `+quoted+` to `+quoted+` but repeat `+quoted+`$`, withThreeStrings(w.submitPasswordForm))
 	sc.Step(`^I am also signed in on another browser$`, w.alsoSignedInElsewhere)
 	sc.Step(`^the list of browsers has (\d+) rows$`, w.browserListHasRows)
-	sc.Step(`^I sign out the other browser$`, func() error { return w.click(".session-list button") })
+	sc.Step(`^I sign out the other browser$`, func() error { return w.click(".sessions button") })
 	sc.Step(`^I sign out all other browsers$`, func() error {
 		return w.click("form[action='/account/sessions/revoke-others'] button")
 	})
@@ -322,7 +322,7 @@ func (w *world) alsoSignedInElsewhere() error {
 
 func (w *world) browserListHasRows(expected int) error {
 	return harness.Eventually(fmt.Sprintf("the list has %d rows", expected), func() (bool, error) {
-		rows, err := w.browser.All(harness.CSS(".session-list .user-row"))
+		rows, err := w.browser.All(harness.CSS(".sessions li"))
 		return len(rows) == expected, err
 	})
 }
