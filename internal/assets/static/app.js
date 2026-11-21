@@ -376,8 +376,7 @@
     title.className = "inline-title";
     title.textContent = doc.querySelector("main h1").textContent;
     node.append(title);
-    const summary = doc.querySelector("main .summary");
-    if (summary) node.append(document.importNode(summary, true));
+    for (const summary of doc.querySelectorAll("main .summary")) node.append(document.importNode(summary, true));
     node.append(document.importNode(form, true));
     showScriptOnly(node);
     return node;

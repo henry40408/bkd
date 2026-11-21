@@ -500,6 +500,7 @@ type ConfirmDeleteView struct {
 	Shell      Shell
 	Heading    string
 	Detail     string
+	Warning    string
 	Action     string
 	Hidden     []HiddenField
 	CancelHref string
@@ -520,6 +521,7 @@ func ConfirmDeletePage(view ConfirmDeleteView) string {
 	content := group(
 		el("h1", nil, text(view.Heading)),
 		el("p", []attr{classes("summary")}, text(view.Detail)),
+		maybe(view.Warning != "", func() node { return el("p", []attr{classes("summary")}, text(view.Warning)) }),
 		el("form", []attr{classes("stack"), a("method", "post"), a("action", view.Action)}, form...),
 	)
 	return framed("Delete · bkd", view.Shell, content)

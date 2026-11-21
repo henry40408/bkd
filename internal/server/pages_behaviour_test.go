@@ -62,7 +62,7 @@ func TestBookmarkPages(t *testing.T) {
 		id := app.newestBookmarkID(token)
 		r := app.send(get(fmt.Sprintf("/bookmarks/%d/delete?back=%%2F%%3Fpage%%3D3", id)).as(token))
 		assertStatus(t, r, http.StatusOK)
-		mustContain(t, r, "Delete this bookmark?", `action="/bookmarks/delete"`, fmt.Sprintf(`name="id" value="%d"`, id), "doomed &lt;i&gt;")
+		mustContain(t, r, "Delete this bookmark?", "This cannot be undone.", `action="/bookmarks/delete"`, fmt.Sprintf(`name="id" value="%d"`, id), "doomed &lt;i&gt;")
 		mustLack(t, r, "doomed <i>")
 	})
 	t.Run("a confirmed delete removes the bookmark", func(t *testing.T) {

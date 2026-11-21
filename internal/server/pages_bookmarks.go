@@ -286,6 +286,7 @@ func (a *App) pageDeleteForm(w http.ResponseWriter, r *http.Request, user auth.S
 	back := pathOrHome(r.URL.Query().Get("back"))
 	writeHTML(w, http.StatusOK, views.ConfirmDeletePage(views.ConfirmDeleteView{
 		Shell: shell, Heading: "Delete this bookmark?", Detail: bookmark.Title,
+		Warning:    "This cannot be undone.",
 		Action:     "/bookmarks/delete",
 		Hidden:     []views.HiddenField{{Name: "id", Value: strconv.FormatInt(id, 10)}, {Name: "back", Value: back}},
 		CancelHref: back,
