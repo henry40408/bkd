@@ -30,7 +30,23 @@
   // The server hides what only works with this script.
   function showScriptOnly(root) {
     for (const part of root.querySelectorAll("[data-script-only]")) part.hidden = false;
+    syncSubmitStates(root);
   }
+
+  // A form marked `data-submit-when-valid` keeps its submit button off until the browser would accept it.
+  function syncSubmitState(form) {
+    const button = form.querySelector('button[type="submit"]');
+    if (button) button.disabled = !form.checkValidity();
+  }
+
+  function syncSubmitStates(root) {
+    for (const form of root.querySelectorAll("form[data-submit-when-valid]")) syncSubmitState(form);
+  }
+
+  document.addEventListener("input", (event) => {
+    const form = event.target instanceof Element && event.target.closest("form[data-submit-when-valid]");
+    if (form) syncSubmitState(form);
+  });
 
   function updateSelectionCount() {
     const label = document.getElementById("bulk-count");
@@ -475,7 +491,10 @@
     }
     if (submitter) submitter.disabled = busy;
     // Ending the busy state must not re-enable an action that has nothing ticked.
-    if (!busy) updateSelectionCount();
+    if (!busy) {
+      updateSelectionCount();
+      if (form.matches("[data-submit-when-valid]")) syncSubmitState(form);
+    }
   }
 
   const tickedIds = (data) =>
@@ -584,6 +603,7 @@
     const target = button.dataset.movedTo;
     if (!field || !isWebAddress(target)) return;
     field.value = target;
+    syncSubmitState(form);
     button.hidden = true;
     const hint = form.querySelector(".hint.moved");
     if (hint) hint.textContent = MOVED_FILLED;

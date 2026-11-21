@@ -26,6 +26,13 @@ Feature: Changing my own password
     And the address is "/account"
     And "root" can sign in with the temporary password
 
+  # Password managers may fill these fields without firing the events a script
+  # listens for, so the button must never be disabled.
+  Scenario: The password button is never disabled
+    When I open Account
+    And I fill in the password form from "correct-horse-battery" to "short"
+    Then the password form can be saved
+
   Scenario: The server also refuses a new password that is too short
     When I open Account
     And the browser's own form checks are switched off

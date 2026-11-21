@@ -75,7 +75,7 @@ form:has(label) > .btns { margin-top: var(--sp-2); }
 .brand { font: var(--strong) var(--fs-4)/1 var(--serif); text-decoration: none; display: inline-flex; align-items: baseline; gap: .3em; }
 /* The signature: a bookmark ribbon with its swallowtail cut. It stands on the baseline, and the
    letters b, k, d are .75em tall, so a shift of (height - .75em) / 2 centres it on the letters. */
-.brand::before { content: ""; width: .44em; height: 1.1em; translate: 0 .175em; background: var(--ribbon); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%); }
+.brand::before { content: ""; width: .68em; height: 1.1em; translate: 0 .175em; background: var(--ribbon); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%); }
 .side { padding: var(--sp-5) 0 var(--sp-4); border-right: 1px solid var(--rule); position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-5); }
 .side .brand, .side h2 { margin: 0 var(--sp-5); align-self: flex-start; }
 .side h2 { font: var(--strong) var(--fs-1)/var(--lh-tight) var(--sans); color: var(--soft); margin-bottom: var(--sp-1); }
@@ -182,6 +182,7 @@ form.stack { display: grid; gap: var(--sp-3); }
 .foot { padding: var(--sp-4) 0; color: var(--soft); font-size: var(--fs-1); display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; justify-content: space-between; }
 .foot .btn { color: var(--ink); font-size: var(--fs-2); }
 .btn[aria-disabled="true"] { opacity: .6; cursor: progress; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
 .pick .note { max-width: none; }
 
 /* ---- Bulk bar ---- */
@@ -195,7 +196,6 @@ form.stack { display: grid; gap: var(--sp-3); }
 .bulk .btn { color: var(--ink); border-color: transparent; }
 .bulk .btn.danger { color: var(--sheet); }
 .bulk .btn.quiet { color: var(--paper); }
-.bulk .btn:disabled { opacity: .5; cursor: not-allowed; }
 .bulk :focus-visible { outline-color: var(--marker); }
 .bulk .hint { color: inherit; }
 .bulk .err { color: var(--broken-bg); }

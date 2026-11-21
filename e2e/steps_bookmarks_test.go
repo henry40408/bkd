@@ -49,6 +49,12 @@ func registerBookmarkActionSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^I start editing `+quoted+`$`, withString(w.startEditing))
 	sc.Step(`^I edit `+quoted+` to the title `+quoted+`$`, withTwoStrings(w.editBookmark))
 	sc.Step(`^I save the edit with the URL `+quoted+`$`, withString(w.saveEditWithURL))
+	sc.Step(`^I press Enter in the field `+quoted+`$`, withString(w.pressEnter))
+	sc.Step(`^I fill the add form with the URL `+quoted+` and the title `+quoted+`$`, withTwoStrings(w.fillAddForm))
+	sc.Step(`^I type the URL `+quoted+` in the edit form$`, withString(func(url string) error {
+		return w.fill(editForm+" input[name=url]", url)
+	}))
+	sc.Step(`^the (add|edit) form (can|cannot) be saved$`, w.formCanBeSaved)
 	sc.Step(`^the edit form holds `+quoted+` as the title$`, withString(func(title string) error {
 		return w.titleFieldHolds(editForm, title)
 	}))
@@ -233,6 +239,28 @@ func (w *world) saveEditWithURL(url string) error {
 		return err
 	}
 	return w.click(editForm + " button[type=submit]")
+}
+
+// formCanBeSaved retries because the script updates the button after each keystroke.
+func (w *world) formCanBeSaved(which, can string) error {
+	selector := addForm
+	if which == "edit" {
+		selector = editForm
+	}
+	return w.saveButtonIs(selector, which, can)
+}
+
+// saveButtonIs waits for the form's submit button to be off ("cannot") or on ("can").
+func (w *world) saveButtonIs(formSelector, name, can string) error {
+	wantDisabled := can == "cannot"
+	return harness.Eventually(fmt.Sprintf("the %s form %s be saved", name, can), func() (bool, error) {
+		button, err := w.element(formSelector + " button[type=submit]")
+		if err != nil {
+			return false, err
+		}
+		_, disabled, err := button.Attr("disabled")
+		return disabled == wantDisabled, err
+	})
 }
 
 func (w *world) searchFor(query string) error {

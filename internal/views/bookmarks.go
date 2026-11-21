@@ -270,7 +270,7 @@ func searchBar(view BookmarksView) node {
 func addForm(add AddForm) node {
 	return el("details", []attr{classes("add"), a("id", "add"), when(add.Open, flag("open"))},
 		el("summary", []attr{classes("btn", "primary", "ico"), a("title", "Add bookmark")}, iconLabel(iconPlus, "Add bookmark")),
-		el("form", []attr{classes("stack", "panel"), a("method", "post"), a("action", "/bookmarks")},
+		el("form", []attr{classes("stack", "panel"), a("method", "post"), a("action", "/bookmarks"), a("data-submit-when-valid", "")},
 			field("URL ", void("input", a("type", "url"), a("name", "url"), a("value", add.URL), a("placeholder", "https://"), flag("required"))),
 			el("div", []attr{classes("grid2")},
 				field("Title ", void("input", a("type", "text"), a("name", "title"), a("value", add.Title), a("placeholder", "Leave blank to use the domain"))),
@@ -470,7 +470,7 @@ func movedNote(target string) node {
 func EditPage(view EditView) string {
 	content := group(
 		el("h1", nil, text("Edit bookmark")),
-		el("form", []attr{classes("stack", "edit-form"), a("method", "post"), a("action", fmt.Sprintf("/bookmarks/%d/edit", view.ID))},
+		el("form", []attr{classes("stack", "edit-form"), a("method", "post"), a("action", fmt.Sprintf("/bookmarks/%d/edit", view.ID)), a("data-submit-when-valid", "")},
 			hidden("back", view.Back),
 			field("URL ", void("input", a("type", "url"), a("name", "url"), a("value", view.URL), a("placeholder", "https://"), flag("required"), flag("autofocus"))),
 			movedNote(view.MovedTo),

@@ -9,6 +9,10 @@ Feature: Setup and sign-in
     And the address is "/"
     And I can open Manage users
 
+  Scenario: The setup button is never disabled
+    When I open the site
+    Then the setup button stays enabled with empty fields
+
   Scenario: A wrong setup token is refused
     When I open the site
     And I try to create the first admin "root" with the token "AAAAA-AAAAA"
@@ -26,6 +30,11 @@ Feature: Setup and sign-in
     When I sign out
     Then I see the sign-in page
     And the address is "/login"
+
+  Scenario: The sign-in button is never disabled
+    Given the admin "root" exists
+    When I open the site
+    Then the sign-in button stays enabled with empty fields
 
   Scenario: A wrong password gets one plain refusal
     Given the admin "root" exists

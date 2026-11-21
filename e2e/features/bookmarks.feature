@@ -15,11 +15,21 @@ Feature: Bookmarks
     And the link "Example" points to "https://example.com"
     And the sidebar lists the tag "rust"
 
-  Scenario: A URL without a scheme is stopped by the browser
-    When I add the bookmark "example.com" titled "Example" tagged "rust"
+  Scenario: A URL without a scheme cannot be saved
+    When I open the site
+    And I fill the add form with the URL "example.com" and the title "Example"
     Then the browser refuses the field "#add input[name=url]"
-    And the address is "/"
+    And the add form cannot be saved
+    When I press Enter in the field "#add input[name=url]"
+    Then the address is "/"
     And the account has exactly 0 bookmarks
+
+  Scenario: The add form can be saved once the URL is valid
+    When I open the site
+    And I fill the add form with the URL "" and the title "Example"
+    Then the add form cannot be saved
+    When I fill the add form with the URL "https://example.com" and the title "Example"
+    Then the add form can be saved
 
   Scenario: The server refuses a URL it cannot save and keeps what was typed
     When I open the site
@@ -61,6 +71,16 @@ Feature: Bookmarks
     Then I see the error "must start with http"
     And the edit form holds "Zebra" as the title
     And the address is "/"
+
+  Scenario: The edit form can be saved only with a valid URL
+    Given I have the bookmark "https://a.test" titled "Zebra"
+    When I open the site
+    And I start editing "Zebra"
+    Then the edit form can be saved
+    When I type the URL "" in the edit form
+    Then the edit form cannot be saved
+    When I type the URL "https://b.test" in the edit form
+    Then the edit form can be saved
 
   Scenario: Escape closes the edit form
     Given I have the bookmark "https://a.test" titled "Zebra"

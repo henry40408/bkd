@@ -30,9 +30,14 @@ func registerLayoutSteps(sc *godog.ScenarioContext, w *world) {
 }
 
 // formChecksOff matters because the script is what turns a refusal into a
-// message instead of the browser's own bubble.
+// message instead of the browser's own bubble. It also lifts the script's own
+// gate, which keeps a submit button off until the browser would accept the form.
 func (w *world) formChecksOff() error {
-	_, err := harness.Exec[any](w.browser, "for (const form of document.forms) form.noValidate = true;")
+	_, err := harness.Exec[any](w.browser, `for (const form of document.forms) {
+		form.noValidate = true;
+		form.removeAttribute("data-submit-when-valid");
+		for (const button of form.querySelectorAll('button[type="submit"]')) button.disabled = false;
+	}`)
 	return err
 }
 
