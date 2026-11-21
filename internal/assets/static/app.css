@@ -203,8 +203,8 @@ form.stack { display: grid; gap: var(--sp-3); }
 .bulk .inline-form .summary { color: inherit; }
 
 /* ---- Other screens: forms on a sheet, sign-in ---- */
-.sheet { max-width: var(--form-w); display: grid; gap: var(--sp-5); }
-.sheet section { display: grid; gap: var(--sp-3); padding-top: var(--sp-4); border-top: 1px solid var(--rule); }
+.sheet { max-width: var(--form-w); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); } /* minmax: an auto column grows to the file input's own width */
+.sheet section { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); padding-top: var(--sp-4); border-top: 1px solid var(--rule); }
 .sheet section:first-of-type { border-top: 2px solid var(--ink); }
 .sheet h2 { margin: 0; }
 .sheet p { max-width: 65ch; }
