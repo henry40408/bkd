@@ -170,7 +170,7 @@ form.stack { display: grid; gap: var(--sp-3); }
 @media (hover: none) { .actions { opacity: 1; } }
 .selecting .actions { visibility: hidden; }
 .item > .inline-form { grid-column: 2 / -1; margin-bottom: 0; }
-.empty { padding: var(--sp-7) var(--sp-3); color: var(--soft); border-top: 2px solid var(--ink); border-bottom: 1px solid var(--rule); }
+.empty { padding: var(--sp-4) var(--sp-3); color: var(--soft); border-top: 2px solid var(--ink); border-bottom: 1px solid var(--rule); }
 .foot { padding: var(--sp-4) 0; color: var(--soft); font-size: var(--fs-1); display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; justify-content: space-between; }
 .foot .btn { color: var(--ink); font-size: var(--fs-2); }
 .btn[aria-disabled="true"] { opacity: .6; cursor: progress; }
