@@ -252,7 +252,7 @@ main.auth { max-width: none; min-height: 100vh; min-height: 100dvh; display: gri
   .site { grid-column: 2; display: flex; gap: var(--sp-3); justify-content: space-between; }
   .body { grid-column: 2; }
   .actions { grid-column: 2; opacity: 1; margin-top: var(--sp-2); gap: var(--sp-2); }
-  .grid2 { grid-template-columns: 1fr; }
+  .grid2 { grid-template-columns: minmax(0, 1fr); } /* 1fr alone grows to the file input's own width */
   .bar .q { flex-basis: 100%; }
   .me .btn { min-height: var(--control); }
   /* Icon-only buttons: the label stays in the page for screen readers, the title shows it on hover. */
