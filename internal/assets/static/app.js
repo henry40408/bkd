@@ -114,6 +114,7 @@
     ok: "M3 8.5l3.2 3.2L13 4.5",
     redirected: "M2.5 8h10.5M9 4l4 4-4 4",
     broken: "M4 4l8 8M12 4l-8 8",
+    unknown: "M5.6 6a2.4 2.4 0 1 1 3.6 2.1c-.8.5-1.2 1-1.2 1.9M8 12.6v.2",
   };
   const LINK_LABELS = {
     ok: "Link OK",
@@ -172,53 +173,43 @@
   }
 
   function linkGlyph(status) {
-    const glyph = document.createElement("span");
-    glyph.className = "glyph";
-    glyph.setAttribute("aria-hidden", "true");
-    if (!LINK_GLYPHS[status]) {
-      glyph.textContent = "?";
-      return glyph;
-    }
     const svg = document.createElementNS(SVG_NS, "svg");
     svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("aria-hidden", "true");
     const path = document.createElementNS(SVG_NS, "path");
     path.setAttribute("d", LINK_GLYPHS[status]);
     svg.append(path);
-    glyph.append(svg);
-    return glyph;
+    return svg;
   }
 
-  function linkNoteText(link, checkedAt) {
-    if (link.status === "ok") return `checked ${checkedAt}`;
-    if (link.status === "redirected") return `now at ${link.detail}`;
-    return link.detail;
+  // The words after the bold label; the server renders the same sentence.
+  function linkNoteText(link) {
+    if (link.status === "ok") return ", checked just now";
+    if (link.status === "redirected") return `, now at ${link.detail}, checked just now`;
+    if (!link.detail) return ", checked just now";
+    return `: ${link.detail}, checked just now`;
   }
 
   function linkNote(link) {
     const checkedAt = new Date(link.checked_at * 1000).toLocaleString();
-    const label = document.createElement("span");
-    label.className = "sr-only";
-    label.textContent = `${LINK_LABELS[link.status]}: `;
+    const label = document.createElement("b");
+    label.textContent = LINK_LABELS[link.status];
+    const words = document.createElement("span");
+    words.append(label, linkNoteText(link));
     const note = document.createElement("p");
     note.className = `link-note ${link.status}`;
     note.title = `Checked ${checkedAt}`;
-    note.append(linkGlyph(link.status), label, linkNoteText(link, checkedAt));
+    note.append(linkGlyph(link.status), words);
     return note;
   }
 
   function showLinkResult(id, link) {
     const row = document.querySelector(`li[data-id="${id}"]`);
     if (!row || !LINK_LABELS[link.status]) return;
-    for (const name of Array.from(row.classList)) {
-      if (name.startsWith("link-")) row.classList.remove(name);
-    }
-    row.classList.add(`link-${link.status}`);
     const note = linkNote(link);
     const old = row.querySelector(".link-note");
     if (old) return old.replaceWith(note);
-    const tags = row.querySelector(".tags");
-    if (tags) return tags.before(note);
-    row.querySelector("a.title").parentElement.append(note);
+    row.querySelector(".body").append(note);
   }
 
   function showCheckProgress(form, total, onStop) {
@@ -228,7 +219,7 @@
     const text = document.createElement("span");
     const stop = document.createElement("button");
     stop.type = "button";
-    stop.className = "quiet";
+    stop.className = "btn";
     stop.textContent = "Stop";
     stop.addEventListener("click", onStop);
     box.append(text, " ", stop);

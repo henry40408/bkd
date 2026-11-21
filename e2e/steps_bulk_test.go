@@ -10,13 +10,15 @@ import (
 )
 
 const (
-	bulkBar      = ".bulk"
-	bulkTagsPath = ".bulk-panel input[name=tags]"
+	bulkBar = ".bulk"
+	// The form of the search bar lays out as part of the bar, so the bar is the link scope.
+	searchTools  = ".bar"
+	bulkTagsPath = ".bulk input[name=tags]"
 )
 
 func registerBulkSteps(sc *godog.ScenarioContext, w *world) {
-	sc.Step(`^I enter select mode$`, func() error { return w.clickLink(searchBar, "Select") })
-	sc.Step(`^I leave select mode$`, func() error { return w.clickLink(searchBar, "Done") })
+	sc.Step(`^I enter select mode$`, func() error { return w.clickLink(searchTools, "Select") })
+	sc.Step(`^I leave select mode$`, func() error { return w.clickLink(bulkBar, "Done") })
 	sc.Step(`^I tick `+quoted+`$`, withString(func(title string) error { return w.click(checkbox(title)) }))
 	sc.Step(`^I Shift-click `+quoted+`$`, withString(w.shiftClick))
 	sc.Step(`^I select all on this page$`, func() error { return w.clickLink(bulkBar, "Select all on this page") })
@@ -35,8 +37,8 @@ func registerBulkSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^the selection count is blank$`, func() error {
 		return w.eventuallyText("#bulk-count is blank", "#bulk-count", func(text string) bool { return text == "" })
 	})
-	sc.Step(`^select mode is on$`, func() error { return w.textContains(searchBar, "Done") })
-	sc.Step(`^select mode is off$`, func() error { return w.textLacks(searchBar, "Done") })
+	sc.Step(`^select mode is on$`, func() error { return w.selectModeIs(true) })
+	sc.Step(`^select mode is off$`, func() error { return w.selectModeIs(false) })
 	sc.Step(`^the bulk bar shows `+quoted+`$`, withString(func(text string) error { return w.textContains(bulkBar, text) }))
 	sc.Step(`^the tags field holds `+quoted+`$`, withString(w.tagsFieldHolds))
 	sc.Step(`^`+quoted+` is ticked$`, withString(func(title string) error { return w.tickedIs(title, true) }))
@@ -90,5 +92,13 @@ func (w *world) tickedIs(title string, expected bool) error {
 		}
 		ticked, err := box.Checked()
 		return ticked == expected, err
+	})
+}
+
+// selectModeIs waits until the Select link is pressed (class "on") or is not.
+func (w *world) selectModeIs(on bool) error {
+	return harness.Eventually(fmt.Sprintf("select mode is %t", on), func() (bool, error) {
+		pressed, err := w.browser.All(harness.CSS(searchTools + " a.on"))
+		return (len(pressed) > 0) == on, err
 	})
 }

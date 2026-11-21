@@ -23,7 +23,7 @@ func sessionRow(session SessionRow, now int64) node {
 	})
 	signOut := maybe(!session.IsCurrent, func() node {
 		return el("form", []attr{a("method", "post"), a("action", "/account/sessions/"+session.ID+"/revoke")},
-			el("button", []attr{classes("quiet", "danger"), a("type", "submit"), a("aria-label", "Sign out "+session.Agent)},
+			el("button", []attr{classes("btn", "quiet", "danger-text"), a("type", "submit"), a("aria-label", "Sign out "+session.Agent)},
 				text("Sign out")))
 	})
 	return el("div", []attr{classes("user-row")},
@@ -54,7 +54,7 @@ func AccountPage(view AccountView) string {
 		el("div", []attr{classes("session-list")}, rows...),
 		maybe(len(view.Sessions) > 1, func() node {
 			return el("form", []attr{classes("downloads"), a("method", "post"), a("action", "/account/sessions/revoke-others")},
-				el("button", []attr{classes("quiet"), a("type", "submit")}, text("Sign out all other browsers")))
+				el("button", []attr{classes("btn"), a("type", "submit")}, text("Sign out all other browsers")))
 		}),
 		el("h2", nil, text("Change password")),
 		el("p", []attr{classes("summary")},
@@ -64,7 +64,7 @@ func AccountPage(view AccountView) string {
 			passwordField("New password ", "new", "new-password", true),
 			passwordField("Repeat new password ", "again", "new-password", false),
 			errorLine(view.Error),
-			el("div", nil, el("button", []attr{a("type", "submit")}, text("Change password"))),
+			formButtons(submitButton("Change password")),
 		),
 	)
 	return framed("Account · bkd", view.Shell, content)

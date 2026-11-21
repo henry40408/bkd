@@ -30,7 +30,7 @@ func withThreeStrings(step func(string, string, string) error) func(string, stri
 }
 
 // The sidebar link only an admin sees.
-const manageUsersLink = ".me a[href='/users']"
+const manageUsersLink = "#sidebar a[href='/users']"
 
 // slowFetchAndWatchCSP slows every request down and records each Content
 // Security Policy violation.

@@ -14,7 +14,7 @@ type LoginView struct {
 }
 
 func labelled(label string, input node) node {
-	return el("label", nil, text(label), input)
+	return field(label, input)
 }
 
 // LoginPage renders the sign-in form.
@@ -31,7 +31,7 @@ func LoginPage(view LoginView) string {
 			flag("required"), flag("autofocus"))),
 		labelled("Password ", void("input", a("type", "password"), a("name", "password"),
 			a("autocomplete", "current-password"), flag("required"))),
-		el("button", []attr{a("type", "submit")}, text("Sign in")),
+		submitButton("Sign in"),
 	)
 	return bare("Sign in · bkd", form)
 }
@@ -57,7 +57,7 @@ func SetupPage(view SetupView) string {
 			a("autocomplete", "username"), a("autocapitalize", "none"), a("spellcheck", "false"), flag("required"))),
 		labelled("Password ", void("input", a("type", "password"), a("name", "password"),
 			a("autocomplete", "new-password"), a("minlength", "12"), flag("required"))),
-		el("button", []attr{a("type", "submit")}, text("Create admin")),
+		submitButton("Create admin"),
 	)
 	return bare("Set up · bkd", form)
 }
@@ -78,10 +78,9 @@ func ConfirmPage(view ConfirmView) string {
 			errorLine(view.Error),
 			labelled("Password ", void("input", a("type", "password"), a("name", "password"),
 				a("autocomplete", "current-password"), flag("required"), flag("autofocus"))),
-			el("div", nil,
-				el("button", []attr{a("type", "submit")}, text("Confirm")),
-				text(" "),
-				el("a", []attr{classes("quiet-link"), a("href", "/users")}, text("Cancel")),
+			formButtons(
+				submitButton("Confirm"),
+				el("a", []attr{classes("btn", "quiet-link"), a("href", "/users")}, text("Cancel")),
 			),
 		),
 	)

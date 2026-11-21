@@ -40,7 +40,7 @@ func registerTransferSteps(sc *godog.ScenarioContext, w *world) {
 }
 
 func (w *world) openImportAndExport() error {
-	if err := w.click(".me a[href='/transfer']"); err != nil {
+	if err := w.click("#sidebar a[href='/transfer']"); err != nil {
 		return err
 	}
 	_, err := w.element(importForm)

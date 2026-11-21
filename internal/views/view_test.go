@@ -128,7 +128,8 @@ func TestSelectModeTicksTheChosenRows(t *testing.T) {
 		`<input type="checkbox" name="id-6" value="1" aria-label="Select Page 2">`,
 		`<input type="text" name="tags" value="a, b"`,
 		`<p class="err" role="alert">Choose an action.</p>`,
-		`<a class="button quiet-button on" href="/">Done</a>`,
+		`<a class="btn ico quiet" href="/" title="Done">`,
+		`<a class="btn ico on" href="/" title="Select">`,
 		`Select all on this page`,
 	} {
 		if !strings.Contains(page, want) {
@@ -142,28 +143,53 @@ func TestSelectModeTicksTheChosenRows(t *testing.T) {
 	}
 }
 
-func TestTagsRowOpensOnlyForARefusalOrTypedTags(t *testing.T) {
-	const closed = `<input id="bulk-tags-toggle" type="checkbox">`
-	const open = `<input id="bulk-tags-toggle" type="checkbox" checked>`
-	cases := []struct {
-		name string
-		bulk BulkState
-		want string
-	}{
-		{"nothing to show", BulkState{}, closed},
-		{"a refusal", BulkState{Error: "Choose an action."}, open},
-		{"typed tags", BulkState{Tags: "a"}, open},
+func TestBulkBarFollowsTheListAndHasNoTagsToggle(t *testing.T) {
+	view := BookmarksView{
+		Shell: emptyShell("alice", false), List: ListView{Page: 1, Select: true}, Now: goldenNow, Rows: pageRows(1, 1),
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			view := BookmarksView{
-				Shell: emptyShell("alice", false), List: ListView{Page: 1, Select: true}, Now: goldenNow,
-				Rows: pageRows(1, 1), Bulk: tc.bulk,
-			}
-			if page := BookmarksPage(view); !strings.Contains(page, tc.want) {
-				t.Errorf("page lacks %s", tc.want)
-			}
-		})
+	page := BookmarksPage(view)
+	list, bar := strings.Index(page, `<ul class="list selecting">`), strings.Index(page, `class="bulk"`)
+	if list < 0 || bar < list {
+		t.Errorf("the bulk bar must come after the list (list %d, bar %d)", list, bar)
+	}
+	requireAbsent(t, page, "bulk-tags-toggle")
+	requireContains(t, page, `name="action" value="add_tags"`, `name="action" value="remove_tags"`,
+		`name="action" value="check"`, `name="action" value="delete"`, `id="bulk-count"`)
+}
+
+func TestSelectLinkIsOnlyPressedInSelectMode(t *testing.T) {
+	view := BookmarksView{Shell: emptyShell("alice", false), List: ListView{Page: 1}, Rows: pageRows(1, 1)}
+	page := BookmarksPage(view)
+	requireContains(t, page, `<a class="btn ico" href="/?select=1" title="Select">`)
+	requireAbsent(t, page, `class="bulk"`, `ico on`)
+}
+
+func TestSearchTipsExplainTheSyntax(t *testing.T) {
+	page := BookmarksPage(BookmarksView{Shell: emptyShell("alice", false), List: ListView{Page: 1}})
+	requireContains(t, page, `<details class="tips" id="search-hint">`, `aria-describedby="search-hint"`,
+		"<code>-word</code>", "<code>url:github.com</code>", "<code>status:broken</code>")
+}
+
+func TestRowShowsItsUrlWithHighlight(t *testing.T) {
+	row := BookmarkRow{ID: 1, URL: "https://a.test/x", Title: "A", DomainTerms: []string{"a.test"}}
+	requireContains(t, string(bookmarkItem(row, goldenNow, "/", nil)), `<p class="url" title="https://a.test/x">https://<mark>a.test</mark>/x</p>`)
+}
+
+func TestIconsAllHaveAPathAndRender(t *testing.T) {
+	for name := range iconPaths {
+		if iconPaths[name] == "" {
+			t.Errorf("icon %q has no path", name)
+		}
+	}
+	for _, name := range []iconName{iconOK, iconBroken, iconRedirected, iconUnknown, iconEdit, iconTrash, iconPlus,
+		iconShuffle, iconSelect, iconAll, iconTagAdd, iconTagRemove, iconLink, iconSearch, iconMenu} {
+		if _, ok := iconPaths[name]; !ok {
+			t.Errorf("icon %q is not drawn", name)
+		}
+	}
+	want := `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg><span class="lbl">Add</span>`
+	if got := string(iconLabel(iconPlus, "Add")); got != want {
+		t.Errorf("got %s, want %s", got, want)
 	}
 }
 
@@ -191,10 +217,10 @@ func TestPickShowsTheBookmarkAndWaysOut(t *testing.T) {
 	}
 	page := BookmarksPage(view)
 	for _, want := range []string{
-		`<section class="pick" aria-label="Random bookmark">`,
-		`<a class="quiet" href="/random?q=x">Another</a>`,
-		`<a class="quiet" href="/bookmarks/3/edit?back=%2F%3Fq%3Dx">Edit</a>`,
-		`<a class="quiet" href="/?q=x">Close</a>`,
+		`<section class="pick panel" aria-label="Random bookmark">`,
+		`<a class="btn ico primary" href="/random?q=x" title="Another">`,
+		`<a class="btn ico quiet" href="/bookmarks/3/edit?back=%2F%3Fq%3Dx" title="Edit">`,
+		`<a class="btn ico" href="/?q=x" title="Close">`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page lacks %s", want)
@@ -214,8 +240,8 @@ func TestPagerLinksNeighbours(t *testing.T) {
 	view := BookmarksView{Shell: emptyShell("alice", false), List: ListView{Q: "x", Page: 2}, Rows: pageRows(1, 1), HasNext: true}
 	page := BookmarksPage(view)
 	for _, want := range []string{
-		`<a class="button quiet-button" href="/?q=x" rel="prev">Newer</a>`,
-		`<a class="button quiet-button" href="/?q=x&amp;page=3" rel="next">Older</a>`,
+		`<a class="btn" href="/?q=x" rel="prev">Newer</a>`,
+		`<a class="btn" href="/?q=x&amp;page=3" rel="next">Older</a>`,
 		`Showing 51–51`,
 	} {
 		if !strings.Contains(page, want) {
@@ -236,7 +262,7 @@ func TestAccountPageListsSessions(t *testing.T) {
 	for _, want := range []string{
 		`<span class="name">Firefox &lt;1&gt;<span class="here">This browser</span></span>`,
 		`<span class="meta">10.0.0.1 · last used <time datetime="2020-01-01T00:00:00Z" title="2020-01-01 00:00 UTC">6 years ago</time></span>`,
-		`<form method="post" action="/account/sessions/def/revoke"><button class="quiet danger" type="submit" aria-label="Sign out Unknown browser">Sign out</button></form>`,
+		`<form method="post" action="/account/sessions/def/revoke"><button class="btn quiet danger-text" type="submit" aria-label="Sign out Unknown browser">Sign out</button></form>`,
 		`action="/account/sessions/revoke-others"`,
 		`<input type="password" name="new" autocomplete="new-password" minlength="12" required>`,
 		`<input type="password" name="again" autocomplete="new-password" required>`,

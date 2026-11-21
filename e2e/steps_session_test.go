@@ -45,7 +45,7 @@ func registerSessionSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^I open Account$`, w.openAccount)
 	sc.Step(`^I mark the page$`, w.markPage)
 	sc.Step(`^the page was not reloaded$`, w.pageWasNotReloaded)
-	sc.Step(`^I click the bkd brand$`, func() error { return w.click("#sidebar .brand a") })
+	sc.Step(`^I click the bkd brand$`, func() error { return w.click("#sidebar a.brand") })
 	sc.Step(`^I change my password from `+quoted+` to `+quoted+`$`, withTwoStrings(w.changePassword))
 	sc.Step(`^I change my password from `+quoted+` to `+quoted+` but repeat `+quoted+`$`, withThreeStrings(w.submitPasswordForm))
 	sc.Step(`^I am also signed in on another browser$`, w.alsoSignedInElsewhere)
@@ -271,7 +271,7 @@ func (w *world) addressHasNoQuery() error {
 }
 
 func (w *world) openAccount() error {
-	if err := w.click(".me a[href='/account']"); err != nil {
+	if err := w.click("#sidebar a[href='/account']"); err != nil {
 		return err
 	}
 	_, err := w.element(passwordForm)

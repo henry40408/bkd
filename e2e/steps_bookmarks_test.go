@@ -70,7 +70,7 @@ func registerBookmarkActionSteps(sc *godog.ScenarioContext, w *world) {
 	}))
 	sc.Step(`^I choose the tag `+quoted+`$`, withString(w.chooseSidebarFilter))
 	sc.Step(`^I choose the link filter `+quoted+`$`, withString(w.chooseSidebarFilter))
-	sc.Step(`^I choose Random$`, func() error { return w.clickLink(searchBar, "Random") })
+	sc.Step(`^I choose Random$`, func() error { return w.clickLink(searchTools, "Random") })
 	sc.Step(`^I choose Another$`, func() error { return w.clickLink("section.pick", "Another") })
 	sc.Step(`^I close the pick$`, func() error { return w.clickLink("section.pick", "Close") })
 	sc.Step(`^I choose `+quoted+` in the pager$`, withString(func(label string) error {

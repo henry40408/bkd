@@ -76,11 +76,11 @@ func TestLinkStatusesRenderLabelGlyphAndText(t *testing.T) {
 		link *LinkCheck
 		want []string
 	}{
-		{"ok", &LinkCheck{Status: "ok", CheckedAt: 1577900000}, []string{"link-ok", "Link OK: ", "checked 2020-01-01"}},
-		{"redirected", &LinkCheck{Status: "redirected", Detail: "https://new.test/"}, []string{"link-redirected", "Link moved: ", "now at https://new.test/"}},
-		{"broken", &LinkCheck{Status: "broken", Detail: "HTTP <404>"}, []string{"link-broken", "Broken link: ", "HTTP &lt;404&gt;"}},
-		{"broken without detail", &LinkCheck{Status: "broken"}, []string{"link-broken", "Broken link: "}},
-		{"unknown", &LinkCheck{Status: "unknown", Detail: "timed out"}, []string{"link-unknown", "Link not confirmed: ", "timed out", ">?<"}},
+		{"ok", &LinkCheck{Status: "ok", CheckedAt: 1577900000}, []string{`class="link-note ok"`, "<b>Link OK</b>, checked ", `title="Checked 2020-01-01`}},
+		{"redirected", &LinkCheck{Status: "redirected", Detail: "https://new.test/"}, []string{`class="link-note redirected"`, "<b>Link moved</b>, now at https://new.test/, checked "}},
+		{"broken", &LinkCheck{Status: "broken", Detail: "HTTP <404>"}, []string{`class="link-note broken"`, "<b>Broken link</b>: HTTP &lt;404&gt;, checked "}},
+		{"broken without detail", &LinkCheck{Status: "broken"}, []string{`class="link-note broken"`, "<b>Broken link</b>, checked "}},
+		{"unknown", &LinkCheck{Status: "unknown", Detail: "timed out"}, []string{`class="link-note unknown"`, "<b>Link not confirmed</b>: timed out, checked ", `d="M5.6 6a2.4`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -93,7 +93,7 @@ func TestLinkStatusesRenderLabelGlyphAndText(t *testing.T) {
 func TestUncheckedLinksShowNoLinkLine(t *testing.T) {
 	for _, link := range []*LinkCheck{nil, {Status: "unchecked"}} {
 		row := BookmarkRow{ID: 1, URL: "https://a.test/", Title: "A", Link: link}
-		requireAbsent(t, string(bookmarkItem(row, goldenNow, "/", nil)), "link-note", "link-unchecked")
+		requireAbsent(t, string(bookmarkItem(row, goldenNow, "/", nil)), "link-note")
 	}
 }
 

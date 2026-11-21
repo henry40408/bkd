@@ -29,7 +29,7 @@ func SettingsPage(view SettingsView) string {
 				void("input", a("type", "checkbox"), a("name", "link_check_enabled"), a("value", "on"),
 					when(view.LinkCheckEnabled, flag("checked"))),
 				text("Check my bookmarks in the background")),
-			el("div", nil, el("button", []attr{a("type", "submit")}, text("Save"))),
+			formButtons(submitButton("Save")),
 		),
 	)
 	return framed("Settings · bkd", view.Shell, content)

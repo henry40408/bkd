@@ -73,8 +73,9 @@ type BookmarksView struct {
 type linkNote struct {
 	status  string
 	label   string
-	text    string
+	detail  string
 	checked string
+	ago     string
 }
 
 func linkLabel(status string) string {
@@ -89,7 +90,7 @@ func linkLabel(status string) string {
 	return "Link not confirmed"
 }
 
-func noteOf(link *LinkCheck) *linkNote {
+func noteOf(link *LinkCheck, now int64) *linkNote {
 	if link == nil {
 		return nil
 	}
@@ -98,39 +99,33 @@ func noteOf(link *LinkCheck) *linkNote {
 	default:
 		return nil
 	}
-	checked := NewSavedTime(0, link.CheckedAt).Exact
-	note := &linkNote{status: link.Status, label: linkLabel(link.Status), checked: checked}
-	switch link.Status {
-	case "ok":
-		note.text = "checked " + checked
-	case "redirected":
-		note.text = "now at " + link.Detail
-	default:
-		note.text = link.Detail
+	checked := NewSavedTime(now, link.CheckedAt)
+	return &linkNote{
+		status: link.Status, label: linkLabel(link.Status), detail: link.Detail,
+		checked: checked.Exact, ago: checked.Ago,
 	}
-	return note
 }
 
-func linkGlyph(status string) node {
-	glyph := func(d string) node {
-		return el("svg", []attr{a("viewBox", "0 0 16 16")}, el("path", []attr{a("d", d)}))
+// afterLabel is what the status line says after its bold label.
+func (note *linkNote) afterLabel() string {
+	checked := ", checked " + note.ago
+	switch {
+	case note.status == "ok":
+		return checked
+	case note.status == "redirected":
+		return ", now at " + note.detail + checked
+	case note.detail == "":
+		return checked
 	}
-	switch status {
-	case "ok":
-		return glyph("M3 8.5l3.2 3.2L13 4.5")
-	case "redirected":
-		return glyph("M2.5 8h10.5M9 4l4 4-4 4")
-	case "broken":
-		return glyph("M4 4l8 8M12 4l-8 8")
-	}
-	return text("?")
+	return ": " + note.detail + checked
 }
 
+// linkNoteLine is the status line of a bookmark. The status is also the name
+// of its icon.
 func linkNoteLine(note *linkNote) node {
 	return el("p", []attr{classes("link-note", note.status), a("title", "Checked "+note.checked)},
-		el("span", []attr{classes("glyph"), a("aria-hidden", "true")}, linkGlyph(note.status)),
-		el("span", []attr{classes("sr-only")}, text(note.label+": ")),
-		text(note.text),
+		icon(iconName(note.status)),
+		el("span", nil, el("b", nil, text(note.label)), text(note.afterLabel())),
 	)
 }
 
@@ -161,6 +156,17 @@ func (row BookmarkRow) note() node {
 	})
 }
 
+// titleLink opens the bookmark in a new tab.
+func (row BookmarkRow) titleLink() node {
+	return el("a", []attr{classes("title"), a("href", row.URL), a("target", "_blank"), a("rel", "noopener noreferrer")},
+		highlight(row.Title, row.TitleTerms))
+}
+
+func (row BookmarkRow) linkLine(now int64) node {
+	note := noteOf(row.Link, now)
+	return maybe(note != nil, func() node { return linkNoteLine(note) })
+}
+
 func pickBox(row BookmarkRow, ticked bool) node {
 	id := strconv.FormatInt(row.ID, 10)
 	return el("label", []attr{classes("pick-box")},
@@ -168,32 +174,33 @@ func pickBox(row BookmarkRow, ticked bool) node {
 			when(ticked, flag("checked")), a("aria-label", "Select "+row.Title)))
 }
 
+func rowActions(row BookmarkRow, back string) node {
+	return el("div", []attr{classes("actions")},
+		el("a", []attr{classes("btn", "quiet", "ico"), a("href", row.editHref(back)),
+			a("aria-label", "Edit "+row.Title), a("title", "Edit")}, iconLabel(iconEdit, "Edit")),
+		el("a", []attr{classes("btn", "quiet", "ico", "danger-text"), a("href", row.deleteHref(back)),
+			a("aria-label", "Delete "+row.Title), a("title", "Delete")}, iconLabel(iconTrash, "Delete")),
+	)
+}
+
+func rowBody(row BookmarkRow, now int64) node {
+	tags := maybe(len(row.Tags) > 0, func() node { return tagChips(row.Tags) })
+	return el("div", []attr{classes("body")},
+		el("h3", nil, row.titleLink()),
+		el("p", []attr{classes("url"), a("title", row.URL)}, highlight(row.URL, row.DomainTerms)),
+		row.note(), tags, row.linkLine(now),
+	)
+}
+
 // bookmarkItem is one list entry. ticked is nil outside select mode, else
 // whether the row's box starts ticked.
 func bookmarkItem(row BookmarkRow, now int64, back string, ticked *bool) node {
-	note := noteOf(row.Link)
-	itemClass := "item"
-	if note != nil {
-		itemClass += " link-" + note.status
-	}
 	box := maybe(ticked != nil, func() node { return pickBox(row, *ticked) })
-	linkLine := maybe(note != nil, func() node { return linkNoteLine(note) })
-	tags := maybe(len(row.Tags) > 0, func() node { return tagChips(row.Tags) })
-	return el("li", []attr{a("class", itemClass), a("data-id", strconv.FormatInt(row.ID, 10))},
+	return el("li", []attr{classes("item"), a("data-id", strconv.FormatInt(row.ID, 10))},
 		box,
-		el("span", []attr{classes("domain")}, row.domain()),
-		el("div", nil,
-			el("a", []attr{classes("title"), a("href", row.URL), a("target", "_blank"), a("rel", "noopener noreferrer")},
-				highlight(row.Title, row.TitleTerms)),
-			row.note(), linkLine, tags,
-		),
-		el("div", []attr{classes("when")},
-			timeTag(NewSavedTime(now, row.CreatedAt)),
-			el("div", []attr{classes("actions")},
-				el("a", []attr{classes("quiet"), a("href", row.editHref(back)), a("aria-label", "Edit "+row.Title)}, text("Edit")),
-				el("a", []attr{classes("quiet", "danger"), a("href", row.deleteHref(back)), a("aria-label", "Delete "+row.Title)}, text("Delete")),
-			),
-		),
+		el("div", []attr{classes("site")}, el("span", nil, row.domain()), timeTag(NewSavedTime(now, row.CreatedAt))),
+		rowBody(row, now),
+		rowActions(row, back),
 	)
 }
 
@@ -201,53 +208,70 @@ func hidden(name, value string) node {
 	return void("input", a("type", "hidden"), a("name", name), a("value", value))
 }
 
-func searchHint() node {
-	code := func(s string) node { return el("code", nil, text(s)) }
-	return el("p", []attr{classes("search-hint"), a("id", "search-hint")},
-		text("Use "), code(`"exact phrase"`), text(", "), code("-exclude"), text(", "), code("tag:name"), text(", "),
-		code("title:"), text(", "), code("url:"), text(", "), code("note:"), text(" or "), code("status:"), text("."),
+// field is a labelled form control.
+func field(label string, input node) node {
+	return el("label", []attr{classes("field")}, text(label), input)
+}
+
+// searchTips explains the search syntax. The examples are plain text: nothing
+// in the page acts on them.
+func searchTips() node {
+	tip := func(example, meaning string) node {
+		return group(el("dt", nil, el("code", nil, text(example))), el("dd", nil, text(meaning)))
+	}
+	return el("details", []attr{classes("tips"), a("id", "search-hint")},
+		el("summary", nil, text("Search tips")),
+		el("dl", nil,
+			tip(`"exact phrase"`, "Match the words together, in order."),
+			tip("-word", "Leave out bookmarks that match."),
+			tip("url:github.com", "Match one field only: title:, url: or note:."),
+			tip(`tag:"to read"`, "Match a whole tag."),
+			tip("status:broken", "Match the last link check: broken, ok, redirected, unknown or unchecked."),
+		),
 	)
 }
 
+// toolLink is a link that looks like an icon button.
+func toolLink(href string, name iconName, label string, extra ...string) node {
+	names := append([]string{"btn", "ico"}, extra...)
+	return el("a", []attr{classes(names...), a("href", href), a("title", label)}, iconLabel(name, label))
+}
+
+// searchBar is the search form and, after it, the add form, so that "Add
+// bookmark" ends the row of buttons.
 func searchBar(view BookmarksView) node {
 	list := view.List
-	quiet := func(extra string, href, label string) node {
-		names := []string{"button", "quiet-button"}
-		if extra != "" {
-			names = append(names, extra)
-		}
-		return el("a", []attr{classes(names...), a("href", href)}, text(label))
-	}
-	selectLink := quiet("", list.WithSelect().Href(), "Select")
+	selectLink := toolLink(list.WithSelect().Href(), iconSelect, "Select")
 	if list.Select {
-		selectLink = quiet("on", list.WithoutSelect().Href(), "Done")
+		selectLink = toolLink(list.WithoutSelect().Href(), iconSelect, "Select", "on")
 	}
-	bar := el("form", []attr{classes("bar"), a("role", "search"), a("method", "get"), a("action", "/")},
-		el("div", []attr{classes("bar-search")},
+	form := el("form", []attr{a("role", "search"), a("method", "get"), a("action", "/")},
+		el("div", []attr{classes("q")},
 			void("input", a("type", "search"), a("name", "q"), a("value", list.Q), a("aria-label", "Search bookmarks"),
 				a("aria-describedby", "search-hint"), a("placeholder", "Search title, note, URL, or tag")),
-			el("button", []attr{a("type", "submit")}, text("Search")),
 		),
+		el("button", []attr{classes("btn", "ico"), a("type", "submit"), a("title", "Search")}, iconLabel(iconSearch, "Search")),
 		// After the field: the address is built from the form in this order (?q=..&tag=..).
 		maybe(list.Tag != "", func() node { return hidden("tag", list.Tag) }),
 		maybe(list.Status != "", func() node { return hidden("status", list.Status) }),
-		quiet("", list.WithoutSelect().HrefTo("/random"), "Random"),
+		toolLink(list.WithoutSelect().HrefTo("/random"), iconShuffle, "Random"),
 		selectLink,
 	)
-	return group(bar, searchHint())
+	return group(el("div", []attr{classes("bar")}, form, addForm(view.Add)), searchTips())
 }
 
 func addForm(add AddForm) node {
-	field := func(label string, input node) node { return el("label", nil, text(label), input) }
 	return el("details", []attr{classes("add"), a("id", "add"), when(add.Open, flag("open"))},
-		el("summary", nil, text("Add bookmark")),
-		el("form", []attr{classes("stack"), a("method", "post"), a("action", "/bookmarks")},
+		el("summary", []attr{classes("btn", "primary", "ico"), a("title", "Add bookmark")}, iconLabel(iconPlus, "Add bookmark")),
+		el("form", []attr{classes("stack", "panel"), a("method", "post"), a("action", "/bookmarks")},
 			field("URL ", void("input", a("type", "url"), a("name", "url"), a("value", add.URL), a("placeholder", "https://"), flag("required"))),
-			field("Title ", void("input", a("type", "text"), a("name", "title"), a("value", add.Title), a("placeholder", "Leave blank to use the domain"))),
+			el("div", []attr{classes("grid2")},
+				field("Title ", void("input", a("type", "text"), a("name", "title"), a("value", add.Title), a("placeholder", "Leave blank to use the domain"))),
+				field("Tags, separated by commas ", void("input", a("type", "text"), a("name", "tags"), a("value", add.Tags), a("placeholder", "rust, reading"))),
+			),
 			field("Note ", el("textarea", []attr{a("name", "note"), a("rows", "2")}, text(add.Note))),
-			field("Tags, separated by commas ", void("input", a("type", "text"), a("name", "tags"), a("value", add.Tags), a("placeholder", "rust, reading"))),
 			errorLine(add.Error),
-			el("div", nil, el("button", []attr{a("type", "submit")}, text("Save bookmark"))),
+			formButtons(el("button", []attr{classes("btn", "primary"), a("type", "submit")}, iconLabel(iconOK, "Save bookmark"))),
 		),
 	)
 }
@@ -260,17 +284,23 @@ func pickSection(view BookmarksView, back string) node {
 	}
 	pick := *view.Pick
 	randomHref := view.List.WithoutSelect().HrefTo("/random")
-	return el("section", []attr{classes("pick"), a("aria-label", "Random bookmark")},
-		el("a", []attr{classes("title"), a("href", pick.URL), a("target", "_blank"), a("rel", "noopener noreferrer")},
-			highlight(pick.Title, pick.TitleTerms)),
-		el("span", []attr{classes("domain")}, pick.domain()),
+	return el("section", []attr{classes("pick", "panel"), a("aria-label", "Random bookmark")},
+		el("p", []attr{classes("hint")}, pick.domain()),
+		el("h2", nil, pick.titleLink()),
 		pick.note(),
-		el("div", []attr{classes("actions")},
-			el("a", []attr{classes("quiet"), a("href", randomHref)}, text("Another")),
-			el("a", []attr{classes("quiet"), a("href", pick.editHref(back))}, text("Edit")),
-			el("a", []attr{classes("quiet"), a("href", view.List.Href())}, text("Close")),
+		pick.linkLine(view.Now),
+		el("div", []attr{classes("btns")},
+			toolLink(randomHref, iconShuffle, "Another", "primary"),
+			toolLink(pick.editHref(back), iconEdit, "Edit", "quiet"),
+			toolLink(view.List.Href(), iconBroken, "Close"),
 		),
 	)
+}
+
+func bulkSubmit(action string, name iconName, label string, extra ...string) node {
+	names := append([]string{"btn", "ico"}, extra...)
+	return el("button", []attr{classes(names...), a("type", "submit"), a("name", "action"), a("value", action), a("title", label)},
+		iconLabel(name, label))
 }
 
 func bulkPanel(view BookmarksView) node {
@@ -279,33 +309,24 @@ func bulkPanel(view BookmarksView) node {
 	if list.All {
 		toggle = "Clear selection"
 	}
-	submit := func(names []string, action, label string) node {
-		return el("button", []attr{classes(names...), a("type", "submit"), a("name", "action"), a("value", action)}, text(label))
-	}
 	return group(
 		hidden("q", list.Q), hidden("tag", list.Tag), hidden("status", list.Status),
 		hidden("page", strconv.FormatUint(uint64(list.Page), 10)),
 		el("div", []attr{classes("bulk"), a("role", "region"), a("aria-label", "Bulk actions")},
-			el("div", []attr{classes("bulk-head")},
+			el("div", []attr{classes("line")},
 				el("p", []attr{classes("bulk-count"), a("id", "bulk-count"), a("aria-live", "polite")}),
-				el("p", []attr{classes("bulk-all")},
-					el("a", []attr{classes("quiet"), a("href", list.WithAll(!list.All).Href())}, text(toggle))),
+				toolLink(list.WithAll(!list.All).Href(), iconAll, toggle, "quiet"),
+				toolLink(list.WithoutSelect().Href(), iconOK, "Done", "quiet"),
 			),
-			// Shows the tags row on a narrow screen; a refused action keeps it open.
-			void("input", a("id", "bulk-tags-toggle"), a("type", "checkbox"),
-				when(view.Bulk.Error != "" || view.Bulk.Tags != "", flag("checked"))),
-			el("div", []attr{classes("bulk-panel")},
-				el("div", []attr{classes("bulk-tags")},
-					void("input", a("type", "text"), a("name", "tags"), a("value", view.Bulk.Tags),
-						a("placeholder", "Tags, separated by commas"), a("aria-label", "Tags for adding or removing")),
-					el("button", []attr{a("type", "submit"), a("name", "action"), a("value", "add_tags")}, text("Add tags")),
-					submit([]string{"quiet"}, "remove_tags", "Remove tags"),
-				),
-				el("label", []attr{classes("bulk-tags-toggle"), a("for", "bulk-tags-toggle")}, text("Tags")),
-				submit([]string{"quiet"}, "check", "Check links"),
-				submit([]string{"quiet", "danger"}, "delete", "Delete"),
-				errorLine(view.Bulk.Error),
+			el("div", []attr{classes("line")},
+				void("input", a("type", "text"), a("name", "tags"), a("value", view.Bulk.Tags),
+					a("placeholder", "Tags, separated by commas"), a("aria-label", "Tags for adding or removing")),
+				bulkSubmit("add_tags", iconTagAdd, "Add tags"),
+				bulkSubmit("remove_tags", iconTagRemove, "Remove tags"),
+				bulkSubmit("check", iconLink, "Check links"),
+				bulkSubmit("delete", iconTrash, "Delete", "danger"),
 			),
+			errorLine(view.Bulk.Error),
 			el("p", []attr{classes("hint")}, text("Tick the bookmarks you want, then choose an action.")),
 		),
 	)
@@ -349,7 +370,7 @@ func pager(view BookmarksView) node {
 		return ""
 	}
 	link := func(page uint32, rel, label string) node {
-		return el("a", []attr{classes("button", "quiet-button"), a("href", view.List.HrefForPage(page)), a("rel", rel)}, text(label))
+		return el("a", []attr{classes("btn"), a("href", view.List.HrefForPage(page)), a("rel", rel)}, text(label))
 	}
 	return el("nav", []attr{classes("pager"), a("aria-label", "Pages")},
 		maybe(hasPrev, func() node { return link(view.List.Page-1, "prev", "Newer") }),
@@ -360,13 +381,13 @@ func pager(view BookmarksView) node {
 // BookmarksPage renders the bookmark list.
 func BookmarksPage(view BookmarksView) string {
 	back := view.List.Href()
-	list := rowList(view, back)
-	body := list
+	body := rowList(view, back)
 	if view.List.Select {
+		// The bulk bar follows the list so that it can stick to the foot of the window.
 		body = el("form", []attr{classes("bulk-form"), a("method", "post"), a("action", "/bookmarks/bulk")},
-			bulkPanel(view), list)
+			body, bulkPanel(view))
 	}
-	content := group(searchBar(view), addForm(view.Add), pickSection(view, back), body, pager(view))
+	content := group(searchBar(view), pickSection(view, back), body, pager(view))
 	return framed("bkd", view.Shell, content)
 }
 
@@ -385,20 +406,20 @@ type EditView struct {
 
 // EditPage renders the edit form.
 func EditPage(view EditView) string {
-	field := func(label string, input node) node { return el("label", nil, text(label), input) }
 	content := group(
 		el("h1", nil, text("Edit bookmark")),
 		el("form", []attr{classes("stack", "edit-form"), a("method", "post"), a("action", fmt.Sprintf("/bookmarks/%d/edit", view.ID))},
 			hidden("back", view.Back),
 			field("URL ", void("input", a("type", "url"), a("name", "url"), a("value", view.URL), a("placeholder", "https://"), flag("required"), flag("autofocus"))),
-			field("Title ", void("input", a("type", "text"), a("name", "title"), a("value", view.Title), a("placeholder", "Leave blank to use the domain"))),
+			el("div", []attr{classes("grid2")},
+				field("Title ", void("input", a("type", "text"), a("name", "title"), a("value", view.Title), a("placeholder", "Leave blank to use the domain"))),
+				field("Tags, separated by commas ", void("input", a("type", "text"), a("name", "tags"), a("value", view.Tags))),
+			),
 			field("Note ", el("textarea", []attr{a("name", "note"), a("rows", "3")}, text(view.Note))),
-			field("Tags, separated by commas ", void("input", a("type", "text"), a("name", "tags"), a("value", view.Tags))),
 			errorLine(view.Error),
-			el("div", nil,
-				el("button", []attr{a("type", "submit")}, text("Save")),
-				text(" "),
-				el("a", []attr{classes("quiet-link"), a("href", view.Back)}, text("Cancel")),
+			formButtons(
+				el("button", []attr{classes("btn", "primary"), a("type", "submit")}, iconLabel(iconOK, "Save")),
+				el("a", []attr{classes("btn", "quiet-link"), a("href", view.Back)}, iconLabel(iconBroken, "Cancel")),
 			),
 		),
 	)
@@ -429,10 +450,9 @@ func ConfirmDeletePage(view ConfirmDeleteView) string {
 	}
 	form := []node{}
 	form = append(form, fields...)
-	form = append(form, el("div", nil,
-		el("button", []attr{classes("danger-button"), a("type", "submit")}, text("Delete")),
-		text(" "),
-		el("a", []attr{classes("quiet-link"), a("href", view.CancelHref), flag("autofocus")}, text("Keep")),
+	form = append(form, formButtons(
+		el("button", []attr{classes("btn", "danger", "danger-button"), a("type", "submit")}, iconLabel(iconTrash, "Delete")),
+		el("a", []attr{classes("btn", "quiet-link"), a("href", view.CancelHref), flag("autofocus")}, iconLabel(iconBroken, "Keep")),
 	))
 	content := group(
 		el("h1", nil, text(view.Heading)),

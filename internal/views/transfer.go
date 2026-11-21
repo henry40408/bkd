@@ -54,17 +54,16 @@ func TransferPage(view TransferView) string {
 			labelled("Bookmarks file ", void("input", a("type", "file"), a("name", "file"),
 				a("accept", ".html,.htm,text/html"), flag("required"))),
 			errorLine(view.Error),
-			el("div", nil, el("button", []attr{a("type", "submit")}, text("Import bookmarks"))),
+			formButtons(submitButton("Import bookmarks")),
 		),
 		result,
 		el("h2", nil, text("Export")),
 		el("p", []attr{classes("summary")},
 			text("Download all of your bookmarks. Use HTML to move them to a browser or another service, "+
 				"and JSON as a plain backup.")),
-		el("p", []attr{classes("downloads")},
-			el("a", []attr{classes("button"), a("href", "/api/export?format=html"), flag("download")}, text("Download HTML")),
-			text(" "),
-			el("a", []attr{classes("button"), a("href", "/api/export?format=json"), flag("download")}, text("Download JSON")),
+		formButtons(
+			el("a", []attr{classes("btn"), a("href", "/api/export?format=html"), flag("download")}, text("Download HTML")),
+			el("a", []attr{classes("btn"), a("href", "/api/export?format=json"), flag("download")}, text("Download JSON")),
 		),
 	)
 	return framed("Import and export · bkd", view.Shell, content)

@@ -39,13 +39,13 @@ func userActions(user UserRow) node {
 	return el("div", []attr{classes("user-actions")},
 		el("form", []attr{a("method", "post"), a("action", "/users/"+id+"/role")},
 			hidden("is_admin", strconv.FormatBool(!user.IsAdmin)),
-			el("button", []attr{classes("quiet"), a("type", "submit"), a("aria-label", role+" "+user.Username)}, text(role))),
+			el("button", []attr{classes("btn", "quiet"), a("type", "submit"), a("aria-label", role+" "+user.Username)}, text(role))),
 		el("form", []attr{a("method", "post"), a("action", "/users/"+id+"/disabled")},
 			hidden("is_disabled", strconv.FormatBool(!user.IsDisabled)),
-			el("button", []attr{classes("quiet"), a("type", "submit"), a("aria-label", state+" "+user.Username)}, text(state))),
-		el("a", []attr{classes("quiet"), a("href", "/users/"+id+"/password"),
+			el("button", []attr{classes("btn", "quiet"), a("type", "submit"), a("aria-label", state+" "+user.Username)}, text(state))),
+		el("a", []attr{classes("btn", "quiet"), a("href", "/users/"+id+"/password"),
 			a("aria-label", "Reset password of "+user.Username)}, text("Reset password")),
-		el("a", []attr{classes("quiet", "danger"), a("href", "/users/"+id+"/delete"),
+		el("a", []attr{classes("btn", "quiet", "danger-text"), a("href", "/users/"+id+"/delete"),
 			a("aria-label", "Delete "+user.Username)}, text("Delete")),
 	)
 }
@@ -85,7 +85,7 @@ func UsersPage(view UsersView) string {
 				void("input", a("type", "checkbox"), a("name", "is_admin"), when(view.NewIsAdmin, flag("checked"))),
 				text(" Admin (can manage users)")),
 			errorLine(view.Error),
-			el("div", nil, el("button", []attr{a("type", "submit")}, text("Create user"))),
+			formButtons(submitButton("Create user")),
 		),
 	)
 	return framed("Users · bkd", view.Shell, content)
@@ -108,10 +108,9 @@ func PasswordPage(view PasswordView) string {
 			labelled("New password ", void("input", a("type", "password"), a("name", "password"),
 				a("autocomplete", "new-password"), a("minlength", "12"), flag("required"), flag("autofocus"))),
 			errorLine(view.Error),
-			el("div", nil,
-				el("button", []attr{a("type", "submit")}, text("Reset password")),
-				text(" "),
-				el("a", []attr{classes("quiet-link"), a("href", "/users")}, text("Cancel")),
+			formButtons(
+				submitButton("Reset password"),
+				el("a", []attr{classes("btn", "quiet-link"), a("href", "/users")}, text("Cancel")),
 			),
 		),
 	)
