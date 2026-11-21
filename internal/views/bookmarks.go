@@ -323,7 +323,6 @@ func bulkPanel(view BookmarksView) node {
 		el("div", []attr{classes("bulk"), a("role", "region"), a("aria-label", "Bulk actions")},
 			el("div", []attr{classes("line")},
 				el("p", []attr{classes("bulk-count"), a("id", "bulk-count"), a("aria-live", "polite")}),
-				el("p", []attr{classes("hint")}, text("Tick the bookmarks you want, then choose an action.")),
 				toolLink(list.WithAll(!list.All).Href(), iconAll, toggle, "quiet"),
 				toolLink(list.WithoutSelect().Href(), iconOK, "Done", "quiet"),
 			),
