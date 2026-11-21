@@ -188,8 +188,9 @@ form.stack { display: grid; gap: var(--sp-3); }
 .bulk-form { margin: 0; }
 .bulk { position: sticky; bottom: var(--sp-3); margin-top: var(--sp-4); background: var(--ink); color: var(--paper); border-radius: var(--radius); padding: var(--sp-3); display: grid; gap: var(--sp-3); z-index: 3; }
 .bulk .line { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); align-items: center; }
-/* The script fills the count in; without it the count stays empty and the links stay on the right. */
-.bulk-count { flex: 1 1 0; font-weight: var(--strong); font-variant-numeric: tabular-nums; }
+/* The hint takes the space between the count and the links, so the links stay on the right even when the script has not filled the count in. */
+.bulk-count { font-weight: var(--strong); font-variant-numeric: tabular-nums; }
+.bulk .line > .hint { flex: 1 1 0; min-width: 12rem; }
 .bulk input[type="text"] { flex: 1 1 var(--field-min); width: auto; color: var(--ink); }
 .bulk .btn { color: var(--ink); border-color: transparent; }
 .bulk .btn.danger { color: var(--sheet); }
