@@ -171,7 +171,7 @@ form.stack { display: grid; gap: var(--sp-3); }
 @media (hover: hover) { .item:hover .actions { opacity: 1; } }
 @media (hover: none) { .actions { opacity: 1; } }
 .selecting .actions { visibility: hidden; }
-.item > .inline-form { grid-column: 2 / -1; margin-bottom: 0; }
+.item > .inline-form { grid-column: 1 / -1; margin-bottom: 0; }
 .empty { padding: var(--sp-4) var(--sp-3); color: var(--soft); border-top: 2px solid var(--ink); border-bottom: 1px solid var(--rule); }
 .foot { padding: var(--sp-4) 0; color: var(--soft); font-size: var(--fs-1); display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; justify-content: space-between; }
 .foot .btn { color: var(--ink); font-size: var(--fs-2); }
@@ -246,7 +246,6 @@ main.auth { max-width: none; min-height: 100vh; min-height: 100dvh; display: gri
   .site { grid-column: 2; display: flex; gap: var(--sp-3); justify-content: space-between; }
   .body { grid-column: 2; }
   .actions { grid-column: 2; opacity: 1; margin-top: var(--sp-2); gap: var(--sp-2); }
-  .item > .inline-form { grid-column: 1 / -1; }
   .grid2 { grid-template-columns: 1fr; }
   .bar .q { flex-basis: 100%; }
   .me .btn { min-height: var(--control); }
