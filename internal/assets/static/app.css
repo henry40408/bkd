@@ -145,7 +145,7 @@ form.stack { display: grid; gap: var(--sp-3); }
    The server sends no class for a ticked row, so the box itself is the state. */
 .item:has(.pick-box input:checked) { background: color-mix(in srgb, var(--ribbon) var(--sel-tint), var(--paper)); --soft: var(--ink); }
 .item:has(.pick-box input:checked)::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--ribbon); }
-.pick-box { grid-column: 1; padding-top: var(--sp-1); cursor: pointer; }
+.pick-box { grid-column: 1; padding-top: var(--sp-1); margin-left: var(--sp-2); cursor: pointer; }
 .site { grid-column: 2; font-size: var(--fs-1); color: var(--soft); overflow-wrap: anywhere; }
 .site time { display: block; }
 .body { grid-column: 3; min-width: 0; display: grid; gap: var(--sp-1); }
