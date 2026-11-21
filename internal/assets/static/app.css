@@ -135,6 +135,12 @@ form.stack { display: grid; gap: var(--sp-3); }
 .inline-form .inline-title { font: var(--strong) var(--fs-3)/var(--lh-tight) var(--serif); }
 .inline-form .summary, .inline-form form { margin: 0; }
 .item.confirming > .inline-form, .pick.confirming > .inline-form { border-left-color: var(--broken); }
+/* A delete question is one line: the question, then the buttons at the far end; it wraps when narrow. */
+.item.confirming > .inline-form, .pick.confirming > .inline-form, .bulk > .inline-form { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
+.item.confirming > .inline-form > form, .pick.confirming > .inline-form > form, .bulk > .inline-form > form { margin-left: auto; }
+/* Side by side the question and its warning read as one sentence, so they share a size and a face and differ only in weight and colour. */
+.item.confirming > .inline-form .inline-title, .pick.confirming > .inline-form .inline-title, .bulk > .inline-form .inline-title { font: var(--strong) var(--fs-2)/var(--lh) var(--sans); }
+.item.confirming > .inline-form .summary, .pick.confirming > .inline-form .summary, .bulk > .inline-form .summary { font-size: var(--fs-2); }
 .pick > .inline-form { margin: 0; }
 
 /* ---- The index ---- */
