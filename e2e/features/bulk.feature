@@ -94,12 +94,14 @@ Feature: Bulk actions
     And "Beta" is ticked
     And the selection count says "1 selected"
 
-  Scenario: Choosing an action with nothing ticked says so
+  Scenario: Bulk actions wait for a tick
     When I open the site
     And I enter select mode
-    And I add the tag "later" to the selection
-    Then I am told "Tick at least one bookmark first."
-    And the address is "/?select=1&notice=nothing-selected"
+    Then the bulk actions are disabled
+    When I tick "Alpha"
+    Then the bulk actions are enabled
+    When I tick "Alpha"
+    Then the bulk actions are disabled
 
   Scenario: Deleting the selection asks first and can be called off
     When I open the site

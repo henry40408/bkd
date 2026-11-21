@@ -70,12 +70,6 @@ Feature: Link check
     Then the list shows "Other"
     And the list does not show "Private"
 
-  Scenario: Check links with nothing ticked asks for a selection
-    When I open the site
-    And I enter select mode
-    And I check the links of the selection
-    Then I am told "Tick at least one bookmark first."
-
   Scenario: The edit form offers the address a moved link went to
     Given I have the bookmark "https://old.test/page" titled "Moved one" whose link moved to "https://new.test/page"
     When I open the site

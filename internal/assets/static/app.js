@@ -35,7 +35,10 @@
   function updateSelectionCount() {
     const label = document.getElementById("bulk-count");
     if (!label) return;
-    label.textContent = `${document.querySelectorAll(".pick-box input:checked").length} selected`;
+    const ticked = document.querySelectorAll(".pick-box input:checked").length;
+    label.textContent = `${ticked} selected`;
+    // Without the script the buttons stay enabled and the server answers "nothing selected".
+    for (const button of document.querySelectorAll('.bulk .line button[name="action"]')) button.disabled = ticked === 0;
   }
 
   // The new page's first `autofocus` field, else the page itself, so a screen reader
@@ -471,6 +474,8 @@
       else node.removeAttribute("aria-busy");
     }
     if (submitter) submitter.disabled = busy;
+    // Ending the busy state must not re-enable an action that has nothing ticked.
+    if (!busy) updateSelectionCount();
   }
 
   const tickedIds = (data) =>

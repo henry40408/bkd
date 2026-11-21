@@ -31,6 +31,8 @@ func registerBulkSteps(sc *godog.ScenarioContext, w *world) {
 	}))
 	sc.Step(`^I start deleting the selection$`, func() error { return w.pressBulkButton("delete") })
 	sc.Step(`^I check the links of the selection$`, func() error { return w.pressBulkButton("check") })
+	sc.Step(`^the bulk actions are disabled$`, func() error { return w.bulkActionsDisabled(true) })
+	sc.Step(`^the bulk actions are enabled$`, func() error { return w.bulkActionsDisabled(false) })
 	sc.Step(`^the selection count says `+quoted+`$`, withString(func(text string) error {
 		return w.textContains("#bulk-count", text)
 	}))
@@ -66,6 +68,24 @@ func (w *world) submitBulkTags(action, tags string) error {
 
 func (w *world) pressBulkButton(action string) error {
 	return w.click(fmt.Sprintf("%s button[name=action][value=%s]", bulkBar, action))
+}
+
+// bulkActionsDisabled retries because the script updates the buttons after each tick.
+func (w *world) bulkActionsDisabled(expected bool) error {
+	selector := bulkBar + " .line button[name=action]"
+	return harness.Eventually(fmt.Sprintf("every bulk action has disabled=%t", expected), func() (bool, error) {
+		buttons, err := w.browser.All(harness.CSS(selector))
+		if err != nil || len(buttons) == 0 {
+			return false, err
+		}
+		for _, button := range buttons {
+			_, disabled, err := button.Attr("disabled")
+			if err != nil || disabled != expected {
+				return false, err
+			}
+		}
+		return true, nil
+	})
 }
 
 func (w *world) tagsFieldHolds(expected string) error {
