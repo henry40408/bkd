@@ -279,10 +279,18 @@ func scanBookmark(rows *sql.Rows) (Bookmark, error) {
 
 // TagCounts lists every tag the user has used, with how many bookmarks carry it.
 func (s *Store) TagCounts(ctx context.Context, userID int64) ([]TagCount, error) {
+	return s.TagCountsWithStatus(ctx, userID, "")
+}
+
+// TagCountsWithStatus counts only the bookmarks with this link check result
+// (unchecked for none); a blank status counts them all. A tag none of those
+// bookmarks carry is left out.
+func (s *Store) TagCountsWithStatus(ctx context.Context, userID int64, status string) ([]TagCount, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT bookmark_tags.tag AS tag, count(*) AS count
          FROM bookmark_tags JOIN bookmarks ON bookmarks.id = bookmark_tags.bookmark_id
          WHERE bookmarks.user_id = ?1
-         GROUP BY bookmark_tags.tag ORDER BY bookmark_tags.tag`, userID)
+           AND (?2 = '' OR COALESCE(bookmarks.link_status, 'unchecked') = ?2)
+         GROUP BY bookmark_tags.tag ORDER BY bookmark_tags.tag`, userID, normalizeStatus(status))
 	if err != nil {
 		return nil, fmt.Errorf("count tags: %w", err)
 	}
@@ -298,13 +306,26 @@ func (s *Store) TagCounts(ctx context.Context, userID int64) ([]TagCount, error)
 	return counts, rows.Err()
 }
 
+// normalizeStatus spells a status the way the search filter does.
+func normalizeStatus(status string) string {
+	return strings.ToLower(strings.TrimSpace(status))
+}
+
 // LinkCounts says how many of the user's bookmarks have each link check
 // result. A result with no bookmarks is left out; unchecked counts the
 // bookmarks never checked.
 func (s *Store) LinkCounts(ctx context.Context, userID int64) ([]LinkCount, error) {
+	return s.LinkCountsWithTag(ctx, userID, "")
+}
+
+// LinkCountsWithTag counts only the bookmarks carrying this exact tag; a blank
+// tag counts them all.
+func (s *Store) LinkCountsWithTag(ctx context.Context, userID int64, tag string) ([]LinkCount, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT COALESCE(link_status, 'unchecked') AS status, count(*) AS count
          FROM bookmarks WHERE user_id = ?1
-         GROUP BY status ORDER BY status`, userID)
+           AND (?2 = '' OR EXISTS (SELECT 1 FROM bookmark_tags
+                WHERE bookmark_tags.bookmark_id = bookmarks.id AND bookmark_tags.tag = ?2))
+         GROUP BY status ORDER BY status`, userID, tag)
 	if err != nil {
 		return nil, fmt.Errorf("count link results: %w", err)
 	}

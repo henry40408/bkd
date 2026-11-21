@@ -292,3 +292,23 @@ func TestShellPagesAnswer500WhenTheBookmarkCountsFail(t *testing.T) {
 		})
 	}
 }
+
+func TestTheSidebarStacksStatusAndTagAndCountsWhatIsLeft(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("olga", false)
+	app.createBookmark(token, "alpha", "x")
+	app.createBookmark(token, "beta", "x")
+	app.createBookmark(token, "gamma", "y")
+	app.createBookmark(token, "delta")
+	app.exec("UPDATE bookmarks SET link_status = 'broken' WHERE title IN ('alpha', 'gamma')")
+
+	page := app.send(get("/?tag=x&status=broken").as(token))
+	mustContain(t, page,
+		// A status link keeps the tag, a tag link keeps the status.
+		`<a href="/?tag=x&amp;status=unchecked">Not checked<span class="count">1</span></a>`,
+		`<a href="/?tag=y&amp;status=broken">y<span class="count">1</span></a>`,
+		// The tag counts only broken bookmarks, the status counts only x ones.
+		`>Broken<span class="count">1</span>`, `>x<span class="count">1</span>`,
+		// The whole account stays the total.
+		`<span class="count">4</span>`)
+}
