@@ -169,8 +169,8 @@ form.stack { display: grid; gap: var(--sp-3); }
 /* A 14px icon in a 21px line: 4px above centres it on the first line. */
 .link-note svg { margin-top: var(--sp-1); }
 .link-note.ok b, .link-note.ok svg { color: var(--ok); }
-.link-note.broken { background: var(--broken-bg); color: var(--broken); padding: 0 var(--sp-2); }
-.link-note.redirected { background: var(--moved-bg); color: var(--moved); padding: 0 var(--sp-2); }
+.link-note.broken { background: var(--broken-bg); color: var(--broken); padding: var(--sp-2); }
+.link-note.redirected { background: var(--moved-bg); color: var(--moved); padding: var(--sp-2); }
 .actions { grid-column: 4; display: flex; gap: var(--sp-3); align-items: flex-start; opacity: 0; transition: opacity .12s; }
 .actions .btn { min-height: 0; }
 .item:focus-within .actions { opacity: 1; }
