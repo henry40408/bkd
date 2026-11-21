@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	newUserForm = ".new-user"
-	userList    = ".user-list"
+	newUserForm = "form[action='/users']"
+	userList    = ".people"
 )
 
 func registerUserSteps(sc *godog.ScenarioContext, w *world) {
@@ -115,7 +115,7 @@ func (w *world) deleteUser(username string) error {
 
 func userRow(username string) harness.Locator {
 	return harness.XPath(fmt.Sprintf(
-		"//div[contains(@class, 'user-row')][.//span[@class='name' and text()=%s]]", xpathString(username)))
+		"//ul[@class='people']/li[span[@class='who' and text()=%s]]", xpathString(username)))
 }
 
 func (w *world) userListShowsDisabled(username string) error {

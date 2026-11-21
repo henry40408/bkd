@@ -10,16 +10,18 @@ import (
 )
 
 const (
-	bulkBar      = ".bulk"
-	bulkTagsPath = ".bulk-panel input[name=tags]"
+	bulkBar = ".bulk"
+	// The form of the search bar lays out as part of the bar, so the bar is the link scope.
+	searchTools  = ".bar"
+	bulkTagsPath = ".bulk input[name=tags]"
 )
 
 func registerBulkSteps(sc *godog.ScenarioContext, w *world) {
-	sc.Step(`^I enter select mode$`, func() error { return w.clickLink(searchBar, "Select") })
-	sc.Step(`^I leave select mode$`, func() error { return w.clickLink(searchBar, "Done") })
+	sc.Step(`^I enter select mode$`, func() error { return w.clickLink(searchTools, "Select") })
+	sc.Step(`^I leave select mode$`, func() error { return w.clickLink(bulkBar, "Done") })
 	sc.Step(`^I tick `+quoted+`$`, withString(func(title string) error { return w.click(checkbox(title)) }))
 	sc.Step(`^I Shift-click `+quoted+`$`, withString(w.shiftClick))
-	sc.Step(`^I select all on this page$`, func() error { return w.clickLink(bulkBar, "Select all on this page") })
+	sc.Step(`^I select all$`, func() error { return w.clickLink(bulkBar, "Select all") })
 	sc.Step(`^I clear the selection$`, func() error { return w.clickLink(bulkBar, "Clear selection") })
 	sc.Step(`^I add the tag `+quoted+` to the selection$`, withString(func(tags string) error {
 		return w.submitBulkTags("add_tags", tags)
@@ -29,14 +31,16 @@ func registerBulkSteps(sc *godog.ScenarioContext, w *world) {
 	}))
 	sc.Step(`^I start deleting the selection$`, func() error { return w.pressBulkButton("delete") })
 	sc.Step(`^I check the links of the selection$`, func() error { return w.pressBulkButton("check") })
+	sc.Step(`^the bulk actions are disabled$`, func() error { return w.bulkActionsDisabled(true) })
+	sc.Step(`^the bulk actions are enabled$`, func() error { return w.bulkActionsDisabled(false) })
 	sc.Step(`^the selection count says `+quoted+`$`, withString(func(text string) error {
 		return w.textContains("#bulk-count", text)
 	}))
 	sc.Step(`^the selection count is blank$`, func() error {
 		return w.eventuallyText("#bulk-count is blank", "#bulk-count", func(text string) bool { return text == "" })
 	})
-	sc.Step(`^select mode is on$`, func() error { return w.textContains(searchBar, "Done") })
-	sc.Step(`^select mode is off$`, func() error { return w.textLacks(searchBar, "Done") })
+	sc.Step(`^select mode is on$`, func() error { return w.selectModeIs(true) })
+	sc.Step(`^select mode is off$`, func() error { return w.selectModeIs(false) })
 	sc.Step(`^the bulk bar shows `+quoted+`$`, withString(func(text string) error { return w.textContains(bulkBar, text) }))
 	sc.Step(`^the tags field holds `+quoted+`$`, withString(w.tagsFieldHolds))
 	sc.Step(`^`+quoted+` is ticked$`, withString(func(title string) error { return w.tickedIs(title, true) }))
@@ -66,6 +70,24 @@ func (w *world) pressBulkButton(action string) error {
 	return w.click(fmt.Sprintf("%s button[name=action][value=%s]", bulkBar, action))
 }
 
+// bulkActionsDisabled retries because the script updates the buttons after each tick.
+func (w *world) bulkActionsDisabled(expected bool) error {
+	selector := bulkBar + " .line button[name=action]"
+	return harness.Eventually(fmt.Sprintf("every bulk action has disabled=%t", expected), func() (bool, error) {
+		buttons, err := w.browser.All(harness.CSS(selector))
+		if err != nil || len(buttons) == 0 {
+			return false, err
+		}
+		for _, button := range buttons {
+			_, disabled, err := button.Attr("disabled")
+			if err != nil || disabled != expected {
+				return false, err
+			}
+		}
+		return true, nil
+	})
+}
+
 func (w *world) tagsFieldHolds(expected string) error {
 	field, err := w.element(bulkTagsPath)
 	if err != nil {
@@ -90,5 +112,13 @@ func (w *world) tickedIs(title string, expected bool) error {
 		}
 		ticked, err := box.Checked()
 		return ticked == expected, err
+	})
+}
+
+// selectModeIs waits until the Select link is pressed (class "on") or is not.
+func (w *world) selectModeIs(on bool) error {
+	return harness.Eventually(fmt.Sprintf("select mode is %t", on), func() (bool, error) {
+		pressed, err := w.browser.All(harness.CSS(searchTools + " a.on"))
+		return (len(pressed) > 0) == on, err
 	})
 }

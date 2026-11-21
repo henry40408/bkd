@@ -76,11 +76,11 @@ func TestLinkStatusesRenderLabelGlyphAndText(t *testing.T) {
 		link *LinkCheck
 		want []string
 	}{
-		{"ok", &LinkCheck{Status: "ok", CheckedAt: 1577900000}, []string{"link-ok", "Link OK: ", "checked 2020-01-01"}},
-		{"redirected", &LinkCheck{Status: "redirected", Detail: "https://new.test/"}, []string{"link-redirected", "Link moved: ", "now at https://new.test/"}},
-		{"broken", &LinkCheck{Status: "broken", Detail: "HTTP <404>"}, []string{"link-broken", "Broken link: ", "HTTP &lt;404&gt;"}},
-		{"broken without detail", &LinkCheck{Status: "broken"}, []string{"link-broken", "Broken link: "}},
-		{"unknown", &LinkCheck{Status: "unknown", Detail: "timed out"}, []string{"link-unknown", "Link not confirmed: ", "timed out", ">?<"}},
+		{"ok", &LinkCheck{Status: "ok", CheckedAt: 1577900000}, []string{`class="link-note ok"`, "<b>Link OK</b>, checked ", `title="Checked 2020-01-01`}},
+		{"redirected", &LinkCheck{Status: "redirected", Detail: "https://new.test/"}, []string{`class="link-note redirected"`, "<b>Link moved</b>, now at https://new.test/, checked "}},
+		{"broken", &LinkCheck{Status: "broken", Detail: "HTTP <404>"}, []string{`class="link-note broken"`, "<b>Broken link</b>: HTTP &lt;404&gt;, checked "}},
+		{"broken without detail", &LinkCheck{Status: "broken"}, []string{`class="link-note broken"`, "<b>Broken link</b>, checked "}},
+		{"unknown", &LinkCheck{Status: "unknown", Detail: "timed out"}, []string{`class="link-note unknown"`, "<b>Link not confirmed</b>: timed out, checked ", `d="M5.6 6a2.4`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -93,7 +93,7 @@ func TestLinkStatusesRenderLabelGlyphAndText(t *testing.T) {
 func TestUncheckedLinksShowNoLinkLine(t *testing.T) {
 	for _, link := range []*LinkCheck{nil, {Status: "unchecked"}} {
 		row := BookmarkRow{ID: 1, URL: "https://a.test/", Title: "A", Link: link}
-		requireAbsent(t, string(bookmarkItem(row, goldenNow, "/", nil)), "link-note", "link-unchecked")
+		requireAbsent(t, string(bookmarkItem(row, goldenNow, "/", nil)), "link-note")
 	}
 }
 
@@ -160,6 +160,26 @@ func TestTransferPageHasImportFormAndExportLinks(t *testing.T) {
 	requireAbsent(t, page, "import-result")
 }
 
+func TestTransferPageImportsThroughTheDropBox(t *testing.T) {
+	page := TransferPage(TransferView{Shell: alice(SectionTransfer)})
+	requireContains(t, page, `<form class="drop" method="post" action="/transfer/import" enctype="multipart/form-data">`,
+		`<label class="field">Bookmarks file <input type="file" name="file" accept=".html,.htm,text/html" required></label>`,
+		`<button class="btn primary ico" type="submit" title="Import bookmarks">`,
+		`<span class="lbl">Import bookmarks</span>`,
+		`<p class="hint" data-script-only hidden>Or drop the file in this box.</p>`,
+		`<a class="btn" href="/api/export?format=html" download><svg`,
+		`<a class="btn" href="/api/export?format=json" download><svg`)
+	requireAbsent(t, page, `role="alert"`)
+}
+
+func TestSignInAndSetUpShowTheBrandAboveTheTitle(t *testing.T) {
+	login := LoginPage(LoginView{})
+	requireContains(t, login, `<main class="auth" id="main">`, `<span class="brand">bkd</span><h1>Sign in</h1>`)
+	requireAbsent(t, login, `class="card"`, `class="login"`)
+	setup := SetupPage(SetupView{})
+	requireContains(t, setup, `<span class="brand">bkd</span><h1>Set up bkd</h1>`)
+}
+
 func TestTransferPageReportsImportWithExamples(t *testing.T) {
 	report := &ImportReport{
 		Added: 3, Duplicates: 2, Invalid: 1,
@@ -210,4 +230,18 @@ func TestUsersPageShowsActionsOnlyForOtherUsers(t *testing.T) {
 	}})
 	requireContains(t, page, "/users/2/role")
 	requireAbsent(t, page, "/users/1/role")
+}
+
+func TestUserRowShowsBadgesOnlyForItsState(t *testing.T) {
+	plain := string(userRow(UserRow{ID: 3, Username: "bo"}, goldenNow))
+	requireContains(t, plain, `<li><span class="who">bo<span class="hint">Created `)
+	requireAbsent(t, plain, "badge")
+	both := string(userRow(UserRow{ID: 3, Username: "bo", IsAdmin: true, IsDisabled: true}, goldenNow))
+	requireContains(t, both, `<span class="badge admin">Admin</span><span class="badge">Disabled</span>`)
+}
+
+func TestUserActionsKeepTheirLabelsNextToTheirIcons(t *testing.T) {
+	actions := string(userActions(UserRow{ID: 5, Username: "bo", IsDisabled: true}))
+	requireContains(t, actions, `title="Enable"`, `<span class="lbl">Enable</span>`, `title="Reset password"`,
+		`<span class="lbl">Reset password</span>`, `class="btn quiet ico danger-text"`, `<span class="lbl">Delete</span>`)
 }

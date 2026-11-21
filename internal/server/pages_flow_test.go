@@ -82,7 +82,7 @@ func TestUsersPageMarksAdminsAndDisabledAccounts(t *testing.T) {
 	app.addUser("bob", true)
 	app.exec("UPDATE users SET disabled_at = 1 WHERE id = ?1", member)
 	page := app.send(get("/users").as(admin))
-	mustContain(t, page, "Admin · ", "Disabled · ", `aria-label="Demote bob"`, `aria-label="Enable mei"`)
+	mustContain(t, page, `<span class="badge admin">Admin</span>`, `<span class="badge">Disabled</span>`, `aria-label="Demote bob"`, `aria-label="Enable mei"`)
 	mustLack(t, page, `aria-label="Demote root"`)
 	mustContain(t, app.send(get("/users?notice=user-changed").as(admin)), "Saved.")
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/henry40408/bkd/internal/views"
 )
 
-// Keeps (page - 1) * page size far from overflowing.
+// Keeps page * page size far from overflowing; a page above it is the last page.
 const maxListPage = 1_000_000
 
 // listContext is everything the list page shows besides the bookmarks.
@@ -80,13 +80,16 @@ func rowOf(bookmark bookmarks.Bookmark, filter search.Filter) views.BookmarkRow 
 func (a *App) listPage(ctx context.Context, user auth.SessionUser, in listContext) (views.BookmarksView, *pageError) {
 	view := in.view
 	filter := filterFor(view)
-	window := bookmarks.Page{Limit: views.PageSize + 1, Offset: (view.Page - 1) * views.PageSize}
+	// Load more makes a page longer instead of moving on, so every page starts at the top.
+	window := bookmarks.Page{Limit: view.Page * views.PageSize}
 	found, err := a.bookmarks.List(ctx, user.UserID, filter, window)
 	if err != nil {
 		return views.BookmarksView{}, fromAPI(internal(err))
 	}
-	hasNext := len(found) > views.PageSize
-	found = found[:min(len(found), views.PageSize)]
+	matching, err := a.bookmarks.Count(ctx, user.UserID, filter)
+	if err != nil {
+		return views.BookmarksView{}, fromAPI(internal(err))
+	}
 	shell, failure := a.loadShell(ctx, user, activeSection{
 		section: views.SectionBookmarks, tag: view.Tag, status: view.Status, notice: in.notice,
 	})
@@ -95,7 +98,7 @@ func (a *App) listPage(ctx context.Context, user auth.SessionUser, in listContex
 	}
 	page := views.BookmarksView{
 		Shell: shell, List: view, Now: auth.UnixNow(), Add: in.add, Bulk: in.bulk,
-		PickEmpty: in.pickEmpty, HasNext: hasNext,
+		PickEmpty: in.pickEmpty, Matching: matching,
 	}
 	for _, bookmark := range found {
 		page.Rows = append(page.Rows, rowOf(bookmark, filter))
@@ -212,6 +215,15 @@ func (a *App) ownBookmark(r *http.Request, user auth.SessionUser) (bookmarks.Boo
 	return bookmark, id, nil
 }
 
+// movedTo is where a moved link now answers from: the detail of a redirected
+// check. Empty for any other bookmark.
+func movedTo(bookmark bookmarks.Bookmark) string {
+	if bookmark.Link == nil || bookmark.Link.Status != "redirected" {
+		return ""
+	}
+	return bookmark.Link.Detail
+}
+
 func (a *App) pageEditForm(w http.ResponseWriter, r *http.Request, user auth.SessionUser) *pageError {
 	bookmark, id, failure := a.ownBookmark(r, user)
 	if failure != nil {
@@ -224,6 +236,7 @@ func (a *App) pageEditForm(w http.ResponseWriter, r *http.Request, user auth.Ses
 	writeHTML(w, http.StatusOK, views.EditPage(views.EditView{
 		Shell: shell, ID: id, URL: bookmark.URL, Title: bookmark.Title, Note: bookmark.Note,
 		Tags: strings.Join(bookmark.Tags, ", "), Back: pathOrHome(r.URL.Query().Get("back")),
+		MovedTo: movedTo(bookmark),
 	}))
 	return nil
 }
@@ -273,6 +286,7 @@ func (a *App) pageDeleteForm(w http.ResponseWriter, r *http.Request, user auth.S
 	back := pathOrHome(r.URL.Query().Get("back"))
 	writeHTML(w, http.StatusOK, views.ConfirmDeletePage(views.ConfirmDeleteView{
 		Shell: shell, Heading: "Delete this bookmark?", Detail: bookmark.Title,
+		Warning:    "This cannot be undone.",
 		Action:     "/bookmarks/delete",
 		Hidden:     []views.HiddenField{{Name: "id", Value: strconv.FormatInt(id, 10)}, {Name: "back", Value: back}},
 		CancelHref: back,

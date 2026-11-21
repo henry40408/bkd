@@ -31,8 +31,10 @@ type Shell struct {
 	Forwarded  bool
 	Section    Section
 	AllCurrent bool
-	Statuses   []FilterLink
-	Tags       []FilterLink
+	// Total is how many bookmarks the user has.
+	Total    int64
+	Statuses []FilterLink
+	Tags     []FilterLink
 	// Notice is the fixed text to announce, or empty.
 	Notice string
 }
@@ -54,7 +56,7 @@ func document(title string, body node) string {
 
 // bare is a page with no sidebar: sign-in, set-up and errors.
 func bare(title string, content node) string {
-	return document(title, el("main", []attr{classes("login"), a("id", "main")}, content))
+	return document(title, el("main", []attr{classes("auth"), a("id", "main")}, content))
 }
 
 // framed is a signed-in page: the sidebar around content.
@@ -65,14 +67,18 @@ func framed(title string, shell Shell, content node) string {
 	body := el("div", []attr{classes("app")},
 		void("input", classes("sr-only"), a("id", "menu-toggle"), a("type", "checkbox")),
 		el("header", []attr{classes("topbar")},
-			el("label", []attr{classes("menu"), a("for", "menu-toggle"), a("aria-label", "Open menu")}),
-			el("p", []attr{classes("brand")}, el("a", []attr{a("href", "/")}, text("bkd"))),
+			el("label", []attr{classes("btn", "menu"), a("for", "menu-toggle"), a("aria-label", "Open menu")}, icon(iconMenu)),
+			brand(),
 		),
 		el("label", []attr{classes("backdrop"), a("for", "menu-toggle")}),
 		sidebar(shell),
 		el("main", []attr{a("id", "main"), a("tabindex", "-1")}, notice, content),
 	)
 	return document(title, body)
+}
+
+func brand() node {
+	return el("a", []attr{classes("brand"), a("href", "/")}, text("bkd"))
 }
 
 func current(isCurrent bool) attr {
@@ -82,42 +88,84 @@ func current(isCurrent bool) attr {
 func filterList(filters []FilterLink) node {
 	items := make([]node, len(filters))
 	for i, filter := range filters {
-		items[i] = el("li", nil, el("a", []attr{a("href", filter.Href), current(filter.Current)},
-			text(filter.Label),
-			el("span", []attr{classes("count")}, number(filter.Count)),
-		))
+		items[i] = countedLink(filter)
 	}
 	return el("ul", nil, items...)
 }
 
-func sidebar(shell Shell) node {
-	on := func(section Section) attr { return current(shell.Section == section) }
-	statuses := maybe(len(shell.Statuses) > 0, func() node {
-		return group(el("h2", nil, text("Status")), filterList(shell.Statuses))
-	})
-	account := maybe(!shell.Forwarded, func() node {
-		return el("a", []attr{a("href", "/account"), on(SectionAccount)}, text("Account"))
-	})
-	users := maybe(shell.IsAdmin, func() node {
-		return el("a", []attr{a("href", "/users"), on(SectionUsers)}, text("Manage users"))
-	})
+// countedLink is a sidebar entry with how many bookmarks it leads to.
+func countedLink(filter FilterLink) node {
+	return el("li", nil, el("a", []attr{a("href", filter.Href), current(filter.Current)},
+		text(filter.Label),
+		el("span", []attr{classes("count")}, number(filter.Count)),
+	))
+}
+
+func sectionLink(href, label string, isCurrent bool) node {
+	return el("li", nil, el("a", []attr{a("href", href), current(isCurrent)}, text(label)))
+}
+
+func sectionList(shell Shell) node {
+	on := func(section Section) bool { return shell.Section == section }
+	return el("ul", nil,
+		countedLink(FilterLink{Label: "All bookmarks", Count: shell.Total, Href: "/", Current: shell.AllCurrent}),
+		sectionLink("/transfer", "Import and export", on(SectionTransfer)),
+		sectionLink("/settings", "Settings", on(SectionSettings)),
+		maybe(!shell.Forwarded, func() node { return sectionLink("/account", "Account", on(SectionAccount)) }),
+		maybe(shell.IsAdmin, func() node { return sectionLink("/users", "Manage users", on(SectionUsers)) }),
+	)
+}
+
+func filterGroup(heading string, filters []FilterLink) node {
+	return el("div", nil, el("h2", nil, text(heading)), filterList(filters))
+}
+
+func signedInAs(shell Shell) node {
 	signOut := maybe(!shell.Forwarded, func() node {
 		return el("form", []attr{a("method", "post"), a("action", "/logout")},
-			el("button", []attr{classes("link"), a("type", "submit")}, text("Sign out")))
+			el("button", []attr{classes("btn", "quiet"), a("type", "submit")}, text("Sign out")))
 	})
-	return el("nav", []attr{classes("side"), a("id", "sidebar"), a("aria-label", "Filters")},
-		el("p", []attr{classes("brand")}, el("a", []attr{a("href", "/")}, text("bkd"))),
-		el("ul", nil, el("li", nil, el("a", []attr{a("href", "/"), current(shell.AllCurrent)}, text("All bookmarks")))),
-		statuses,
-		el("h2", nil, text("Tags")),
-		filterList(shell.Tags),
-		el("div", []attr{classes("me")},
-			el("span", nil, text("Signed in as "), el("strong", nil, text(shell.Username))),
-			el("a", []attr{a("href", "/transfer"), on(SectionTransfer)}, text("Import and export")),
-			el("a", []attr{a("href", "/settings"), on(SectionSettings)}, text("Settings")),
-			account, users, signOut,
-		),
+	return el("div", []attr{classes("me")},
+		el("p", nil, text("Signed in as "), el("strong", nil, text(shell.Username))),
+		signOut,
 	)
+}
+
+func sidebar(shell Shell) node {
+	statuses := maybe(len(shell.Statuses) > 0, func() node { return filterGroup("Status", shell.Statuses) })
+	return el("nav", []attr{classes("side"), a("id", "sidebar"), a("aria-label", "Sidebar")},
+		brand(),
+		sectionList(shell),
+		statuses,
+		filterGroup("Tags", shell.Tags),
+		signedInAs(shell),
+	)
+}
+
+// submitButton is the main button of a form.
+func submitButton(label string) node {
+	return el("button", []attr{classes("btn", "primary"), a("type", "submit")}, text(label))
+}
+
+// sheet is the narrow column of a form page; its sections are set apart by rules.
+func sheet(sections ...node) node {
+	return el("div", []attr{classes("sheet")}, sections...)
+}
+
+// sheetSection is one section of a sheet, under its heading.
+func sheetSection(heading string, children ...node) node {
+	return el("section", nil, append([]node{el("h2", nil, text(heading))}, children...)...)
+}
+
+// iconSubmitButton is a submit button that keeps its text on every screen
+// size, with an icon in front.
+func iconSubmitButton(name iconName, label string) node {
+	return el("button", []attr{classes("btn", "primary"), a("type", "submit")}, iconLabel(name, label))
+}
+
+// formButtons is the row of buttons under a form.
+func formButtons(buttons ...node) node {
+	return el("div", []attr{classes("btns")}, buttons...)
 }
 
 // errorLine is a form's refusal, shown above its button.

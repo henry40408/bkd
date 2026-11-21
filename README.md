@@ -100,7 +100,7 @@ Every word you type must match somewhere in the title, URL, note or a tag. Case 
 
 Prefixes combine with the rest: `-tag:old`, `title:"rust book"`. Anything else is plain text, so `https://x.test` and a prefix with nothing after it search for what you typed. A search uses at most 8 terms of 100 characters each.
 
-Every screen has its own address: the search, the tag or status you chose in the sidebar, the page of results, and the "Import and export" and "Manage users" screens (for example `/?q=rust&tag=web&status=broken&page=2`). Reload the page, use Back, or send the link, and you land on the same list. bkd also works with JavaScript turned off; the script only makes pages change faster.
+Every screen has its own address: the search, the tag or status you chose in the sidebar, how much of the list is shown (the list grows with "Load more", and `page=2` shows the first 100 bookmarks), and the "Import and export" and "Manage users" screens (for example `/?q=rust&tag=web&status=broken&page=2`). Reload the page, use Back, or send the link, and you land on the same list. bkd also works with JavaScript turned off; the script only makes pages change faster.
 
 ## Random
 
@@ -108,7 +108,7 @@ The "Random" button next to the search box shows one bookmark picked from what t
 
 ## Bulk actions
 
-"Select" next to the search box turns on checkboxes. Tick the bookmarks you want (Shift-click ticks a range, "Select all" ticks every loaded row), then add a tag to all of them, remove a tag from all of them, or delete them. Tags are separated by commas, as in the add form. Delete asks first and cannot be undone. After an action, select mode ends. Over the API: `POST /api/bookmarks/bulk` with `{"ids": [...], "action": "delete" | "add_tags" | "remove_tags", "tags": [...]}` (up to 200 ids; one transaction, so it changes all of them or none; 404 if any id is missing or not yours). It answers `{"changed": n}`.
+"Select" next to the search box turns on checkboxes. Tick the bookmarks you want (Shift-click ticks a range, "Select all" ticks every row shown, and reads "Select the 50 shown" while "Load more" still hides some), then add a tag to all of them, remove a tag from all of them, or delete them. Tags are separated by commas, as in the add form. Delete asks first and cannot be undone. After an action, select mode ends. Over the API: `POST /api/bookmarks/bulk` with `{"ids": [...], "action": "delete" | "add_tags" | "remove_tags", "tags": [...]}` (up to 200 ids; one transaction, so it changes all of them or none; 404 if any id is missing or not yours). It answers `{"changed": n}`.
 
 ## Link check
 
@@ -116,7 +116,7 @@ In select mode, tick bookmarks and press "Check links". The server asks each add
 
 - **Link OK** (green check, "checked <time>"): the page answers at the saved address.
 - **Broken link** (red cross, red background): HTTP 4xx or 5xx (except the ones below), a refused connection or failed DNS lookup, or a redirect loop.
-- **Link moved** (amber arrow, amber background, "now at <address>"): the page answers, but at another address. bkd only tells you; it does not change the saved URL.
+- **Link moved** (amber arrow, amber background, "now at <address>"): the page answers, but at another address. bkd does not change the saved URL by itself, but the edit form shows the new address and offers "Use new address" (with JavaScript on), which fills it in for you to save.
 - **Link not confirmed** (grey question mark): the site refused robots (401, 403, 429), it did not answer within 10 seconds, or the address was not contacted because it is not public.
 
 A site that answers 429 or 503 is asked to be left alone, and so is a site that does not answer twice in a row: the check does not ask it about the other bookmarks, and says so ("example.com asked us to slow down, so some links were left unchecked"). Each bookmark gets 10 seconds in all (HEAD and GET together). Without a script the page is one response, so it stops waiting after 45 seconds and tells you that some links were not checked. The background check leaves such a site alone for the `Retry-After` it gave (up to 24 hours), or 1 minute, doubling each time in a row, up to 24 hours; one normal answer starts it over. The wait follows the site that answered, so a short link that redirects to a throttling site does not stop the short-link site. A page behind Cloudflare's bot check (`cf-mitigated: challenge`) is "not confirmed", not broken. The checker identifies itself as `bkd-link-checker/<version>` with the project's address in its `User-Agent`.

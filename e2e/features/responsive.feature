@@ -64,3 +64,27 @@ Feature: Narrow windows
     And the backdrop covers the page
     When I tap the backdrop
     Then the sidebar is hidden
+
+  Scenario: On a phone the tools are icons that keep their names
+    Given the window is phone-sized
+    When I open the site
+    Then the control labelled "Edit Alpha" shows only its icon
+    And the control labelled "Delete Alpha" shows only its icon
+    And the control labelled "Random" shows only its icon
+    And the control labelled "Select" shows only its icon
+    And the control labelled "Add bookmark" shows only its icon
+
+  Scenario Outline: On a phone no page scrolls sideways
+    Given the window is phone-sized
+    When I open the site at "<path>"
+    Then the heading says "<heading>"
+    And the page does not scroll sideways
+
+    Examples:
+      | path              | heading           |
+      | /                 | All bookmarks     |
+      | /?select=1        | All bookmarks     |
+      | /bookmarks/1/edit | Edit bookmark     |
+      | /transfer         | Import and export |
+      | /account          | Account           |
+      | /users            | Users             |

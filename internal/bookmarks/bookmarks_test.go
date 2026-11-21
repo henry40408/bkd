@@ -345,6 +345,28 @@ func TestLinkCountsCoverOnlyTheOwnerAndNameUnchecked(t *testing.T) {
 	assertEqual(t, counts, []LinkCount{{"broken", 2}, {"unchecked", 1}})
 }
 
+func TestCountCoversOnlyTheOwnerAndTheFilter(t *testing.T) {
+	store, pool := newStore(t)
+	henry := dbtest.InsertUser(t, pool, "henry")
+	mei := dbtest.InsertUser(t, pool, "mei")
+	count := func(user int64, filter Filter) int64 {
+		t.Helper()
+		got, err := store.Count(bg, user, filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	assertEqual(t, count(henry, nil), int64(0))
+	create(t, store, henry, valid(t, "one"), 1)
+	create(t, store, henry, valid(t, "two"), 2)
+	create(t, store, mei, valid(t, "one"), 3)
+	assertEqual(t, count(henry, nil), int64(2))
+	assertEqual(t, count(mei, nil), int64(1))
+	assertEqual(t, count(henry, titleIs("one")), int64(1))
+	assertEqual(t, count(henry, titleIs("none")), int64(0))
+}
+
 func TestRandomPicksOneOfTheOwnersBookmarks(t *testing.T) {
 	store, pool := newStore(t)
 	henry := dbtest.InsertUser(t, pool, "henry")
@@ -388,4 +410,46 @@ func TestImportSkipsKnownAndRepeatedURLsInOneTransaction(t *testing.T) {
 	}
 	assertEqual(t, added, 1)
 	assertEqual(t, len(listTitles(t, store, user)), 2)
+}
+
+func TestCountsNarrowedByTheOtherFilter(t *testing.T) {
+	store, pool := newStore(t)
+	henry := dbtest.InsertUser(t, pool, "henry")
+	cases := []struct {
+		title  string
+		tags   []string
+		status any
+	}{
+		{"one", []string{"rust", "web"}, "broken"},
+		{"two", []string{"rust"}, nil},
+		{"three", []string{"web"}, "ok"},
+	}
+	for _, c := range cases {
+		id := create(t, store, henry, valid(t, c.title, c.tags...), 1).ID
+		if _, err := pool.Exec("UPDATE bookmarks SET link_status = ?1 WHERE id = ?2", c.status, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tags, err := store.TagCountsWithStatus(bg, henry, " Broken ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEqual(t, tags, []TagCount{{"rust", 1}, {"web", 1}})
+	tags, err = store.TagCountsWithStatus(bg, henry, "unchecked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEqual(t, tags, []TagCount{{"rust", 1}})
+
+	links, err := store.LinkCountsWithTag(bg, henry, "rust")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEqual(t, links, []LinkCount{{"broken", 1}, {"unchecked", 1}})
+	links, err = store.LinkCountsWithTag(bg, henry, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEqual(t, links, []LinkCount{{"broken", 1}, {"ok", 1}})
 }

@@ -15,11 +15,21 @@ Feature: Bookmarks
     And the link "Example" points to "https://example.com"
     And the sidebar lists the tag "rust"
 
-  Scenario: A URL without a scheme is stopped by the browser
-    When I add the bookmark "example.com" titled "Example" tagged "rust"
+  Scenario: A URL without a scheme cannot be saved
+    When I open the site
+    And I fill the add form with the URL "example.com" and the title "Example"
     Then the browser refuses the field "#add input[name=url]"
-    And the address is "/"
+    And the add form cannot be saved
+    When I press Enter in the field "#add input[name=url]"
+    Then the address is "/"
     And the account has exactly 0 bookmarks
+
+  Scenario: The add form can be saved once the URL is valid
+    When I open the site
+    And I fill the add form with the URL "" and the title "Example"
+    Then the add form cannot be saved
+    When I fill the add form with the URL "https://example.com" and the title "Example"
+    Then the add form can be saved
 
   Scenario: The server refuses a URL it cannot save and keeps what was typed
     When I open the site
@@ -61,6 +71,16 @@ Feature: Bookmarks
     Then I see the error "must start with http"
     And the edit form holds "Zebra" as the title
     And the address is "/"
+
+  Scenario: The edit form can be saved only with a valid URL
+    Given I have the bookmark "https://a.test" titled "Zebra"
+    When I open the site
+    And I start editing "Zebra"
+    Then the edit form can be saved
+    When I type the URL "" in the edit form
+    Then the edit form cannot be saved
+    When I type the URL "https://b.test" in the edit form
+    Then the edit form can be saved
 
   Scenario: Escape closes the edit form
     Given I have the bookmark "https://a.test" titled "Zebra"
@@ -201,31 +221,26 @@ Feature: Bookmarks
     Then I see the empty message "No bookmarks match."
     And the address is "/?q=zzz&tag=rust"
 
-  Scenario: The pager appears only when there is more
+  Scenario: Load more appears only when there is more
     Given I have 50 bookmarks
     When I open the site
     Then the list has 50 bookmarks
-    And the pager does not offer "Older"
-    And the pager does not offer "Newer"
+    And the list shows "All 50 bookmarks shown"
+    And Load more is not offered
     Given I have 1 more bookmark
     When I open the site
     Then the list has 50 bookmarks
-    And the pager offers "Older"
-    And the pager does not offer "Newer"
+    And the list shows "Showing 50 of 51"
+    And Load more is offered
 
-  Scenario: Older and Newer move between pages
+  Scenario: Load more adds the rest of the list in place
     Given I have 51 bookmarks
     When I open the site
-    And I choose "Older" in the pager
+    And I choose Load more
     Then the address is "/?page=2"
-    And the list has 1 bookmarks
-    And the list shows "Showing 51–51"
-    And the pager offers "Newer"
-    And the pager does not offer "Older"
-    When I choose "Newer" in the pager
-    Then the address is "/"
-    And the list has 50 bookmarks
-    And the pager offers "Older"
+    And the list has 51 bookmarks
+    And the list shows "All 51 bookmarks shown"
+    And Load more is not offered
 
   Scenario: Editing on the second page returns to the second page
     Given I have 51 bookmarks

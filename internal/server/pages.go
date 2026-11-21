@@ -6,6 +6,7 @@ import (
 
 	"github.com/henry40408/bkd/internal/auth"
 	"github.com/henry40408/bkd/internal/bookmarks"
+	"github.com/henry40408/bkd/internal/search"
 	"github.com/henry40408/bkd/internal/views"
 )
 
@@ -127,22 +128,25 @@ type activeSection struct {
 
 // loadShell builds the page frame around a signed-in screen.
 func (a *App) loadShell(ctx context.Context, user auth.SessionUser, active activeSection) (views.Shell, *pageError) {
-	tags, err := a.bookmarks.TagCounts(ctx, user.UserID)
-	if err != nil {
-		return views.Shell{}, fromAPI(internal(err))
-	}
-	links, err := a.bookmarks.LinkCounts(ctx, user.UserID)
-	if err != nil {
-		return views.Shell{}, fromAPI(internal(err))
-	}
 	onList := active.section == views.SectionBookmarks
 	// Off the list nothing is current: no status or tag is ever empty.
-	currentStatus, currentTag := "", ""
+	current := listFilters{}
 	if onList {
-		currentStatus = active.status
-		if active.status == "" {
-			currentTag = active.tag
-		}
+		current = listFilters{status: active.status, tag: active.tag}
+	}
+	// Each list of links counts only what the other filter leaves, so the
+	// numbers say what a click will show. The total is always the whole account.
+	tags, err := a.bookmarks.TagCountsWithStatus(ctx, user.UserID, current.status)
+	if err != nil {
+		return views.Shell{}, fromAPI(internal(err))
+	}
+	links, err := a.bookmarks.LinkCountsWithTag(ctx, user.UserID, search.NewFilter("", current.tag).Tag())
+	if err != nil {
+		return views.Shell{}, fromAPI(internal(err))
+	}
+	all, err := a.bookmarks.LinkCounts(ctx, user.UserID)
+	if err != nil {
+		return views.Shell{}, fromAPI(internal(err))
 	}
 	return views.Shell{
 		Username:   user.Username,
@@ -150,14 +154,40 @@ func (a *App) loadShell(ctx context.Context, user auth.SessionUser, active activ
 		Forwarded:  user.ViaProxy,
 		Section:    active.section,
 		AllCurrent: onList && active.tag == "" && active.status == "",
-		Statuses:   statusLinks(links, currentStatus),
-		Tags:       tagLinks(tags, currentTag),
+		Total:      totalOf(all),
+		Statuses:   statusLinks(links, current),
+		Tags:       tagLinks(tags, current),
 		Notice:     views.NoticeText(active.notice),
 	}, nil
 }
 
+// totalOf is how many bookmarks the counts add up to: each one has exactly one status.
+func totalOf(counts []bookmarks.LinkCount) int64 {
+	var total int64
+	for _, count := range counts {
+		total += count.Count
+	}
+	return total
+}
+
+// listFilters are the status and tag the list is narrowed to. A sidebar link
+// changes its own kind of filter and keeps the other, so the two stack.
+type listFilters struct{ status, tag string }
+
+// query is the address query of the filters, tag first like the list's own.
+func (f listFilters) query() [][2]string {
+	var pairs [][2]string
+	if f.tag != "" {
+		pairs = append(pairs, [2]string{"tag", f.tag})
+	}
+	if f.status != "" {
+		pairs = append(pairs, [2]string{"status", f.status})
+	}
+	return pairs
+}
+
 // statusLinks lists the statuses that have bookmarks.
-func statusLinks(counts []bookmarks.LinkCount, current string) []views.FilterLink {
+func statusLinks(counts []bookmarks.LinkCount, current listFilters) []views.FilterLink {
 	var links []views.FilterLink
 	for _, filter := range linkFilters {
 		for _, count := range counts {
@@ -167,8 +197,8 @@ func statusLinks(counts []bookmarks.LinkCount, current string) []views.FilterLin
 			links = append(links, views.FilterLink{
 				Label:   filter.label,
 				Count:   count.Count,
-				Href:    views.WithQuery("/", [][2]string{{"status", filter.status}}),
-				Current: current == filter.status,
+				Href:    views.WithQuery("/", listFilters{status: filter.status, tag: current.tag}.query()),
+				Current: current.status == filter.status,
 			})
 			break
 		}
@@ -176,16 +206,15 @@ func statusLinks(counts []bookmarks.LinkCount, current string) []views.FilterLin
 	return links
 }
 
-// tagLinks lists every tag. A status filter replaces the tag filter in the
-// sidebar, as it always did: the caller passes no current tag then.
-func tagLinks(counts []bookmarks.TagCount, current string) []views.FilterLink {
+// tagLinks lists the tags that have bookmarks.
+func tagLinks(counts []bookmarks.TagCount, current listFilters) []views.FilterLink {
 	links := make([]views.FilterLink, len(counts))
 	for i, entry := range counts {
 		links[i] = views.FilterLink{
 			Label:   entry.Tag,
 			Count:   entry.Count,
-			Href:    views.WithQuery("/", [][2]string{{"tag", entry.Tag}}),
-			Current: current == entry.Tag,
+			Href:    views.WithQuery("/", listFilters{status: current.status, tag: entry.Tag}.query()),
+			Current: current.tag == entry.Tag,
 		}
 	}
 	return links

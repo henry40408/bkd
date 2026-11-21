@@ -37,18 +37,19 @@ Feature: The pages work without a script
     Then the address is "/?tag=rust"
     And the list does not show "Beta"
 
-  Scenario: The pager works with plain links
+  Scenario: Load more works with a plain link
     Given I have 50 more bookmarks
     When I open the site
-    And I choose "Older" in the pager
+    And I choose Load more
     Then the address is "/?page=2"
-    And the pager offers "Newer"
+    And the list has 52 bookmarks
+    And Load more is not offered
 
   Scenario: Bulk actions work with plain checkboxes and forms
     When I open the site
     And I enter select mode
     Then the selection count is blank
-    When I select all on this page
+    When I select all
     Then "Alpha" is ticked
     And "Beta" is ticked
     When I clear the selection
@@ -98,3 +99,14 @@ Feature: The pages work without a script
     When I open Account
     And I change my password from "correct-horse-battery" to "a-brand-new-password" but repeat "a-brand-new-passwore"
     Then I see the error "are different"
+
+  Scenario: The edit page of a moved link shows where it went but has no button
+    Given I have the bookmark "https://old.test/page" titled "Moved one" whose link moved to "https://new.test/page"
+    When I open the site
+    And I start editing "Moved one"
+    Then the edit form says "This link moved to https://new.test/page"
+    And the new address button is not offered
+
+  Scenario: The import page does not offer dropping a file
+    When I open Import and export
+    Then the import box does not offer dropping a file

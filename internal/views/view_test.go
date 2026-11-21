@@ -117,7 +117,7 @@ func TestWithQueryAppendsAfterAnExistingQuery(t *testing.T) {
 func TestSelectModeTicksTheChosenRows(t *testing.T) {
 	view := BookmarksView{
 		Shell: emptyShell("alice", false), List: ListView{Page: 1, Select: true}, Now: goldenNow,
-		Rows: pageRows(2, 1),
+		Rows: pageRows(2, 1), Matching: 2,
 		Bulk: BulkState{Selected: []int64{5}, Tags: "a, b", Error: "Choose an action."},
 	}
 	page := BookmarksPage(view)
@@ -128,8 +128,9 @@ func TestSelectModeTicksTheChosenRows(t *testing.T) {
 		`<input type="checkbox" name="id-6" value="1" aria-label="Select Page 2">`,
 		`<input type="text" name="tags" value="a, b"`,
 		`<p class="err" role="alert">Choose an action.</p>`,
-		`<a class="button quiet-button on" href="/">Done</a>`,
-		`Select all on this page`,
+		`<a class="btn ico quiet" href="/" title="Done">`,
+		`<a class="btn ico on" href="/" title="Select">`,
+		`Select all`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page lacks %s", want)
@@ -142,28 +143,54 @@ func TestSelectModeTicksTheChosenRows(t *testing.T) {
 	}
 }
 
-func TestTagsRowOpensOnlyForARefusalOrTypedTags(t *testing.T) {
-	const closed = `<input id="bulk-tags-toggle" type="checkbox">`
-	const open = `<input id="bulk-tags-toggle" type="checkbox" checked>`
-	cases := []struct {
-		name string
-		bulk BulkState
-		want string
-	}{
-		{"nothing to show", BulkState{}, closed},
-		{"a refusal", BulkState{Error: "Choose an action."}, open},
-		{"typed tags", BulkState{Tags: "a"}, open},
+func TestBulkBarFollowsTheListAndHasNoTagsToggle(t *testing.T) {
+	view := BookmarksView{
+		Shell: emptyShell("alice", false), List: ListView{Page: 1, Select: true}, Now: goldenNow, Rows: pageRows(1, 1),
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			view := BookmarksView{
-				Shell: emptyShell("alice", false), List: ListView{Page: 1, Select: true}, Now: goldenNow,
-				Rows: pageRows(1, 1), Bulk: tc.bulk,
-			}
-			if page := BookmarksPage(view); !strings.Contains(page, tc.want) {
-				t.Errorf("page lacks %s", tc.want)
-			}
-		})
+	page := BookmarksPage(view)
+	list, bar := strings.Index(page, `<ul class="list selecting">`), strings.Index(page, `class="bulk"`)
+	if list < 0 || bar < list {
+		t.Errorf("the bulk bar must come after the list (list %d, bar %d)", list, bar)
+	}
+	requireAbsent(t, page, "bulk-tags-toggle")
+	requireContains(t, page, `name="action" value="add_tags"`, `name="action" value="remove_tags"`,
+		`name="action" value="check"`, `name="action" value="delete"`, `id="bulk-count"`)
+}
+
+func TestSelectLinkIsOnlyPressedInSelectMode(t *testing.T) {
+	view := BookmarksView{Shell: emptyShell("alice", false), List: ListView{Page: 1}, Rows: pageRows(1, 1)}
+	page := BookmarksPage(view)
+	requireContains(t, page, `<a class="btn ico" href="/?select=1" title="Select">`)
+	requireAbsent(t, page, `class="bulk"`, `ico on`)
+}
+
+func TestSearchTipsExplainTheSyntax(t *testing.T) {
+	page := BookmarksPage(BookmarksView{Shell: emptyShell("alice", false), List: ListView{Page: 1}})
+	requireContains(t, page, `<details class="tips" id="search-hint">`, `aria-describedby="search-hint"`,
+		"<code>-word</code>", "<code>url:github.com</code>", "<code>status:broken</code>")
+}
+
+func TestRowShowsItsUrlWithHighlight(t *testing.T) {
+	row := BookmarkRow{ID: 1, URL: "https://a.test/x", Title: "A", DomainTerms: []string{"a.test"}}
+	requireContains(t, string(bookmarkItem(row, goldenNow, "/", nil)), `<p class="url" title="https://a.test/x">https://<mark>a.test</mark>/x</p>`)
+}
+
+func TestIconsAllHaveAPathAndRender(t *testing.T) {
+	for name := range iconPaths {
+		if iconPaths[name] == "" {
+			t.Errorf("icon %q has no path", name)
+		}
+	}
+	for _, name := range []iconName{iconOK, iconBroken, iconRedirected, iconUnknown, iconEdit, iconTrash, iconPlus,
+		iconShuffle, iconSelect, iconAll, iconTagAdd, iconTagRemove, iconLink, iconSearch, iconMenu,
+		iconUpload, iconDownload, iconSignOut, iconSignIn, iconKey, iconUserAdd, iconBan} {
+		if _, ok := iconPaths[name]; !ok {
+			t.Errorf("icon %q is not drawn", name)
+		}
+	}
+	want := `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg><span class="lbl">Add</span>`
+	if got := string(iconLabel(iconPlus, "Add")); got != want {
+		t.Errorf("got %s, want %s", got, want)
 	}
 }
 
@@ -191,10 +218,11 @@ func TestPickShowsTheBookmarkAndWaysOut(t *testing.T) {
 	}
 	page := BookmarksPage(view)
 	for _, want := range []string{
-		`<section class="pick" aria-label="Random bookmark">`,
-		`<a class="quiet" href="/random?q=x">Another</a>`,
-		`<a class="quiet" href="/bookmarks/3/edit?back=%2F%3Fq%3Dx">Edit</a>`,
-		`<a class="quiet" href="/?q=x">Close</a>`,
+		`<section class="pick panel" aria-label="Random bookmark">`,
+		`<a class="btn ico primary" href="/random?q=x" title="Another">`,
+		`<a class="btn ico quiet" href="/bookmarks/3/edit?back=%2F%3Fq%3Dx" title="Edit">`,
+		`<a class="btn ico quiet danger-text" href="/bookmarks/3/delete?back=%2F%3Fq%3Dx" title="Delete">`,
+		`<a class="btn ico" href="/?q=x" title="Close">`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page lacks %s", want)
@@ -210,18 +238,171 @@ func TestAnUnknownLinkStatusShowsNoNote(t *testing.T) {
 	}
 }
 
-func TestPagerLinksNeighbours(t *testing.T) {
-	view := BookmarksView{Shell: emptyShell("alice", false), List: ListView{Q: "x", Page: 2}, Rows: pageRows(1, 1), HasNext: true}
+func TestLoadMoreLinksToTheLongerPageAndReturnsToTheLastRow(t *testing.T) {
+	view := BookmarksView{Shell: emptyShell("alice", false), List: ListView{Q: "x", Page: 2}, Rows: pageRows(3, 1), Matching: 101}
 	page := BookmarksPage(view)
-	for _, want := range []string{
-		`<a class="button quiet-button" href="/?q=x" rel="prev">Newer</a>`,
-		`<a class="button quiet-button" href="/?q=x&amp;page=3" rel="next">Older</a>`,
-		`Showing 51–51`,
+	requireContains(t, page,
+		`<div class="foot"><p>Showing 3 of 101</p><a class="btn" id="load-more" href="/?q=x&amp;page=3#bookmark-5">Load more</a></div>`,
+		`<li class="item" id="bookmark-7" data-id="7">`)
+	requireAbsent(t, page, "rel=\"next\"", "Newer", "Older")
+}
+
+func TestLoadMoreKeepsSelectModeAndTicks(t *testing.T) {
+	view := BookmarksView{Shell: emptyShell("alice", false), List: ListView{Page: 1, Select: true}, Rows: pageRows(1, 1), Matching: 2}
+	requireContains(t, BookmarksPage(view), `href="/?page=2&amp;select=1#bookmark-5"`, "Select the 1 shown")
+	view.List.All = true
+	requireContains(t, BookmarksPage(view), `href="/?page=2&amp;select=1&amp;all=1#bookmark-5"`, "Clear selection")
+}
+
+func TestTheFootHasNoLinkWhenEverythingIsShown(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		rows     []BookmarkRow
+		matching int64
+		want     string
+	}{
+		{"none", nil, 0, ""},
+		{"one", pageRows(1, 1), 1, "<p>1 bookmark shown</p>"},
+		{"two", pageRows(2, 1), 2, "<p>All 2 bookmarks shown</p>"},
 	} {
-		if !strings.Contains(page, want) {
-			t.Errorf("page lacks %s", want)
+		page := BookmarksPage(BookmarksView{Shell: emptyShell("alice", false), List: listView(1), Rows: c.rows, Matching: c.matching})
+		requireAbsent(t, page, "load-more")
+		if c.want == "" {
+			requireAbsent(t, page, `class="foot"`)
+			continue
+		}
+		requireContains(t, page, c.want)
+	}
+}
+
+func TestTheFootOffersNothingWhenNoRowIsShownYet(t *testing.T) {
+	page := BookmarksPage(BookmarksView{Shell: emptyShell("alice", false), List: listView(1), Matching: 3})
+	requireContains(t, page, "<p>Showing 0 of 3</p>")
+	requireAbsent(t, page, "load-more")
+}
+
+func TestListHeadingAndCounts(t *testing.T) {
+	shell := emptyShell("alice", false)
+	shell.Total = 7
+	page := BookmarksPage(BookmarksView{Shell: shell, List: ListView{Tag: "go", Page: 1}, Matching: 3})
+	requireContains(t, page, `<div class="head"><h1>Tagged “go”</h1><span class="count" role="status">3 of 7</span></div>`,
+		`<span class="count">7</span></a>`)
+	page = BookmarksPage(BookmarksView{Shell: shell, List: listView(1), Matching: 7})
+	requireContains(t, page, `<h1>All bookmarks</h1><span class="count" role="status">7 bookmarks</span>`)
+}
+
+func TestActiveFilterChipsRemoveOneFilterEach(t *testing.T) {
+	cases := []struct {
+		name string
+		list ListView
+		want []string
+	}{
+		{"tag", ListView{Q: "x", Tag: "go", Page: 3, Select: true}, []string{
+			`<div class="active"><a class="chip" href="/?q=x&amp;select=1">Tag: go<span class="sr-only"> Remove filter</span><span aria-hidden="true">×</span></a></div>`}},
+		{"status", ListView{Status: "redirected", Page: 2}, []string{
+			`<div class="active"><a class="chip" href="/">Status: Moved<span class="sr-only"> Remove filter</span>`}},
+		{"both", ListView{Tag: "go", Status: "ok"}, []string{
+			`<a class="chip" href="/?status=ok">Tag: go`, `<a class="chip" href="/?tag=go">Status: OK`}},
+		{"unknown status", ListView{Status: "odd"}, []string{`Status: odd`}},
+	}
+	for _, c := range cases {
+		page := string(activeFilters(c.list))
+		requireContains(t, page, c.want...)
+	}
+	if got := activeFilters(ListView{Q: "x", Page: 2}); got != "" {
+		t.Errorf("no filter, got %q", got)
+	}
+}
+
+func TestListHeadingNamesWhatTheListShows(t *testing.T) {
+	cases := []struct {
+		list ListView
+		want string
+	}{
+		{ListView{}, "All bookmarks"},
+		{ListView{Tag: "go"}, "Tagged “go”"},
+		{ListView{Status: "broken"}, "Broken links"},
+		{ListView{Status: "redirected"}, "Moved links"},
+		{ListView{Status: "unknown"}, "Links not confirmed"},
+		{ListView{Status: "ok"}, "Links that are OK"},
+		{ListView{Status: "unchecked"}, "Links not checked"},
+		{ListView{Status: "odd"}, "Search results"},
+		{ListView{Q: "x", Tag: "go", Status: "ok"}, "Search results"},
+		{ListView{Q: "  ", Tag: "go"}, "Tagged “go”"},
+	}
+	for _, c := range cases {
+		if got := listHeading(c.list); got != c.want {
+			t.Errorf("%+v: got %q, want %q", c.list, got, c.want)
 		}
 	}
+}
+
+func TestCountWording(t *testing.T) {
+	cases := []struct {
+		filtered        bool
+		matching, total int64
+		want            string
+	}{
+		{false, 0, 0, "0 bookmarks"},
+		{false, 1, 1, "1 bookmark"},
+		{false, 2, 2, "2 bookmarks"},
+		{true, 0, 5, "0 of 5"},
+		{true, 1, 2, "1 of 2"},
+	}
+	for _, c := range cases {
+		if got := countLabel(c.filtered, c.matching, c.total); got != c.want {
+			t.Errorf("%+v: got %q, want %q", c, got, c.want)
+		}
+	}
+}
+
+func TestFootAndSelectAllWording(t *testing.T) {
+	cases := []struct {
+		shown, matching      int64
+		wantFoot, wantSelect string
+	}{
+		{0, 0, "", "Select all"},
+		{1, 1, "1 bookmark shown", "Select all"},
+		{2, 2, "All 2 bookmarks shown", "Select all"},
+		{50, 51, "Showing 50 of 51", "Select the 50 shown"},
+		{100, 100, "All 100 bookmarks shown", "Select all"},
+		{100, 101, "Showing 100 of 101", "Select the 100 shown"},
+	}
+	for _, c := range cases {
+		if got := footText(c.shown, c.matching); got != c.wantFoot {
+			t.Errorf("foot %d of %d: got %q, want %q", c.shown, c.matching, got, c.wantFoot)
+		}
+		if got := selectAllLabel(c.shown, c.matching); got != c.wantSelect {
+			t.Errorf("select %d of %d: got %q, want %q", c.shown, c.matching, got, c.wantSelect)
+		}
+	}
+}
+
+func TestFiltersDropOneFilterAndTheirPage(t *testing.T) {
+	view := ListView{Q: "x", Tag: "go", Status: "ok", Page: 4, Select: true}
+	if got, want := view.WithoutTag().Href(), "/?q=x&status=ok&select=1"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if got, want := view.WithoutStatus().Href(), "/?q=x&tag=go&select=1"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	for list, want := range map[string]bool{"": false, " ": false, "x": true} {
+		if got := (ListView{Q: list}).Filtered(); got != want {
+			t.Errorf("Q %q: Filtered = %v", list, got)
+		}
+	}
+	if !(ListView{Tag: "a"}).Filtered() || !(ListView{Status: "ok"}).Filtered() {
+		t.Error("a tag or a status is a filter")
+	}
+}
+
+func TestEditPageOffersTheMovedAddressOnlyForAMovedLink(t *testing.T) {
+	view := EditView{Shell: alice(SectionBookmarks), ID: 7, URL: "https://old.test/", Back: "/"}
+	requireAbsent(t, EditPage(view), "moved", "data-moved-to")
+	view.MovedTo = `https://new.test/?a=1&b="2"`
+	requireContains(t, EditPage(view),
+		`<p class="hint moved">This link moved to https://new.test/?a=1&amp;b=&quot;2&quot;</p>`,
+		`<button class="btn" type="button" data-moved-to="https://new.test/?a=1&amp;b=&quot;2&quot;" data-script-only hidden>Use new address</button>`)
 }
 
 func TestAccountPageListsSessions(t *testing.T) {
@@ -234,9 +415,10 @@ func TestAccountPageListsSessions(t *testing.T) {
 	}
 	page := AccountPage(view)
 	for _, want := range []string{
-		`<span class="name">Firefox &lt;1&gt;<span class="here">This browser</span></span>`,
-		`<span class="meta">10.0.0.1 · last used <time datetime="2020-01-01T00:00:00Z" title="2020-01-01 00:00 UTC">6 years ago</time></span>`,
-		`<form method="post" action="/account/sessions/def/revoke"><button class="quiet danger" type="submit" aria-label="Sign out Unknown browser">Sign out</button></form>`,
+		`<span class="who"><b>Firefox &lt;1&gt;</b><span class="hint">10.0.0.1 · last used <time datetime="2020-01-01T00:00:00Z" title="2020-01-01 00:00 UTC">6 years ago</time></span></span><span class="badge admin">This browser</span>`,
+		`<form method="post" action="/account/sessions/def/revoke"><button class="btn ico" type="submit" title="Sign out" aria-label="Sign out Unknown browser"><svg viewBox="0 0 16 16" aria-hidden="true">`,
+		`<span class="lbl">Sign out</span></button></form>`,
+		`At least 12 characters, without your username. Changing it signs you out everywhere else.`,
 		`action="/account/sessions/revoke-others"`,
 		`<input type="password" name="new" autocomplete="new-password" minlength="12" required>`,
 		`<input type="password" name="again" autocomplete="new-password" required>`,
@@ -273,10 +455,6 @@ func TestInactiveUserRowsHideTheirActionsForYourself(t *testing.T) {
 	view := UsersView{Shell: alice(SectionUsers), Now: goldenNow, NewIsAdmin: true,
 		Users: []UserRow{{ID: 7, Username: "me", IsAdmin: true, IsDisabled: true}}}
 	page := UsersPage(view)
-	if strings.Contains(page, "user-actions") {
-		t.Error("your own row must have no buttons")
-	}
-	if !strings.Contains(page, `<div class="user-row off">`) || !strings.Contains(page, `name="is_admin" checked>`) {
-		t.Error("a disabled row needs the off class and the new-user admin box must be ticked")
-	}
+	requireAbsent(t, page, "/users/7/")
+	requireContains(t, page, `<span class="badge admin">Admin</span><span class="badge">Disabled</span>`, `name="is_admin" checked>`)
 }

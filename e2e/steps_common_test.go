@@ -30,7 +30,7 @@ func withThreeStrings(step func(string, string, string) error) func(string, stri
 }
 
 // The sidebar link only an admin sees.
-const manageUsersLink = ".me a[href='/users']"
+const manageUsersLink = "#sidebar a[href='/users']"
 
 // slowFetchAndWatchCSP slows every request down and records each Content
 // Security Policy violation.
@@ -38,6 +38,19 @@ const slowFetchAndWatchCSP = `window.cspViolations = [];
 	document.addEventListener('securitypolicyviolation', (e) => window.cspViolations.push(e.violatedDirective));
 	const fetchNow = window.fetch;
 	window.fetch = (...args) => new Promise((resolve) => setTimeout(resolve, 500)).then(() => fetchNow(...args));`
+
+// pressEnter presses Enter once in the field, so a form that must refuse the
+// submit shows it is the browser stopping it, not only a disabled button.
+func (w *world) pressEnter(selector string) error {
+	field, err := w.element(selector)
+	if err != nil {
+		return err
+	}
+	if err := field.Focus(); err != nil {
+		return err
+	}
+	return w.browser.KeyEvent(kb.Enter)
+}
 
 // pressEnterTwice presses Enter twice in a row in the field, as an impatient
 // user would. The page's script must send one request and leave the form alone

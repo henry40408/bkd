@@ -53,6 +53,13 @@ Feature: Managing users
     When I delete "mei"
     Then the user list does not show "mei"
 
+  Scenario: The confirm button is never disabled
+    Given the member "mei" exists
+    And my password confirmation is old
+    When I open Manage users
+    And I disable "mei"
+    Then the confirmation button stays enabled with empty fields
+
   Scenario: An old confirmation sends the admin to confirm the password first
     Given the member "mei" exists
     And my password confirmation is old

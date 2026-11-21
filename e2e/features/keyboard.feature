@@ -35,7 +35,7 @@ Feature: Keyboard focus
     When I open the site
     And I open Manage users
     And I start resetting the password of "mei"
-    Then the focus is on ".password-form input[name=password]"
+    Then the focus is on "form[action$='/password'] input[name=password]"
 
   Scenario: Confirming the password puts the focus in the password field
     Given the member "mei" exists

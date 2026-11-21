@@ -30,9 +30,14 @@ func registerLayoutSteps(sc *godog.ScenarioContext, w *world) {
 }
 
 // formChecksOff matters because the script is what turns a refusal into a
-// message instead of the browser's own bubble.
+// message instead of the browser's own bubble. It also lifts the script's own
+// gate, which keeps a submit button off until the browser would accept the form.
 func (w *world) formChecksOff() error {
-	_, err := harness.Exec[any](w.browser, "for (const form of document.forms) form.noValidate = true;")
+	_, err := harness.Exec[any](w.browser, `for (const form of document.forms) {
+		form.noValidate = true;
+		form.removeAttribute("data-submit-when-valid");
+		for (const button of form.querySelectorAll('button[type="submit"]')) button.disabled = false;
+	}`)
 	return err
 }
 
@@ -70,13 +75,23 @@ func (w *world) shownIs(selector string, shown bool) error {
 }
 
 func (w *world) noSidewaysScroll() error {
-	overflow, err := harness.Exec[float64](w.browser,
-		"const page = document.scrollingElement; return page.scrollWidth - page.clientWidth")
+	// The wide elements are named in the error: the cause of a one pixel
+	// overflow can differ between browsers and cannot be seen from the number.
+	report, err := harness.Exec[string](w.browser, `
+		const page = document.scrollingElement;
+		const overflow = page.scrollWidth - page.clientWidth;
+		if (overflow <= 0) return "";
+		const wide = [...document.body.querySelectorAll("*")]
+			.filter((el) => el.getBoundingClientRect().right > page.clientWidth)
+			.slice(0, 5)
+			.map((el) => el.tagName.toLowerCase() + (el.className ? "." + el.className : "") +
+				" right=" + el.getBoundingClientRect().right);
+		return overflow + "px wider than the window; elements past the edge: " + wide.join(", ");`)
 	if err != nil {
 		return err
 	}
-	if overflow > 0 {
-		return fmt.Errorf("the page is %vpx wider than the window", overflow)
+	if report != "" {
+		return fmt.Errorf("the page is %s", report)
 	}
 	return nil
 }

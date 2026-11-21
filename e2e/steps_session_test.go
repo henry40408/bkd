@@ -14,7 +14,7 @@ const (
 	loginForm     = "form[action='/login']"
 	setupForm     = "form[action='/setup']"
 	confirmForm   = "form[action='/confirm']"
-	passwordForm  = ".password-form"
+	passwordForm  = "form[action$='/password']"
 	searchBoxPath = "[role=search] input[name=q]"
 )
 
@@ -45,12 +45,18 @@ func registerSessionSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^I open Account$`, w.openAccount)
 	sc.Step(`^I mark the page$`, w.markPage)
 	sc.Step(`^the page was not reloaded$`, w.pageWasNotReloaded)
-	sc.Step(`^I click the bkd brand$`, func() error { return w.click("#sidebar .brand a") })
+	sc.Step(`^I click the bkd brand$`, func() error { return w.click("#sidebar a.brand") })
 	sc.Step(`^I change my password from `+quoted+` to `+quoted+`$`, withTwoStrings(w.changePassword))
 	sc.Step(`^I change my password from `+quoted+` to `+quoted+` but repeat `+quoted+`$`, withThreeStrings(w.submitPasswordForm))
+	sc.Step(`^I fill in the password form from `+quoted+` to `+quoted+`$`, withTwoStrings(func(current, replacement string) error {
+		return w.fillPasswordForm(current, replacement, replacement)
+	}))
+	sc.Step(`^the password form can be saved$`, func() error {
+		return w.saveButtonIs(passwordForm, "password", "can")
+	})
 	sc.Step(`^I am also signed in on another browser$`, w.alsoSignedInElsewhere)
 	sc.Step(`^the list of browsers has (\d+) rows$`, w.browserListHasRows)
-	sc.Step(`^I sign out the other browser$`, func() error { return w.click(".session-list button") })
+	sc.Step(`^I sign out the other browser$`, func() error { return w.click(".sessions button") })
 	sc.Step(`^I sign out all other browsers$`, func() error {
 		return w.click("form[action='/account/sessions/revoke-others'] button")
 	})
@@ -58,6 +64,7 @@ func registerSessionSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^I am asked to confirm my password$`, func() error { _, err := w.element(confirmForm); return err })
 	sc.Step(`^I confirm my password with `+quoted+`$`, withString(w.confirmPassword))
 	sc.Step(`^I cancel the confirmation$`, func() error { return w.click(confirmForm + " a.quiet-link") })
+	sc.Step(`^the (sign-in|setup|confirmation) button stays enabled with empty fields$`, w.accessButtonStaysEnabled)
 	sc.Step(`^the browser reports no policy violation$`, w.noPolicyViolation)
 }
 
@@ -271,7 +278,7 @@ func (w *world) addressHasNoQuery() error {
 }
 
 func (w *world) openAccount() error {
-	if err := w.click(".me a[href='/account']"); err != nil {
+	if err := w.click("#sidebar a[href='/account']"); err != nil {
 		return err
 	}
 	_, err := w.element(passwordForm)
@@ -298,12 +305,47 @@ func (w *world) changePassword(current, replacement string) error {
 	return w.submitPasswordForm(current, replacement, replacement)
 }
 
-func (w *world) submitPasswordForm(current, replacement, again string) error {
+// accessButtonStaysEnabled locks in that the forms people get in through never
+// disable their button. Autofill and password managers do not always fire the
+// events the script listens for, so a disabled button could lock someone out
+// for good; the browser's own required check already stops an empty submit.
+// Each field is typed in and cleared first, so the script has had every chance
+// to disable the button.
+func (w *world) accessButtonStaysEnabled(which string) error {
+	forms := map[string]struct {
+		selector string
+		fields   []string
+	}{
+		"sign-in":      {loginForm, []string{"username", "password"}},
+		"setup":        {setupForm, []string{"token", "username", "password"}},
+		"confirmation": {confirmForm, []string{"password"}},
+	}
+	form := forms[which]
+	for _, field := range form.fields {
+		selector := fmt.Sprintf("%s input[name=%s]", form.selector, field)
+		if err := w.fill(selector, "x"); err != nil {
+			return err
+		}
+		if err := w.fill(selector, ""); err != nil {
+			return err
+		}
+	}
+	return w.saveButtonIs(form.selector, which, "can")
+}
+
+func (w *world) fillPasswordForm(current, replacement, again string) error {
 	fields := [][2]string{{"current", current}, {"new", replacement}, {"again", again}}
 	for _, field := range fields {
 		if err := w.fill(fmt.Sprintf("%s input[name=%s]", passwordForm, field[0]), field[1]); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (w *world) submitPasswordForm(current, replacement, again string) error {
+	if err := w.fillPasswordForm(current, replacement, again); err != nil {
+		return err
 	}
 	return w.click(passwordForm + " button[type=submit]")
 }
@@ -322,7 +364,7 @@ func (w *world) alsoSignedInElsewhere() error {
 
 func (w *world) browserListHasRows(expected int) error {
 	return harness.Eventually(fmt.Sprintf("the list has %d rows", expected), func() (bool, error) {
-		rows, err := w.browser.All(harness.CSS(".session-list .user-row"))
+		rows, err := w.browser.All(harness.CSS(".sessions li"))
 		return len(rows) == expected, err
 	})
 }

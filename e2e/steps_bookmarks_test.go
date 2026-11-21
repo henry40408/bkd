@@ -18,6 +18,8 @@ const (
 	editForm  = ".edit-form"
 	// keepLink is Keep in a delete question, inline or on its own page.
 	keepLink = "form:has(.danger-button) a.quiet-link"
+	// loadMoreLink is the link that makes the list longer.
+	loadMoreLink = "a#load-more"
 )
 
 func registerBookmarkSteps(sc *godog.ScenarioContext, w *world) {
@@ -47,6 +49,12 @@ func registerBookmarkActionSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^I start editing `+quoted+`$`, withString(w.startEditing))
 	sc.Step(`^I edit `+quoted+` to the title `+quoted+`$`, withTwoStrings(w.editBookmark))
 	sc.Step(`^I save the edit with the URL `+quoted+`$`, withString(w.saveEditWithURL))
+	sc.Step(`^I press Enter in the field `+quoted+`$`, withString(w.pressEnter))
+	sc.Step(`^I fill the add form with the URL `+quoted+` and the title `+quoted+`$`, withTwoStrings(w.fillAddForm))
+	sc.Step(`^I type the URL `+quoted+` in the edit form$`, withString(func(url string) error {
+		return w.fill(editForm+" input[name=url]", url)
+	}))
+	sc.Step(`^the (add|edit) form (can|cannot) be saved$`, w.formCanBeSaved)
 	sc.Step(`^the edit form holds `+quoted+` as the title$`, withString(func(title string) error {
 		return w.titleFieldHolds(editForm, title)
 	}))
@@ -70,12 +78,10 @@ func registerBookmarkActionSteps(sc *godog.ScenarioContext, w *world) {
 	}))
 	sc.Step(`^I choose the tag `+quoted+`$`, withString(w.chooseSidebarFilter))
 	sc.Step(`^I choose the link filter `+quoted+`$`, withString(w.chooseSidebarFilter))
-	sc.Step(`^I choose Random$`, func() error { return w.clickLink(searchBar, "Random") })
+	sc.Step(`^I choose Random$`, func() error { return w.clickLink(searchTools, "Random") })
 	sc.Step(`^I choose Another$`, func() error { return w.clickLink("section.pick", "Another") })
 	sc.Step(`^I close the pick$`, func() error { return w.clickLink("section.pick", "Close") })
-	sc.Step(`^I choose `+quoted+` in the pager$`, withString(func(label string) error {
-		return w.clickLink("nav.pager", label)
-	}))
+	sc.Step(`^I choose Load more$`, func() error { return w.click(loadMoreLink) })
 }
 
 func registerSearchSteps(sc *godog.ScenarioContext, w *world) {
@@ -102,8 +108,8 @@ func registerNavigationSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^there is no pick$`, w.noPick)
 	sc.Step(`^the add form holds `+quoted+` as the title$`, withString(func(title string) error { return w.titleFieldHolds(addForm, title) }))
 	sc.Step(`^I am told `+quoted+`$`, withString(w.expectText))
-	sc.Step(`^the pager offers `+quoted+`$`, withString(func(label string) error { return w.pagerOffers(label, true) }))
-	sc.Step(`^the pager does not offer `+quoted+`$`, withString(func(label string) error { return w.pagerOffers(label, false) }))
+	sc.Step(`^Load more is offered$`, func() error { return w.loadMoreOffered(true) })
+	sc.Step(`^Load more is not offered$`, func() error { return w.loadMoreOffered(false) })
 	sc.Step(`^the page title is still `+quoted+`$`, withString(w.pageTitleIs))
 }
 
@@ -132,11 +138,19 @@ func (w *world) createBookmark(bookmark harness.NewBookmark) error {
 }
 
 func (w *world) haveBulkBookmarks(count int) error {
+	return w.haveTaggedBulkBookmarks(count, "")
+}
+
+// haveTaggedBulkBookmarks makes bulk bookmarks, tagged when tag is not empty.
+func (w *world) haveTaggedBulkBookmarks(count int, tag string) error {
 	for range count {
 		w.bulkCount++
 		bookmark := harness.NewBookmark{
 			URL:   fmt.Sprintf("https://bulk.test/%d", w.bulkCount),
 			Title: fmt.Sprintf("Bulk %d", w.bulkCount),
+		}
+		if tag != "" {
+			bookmark.Tags = []string{tag}
 		}
 		if err := w.createBookmark(bookmark); err != nil {
 			return err
@@ -227,6 +241,28 @@ func (w *world) saveEditWithURL(url string) error {
 	return w.click(editForm + " button[type=submit]")
 }
 
+// formCanBeSaved retries because the script updates the button after each keystroke.
+func (w *world) formCanBeSaved(which, can string) error {
+	selector := addForm
+	if which == "edit" {
+		selector = editForm
+	}
+	return w.saveButtonIs(selector, which, can)
+}
+
+// saveButtonIs waits for the form's submit button to be off ("cannot") or on ("can").
+func (w *world) saveButtonIs(formSelector, name, can string) error {
+	wantDisabled := can == "cannot"
+	return harness.Eventually(fmt.Sprintf("the %s form %s be saved", name, can), func() (bool, error) {
+		button, err := w.element(formSelector + " button[type=submit]")
+		if err != nil {
+			return false, err
+		}
+		_, disabled, err := button.Attr("disabled")
+		return disabled == wantDisabled, err
+	})
+}
+
 func (w *world) searchFor(query string) error {
 	// The page may still be swapping in the previous answer, which makes the bar go stale.
 	return harness.Eventually("the search bar takes the search", func() (bool, error) {
@@ -315,10 +351,9 @@ func (w *world) titleFieldHolds(form, expected string) error {
 	return nil
 }
 
-func (w *world) pagerOffers(label string, offered bool) error {
-	link := harness.XPath(fmt.Sprintf("//nav[@class='pager']//a[text()=%s]", xpathString(label)))
-	return harness.Eventually(fmt.Sprintf("the pager offering %s is %t", label, offered), func() (bool, error) {
-		links, err := w.browser.All(link)
+func (w *world) loadMoreOffered(offered bool) error {
+	return harness.Eventually(fmt.Sprintf("Load more is offered: %t", offered), func() (bool, error) {
+		links, err := w.browser.All(harness.CSS(loadMoreLink))
 		return (len(links) == 0) != offered, err
 	})
 }
