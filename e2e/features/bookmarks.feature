@@ -201,31 +201,26 @@ Feature: Bookmarks
     Then I see the empty message "No bookmarks match."
     And the address is "/?q=zzz&tag=rust"
 
-  Scenario: The pager appears only when there is more
+  Scenario: Load more appears only when there is more
     Given I have 50 bookmarks
     When I open the site
     Then the list has 50 bookmarks
-    And the pager does not offer "Older"
-    And the pager does not offer "Newer"
+    And the list shows "All 50 bookmarks shown"
+    And Load more is not offered
     Given I have 1 more bookmark
     When I open the site
     Then the list has 50 bookmarks
-    And the pager offers "Older"
-    And the pager does not offer "Newer"
+    And the list shows "Showing 50 of 51"
+    And Load more is offered
 
-  Scenario: Older and Newer move between pages
+  Scenario: Load more adds the rest of the list in place
     Given I have 51 bookmarks
     When I open the site
-    And I choose "Older" in the pager
+    And I choose Load more
     Then the address is "/?page=2"
-    And the list has 1 bookmarks
-    And the list shows "Showing 51–51"
-    And the pager offers "Newer"
-    And the pager does not offer "Older"
-    When I choose "Newer" in the pager
-    Then the address is "/"
-    And the list has 50 bookmarks
-    And the pager offers "Older"
+    And the list has 51 bookmarks
+    And the list shows "All 51 bookmarks shown"
+    And Load more is not offered
 
   Scenario: Editing on the second page returns to the second page
     Given I have 51 bookmarks

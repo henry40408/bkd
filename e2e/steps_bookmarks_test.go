@@ -18,6 +18,8 @@ const (
 	editForm  = ".edit-form"
 	// keepLink is Keep in a delete question, inline or on its own page.
 	keepLink = "form:has(.danger-button) a.quiet-link"
+	// loadMoreLink is the link that makes the list longer.
+	loadMoreLink = "a#load-more"
 )
 
 func registerBookmarkSteps(sc *godog.ScenarioContext, w *world) {
@@ -73,9 +75,7 @@ func registerBookmarkActionSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^I choose Random$`, func() error { return w.clickLink(searchTools, "Random") })
 	sc.Step(`^I choose Another$`, func() error { return w.clickLink("section.pick", "Another") })
 	sc.Step(`^I close the pick$`, func() error { return w.clickLink("section.pick", "Close") })
-	sc.Step(`^I choose `+quoted+` in the pager$`, withString(func(label string) error {
-		return w.clickLink("nav.pager", label)
-	}))
+	sc.Step(`^I choose Load more$`, func() error { return w.click(loadMoreLink) })
 }
 
 func registerSearchSteps(sc *godog.ScenarioContext, w *world) {
@@ -102,8 +102,8 @@ func registerNavigationSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^there is no pick$`, w.noPick)
 	sc.Step(`^the add form holds `+quoted+` as the title$`, withString(func(title string) error { return w.titleFieldHolds(addForm, title) }))
 	sc.Step(`^I am told `+quoted+`$`, withString(w.expectText))
-	sc.Step(`^the pager offers `+quoted+`$`, withString(func(label string) error { return w.pagerOffers(label, true) }))
-	sc.Step(`^the pager does not offer `+quoted+`$`, withString(func(label string) error { return w.pagerOffers(label, false) }))
+	sc.Step(`^Load more is offered$`, func() error { return w.loadMoreOffered(true) })
+	sc.Step(`^Load more is not offered$`, func() error { return w.loadMoreOffered(false) })
 	sc.Step(`^the page title is still `+quoted+`$`, withString(w.pageTitleIs))
 }
 
@@ -315,10 +315,9 @@ func (w *world) titleFieldHolds(form, expected string) error {
 	return nil
 }
 
-func (w *world) pagerOffers(label string, offered bool) error {
-	link := harness.XPath(fmt.Sprintf("//nav[@class='pager']//a[text()=%s]", xpathString(label)))
-	return harness.Eventually(fmt.Sprintf("the pager offering %s is %t", label, offered), func() (bool, error) {
-		links, err := w.browser.All(link)
+func (w *world) loadMoreOffered(offered bool) error {
+	return harness.Eventually(fmt.Sprintf("Load more is offered: %t", offered), func() (bool, error) {
+		links, err := w.browser.All(harness.CSS(loadMoreLink))
 		return (len(links) == 0) != offered, err
 	})
 }

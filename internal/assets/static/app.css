@@ -96,6 +96,8 @@ main { padding: var(--sp-5) var(--sp-6) var(--sp-7); max-width: var(--page-w); m
 main:focus { outline: none; }
 main[aria-busy="true"] { cursor: progress; }
 main h1 { font: var(--strong) var(--fs-5)/var(--lh-tight) var(--serif); margin-bottom: var(--sp-4); }
+.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); margin-bottom: var(--sp-4); }
+.head h1 { margin: 0; }
 main h2 { font: var(--strong) var(--fs-3)/var(--lh-tight) var(--serif); margin: var(--sp-5) 0 var(--sp-2); }
 .notice { padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-4); border-left: 4px solid var(--ribbon); background: var(--sheet); overflow-wrap: anywhere; }
 .summary { color: var(--soft); font-size: var(--fs-1); margin-bottom: var(--sp-2); }
@@ -104,7 +106,10 @@ main h2 { font: var(--strong) var(--fs-3)/var(--lh-tight) var(--serif); margin: 
 .bar { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
 /* The form only groups its controls for the browser; they lay out as items of the bar. */
 .bar > form { display: contents; }
-.bar .q { flex: 1 1 var(--field-min); min-width: 0; }
+.bar .q { flex: 1 1 var(--field-min); min-width: 0; position: relative; }
+.bar .q kbd { position: absolute; right: var(--sp-2); inset-block: 0; margin-block: auto; height: max-content; font: var(--regular) var(--fs-1)/var(--lh) var(--sans); color: var(--soft); border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: 0 var(--sp-2); pointer-events: none; }
+.bar .q input { padding-right: var(--sp-6); }
+@media (hover: none) { .bar .q kbd { display: none; } }
 .tips { margin: var(--sp-2) 0 var(--sp-3); font-size: var(--fs-1); }
 .tips summary { color: var(--link); cursor: pointer; width: fit-content; text-decoration: underline; text-underline-offset: 2px; }
 .tips dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-1) var(--sp-4); margin-top: var(--sp-2); padding: var(--sp-3); background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius); }
@@ -114,6 +119,11 @@ details.add summary { list-style: none; }
 details.add summary::-webkit-details-marker { display: none; }
 details.add[open] { flex: 1 0 100%; }
 
+.active { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.chip { display: inline-flex; gap: var(--sp-2); align-items: center; min-height: var(--sp-6); padding: 0 var(--sp-3); border: 2px solid var(--ribbon); border-radius: var(--radius-pill); background: var(--sheet); font-weight: var(--strong); text-decoration: none; }
+.hint.moved { overflow-wrap: anywhere; }
+form .btn[data-moved-to] { justify-self: start; }
+
 /* ---- Panels (add form, random pick, inline edit, confirm) ---- */
 .panel, .inline-form { background: var(--sheet); border: 1px solid var(--rule); border-left: 4px solid var(--ribbon); border-radius: 0 var(--radius) var(--radius) 0; padding: var(--sp-4); margin: var(--sp-3) 0; display: grid; gap: var(--sp-3); }
 .panel h2 { font: var(--strong) var(--fs-3)/var(--lh-tight) var(--serif); margin: 0; }
@@ -122,7 +132,8 @@ form.stack { display: grid; gap: var(--sp-3); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
 .inline-form .inline-title { font: var(--strong) var(--fs-3)/var(--lh-tight) var(--serif); }
 .inline-form .summary, .inline-form form { margin: 0; }
-.item.confirming > .inline-form { border-left-color: var(--broken); }
+.item.confirming > .inline-form, .pick.confirming > .inline-form { border-left-color: var(--broken); }
+.pick > .inline-form { margin: 0; }
 
 /* ---- The index ---- */
 .list { border-top: 2px solid var(--ink); }
@@ -160,7 +171,9 @@ form.stack { display: grid; gap: var(--sp-3); }
 .selecting .actions { visibility: hidden; }
 .item > .inline-form { grid-column: 2 / -1; margin-bottom: 0; }
 .empty { padding: var(--sp-7) var(--sp-3); color: var(--soft); border-top: 2px solid var(--ink); border-bottom: 1px solid var(--rule); }
-.pager { display: flex; justify-content: space-between; gap: var(--sp-3); margin-top: var(--sp-5); }
+.foot { padding: var(--sp-4) 0; color: var(--soft); font-size: var(--fs-1); display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; justify-content: space-between; }
+.foot .btn { color: var(--ink); font-size: var(--fs-2); }
+.btn[aria-disabled="true"] { opacity: .6; cursor: progress; }
 .pick .note { max-width: none; }
 
 /* ---- Bulk bar ---- */

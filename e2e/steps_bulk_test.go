@@ -21,7 +21,7 @@ func registerBulkSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^I leave select mode$`, func() error { return w.clickLink(bulkBar, "Done") })
 	sc.Step(`^I tick `+quoted+`$`, withString(func(title string) error { return w.click(checkbox(title)) }))
 	sc.Step(`^I Shift-click `+quoted+`$`, withString(w.shiftClick))
-	sc.Step(`^I select all on this page$`, func() error { return w.clickLink(bulkBar, "Select all on this page") })
+	sc.Step(`^I select all$`, func() error { return w.clickLink(bulkBar, "Select all") })
 	sc.Step(`^I clear the selection$`, func() error { return w.clickLink(bulkBar, "Clear selection") })
 	sc.Step(`^I add the tag `+quoted+` to the selection$`, withString(func(tags string) error {
 		return w.submitBulkTags("add_tags", tags)

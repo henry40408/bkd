@@ -31,8 +31,10 @@ type Shell struct {
 	Forwarded  bool
 	Section    Section
 	AllCurrent bool
-	Statuses   []FilterLink
-	Tags       []FilterLink
+	// Total is how many bookmarks the user has.
+	Total    int64
+	Statuses []FilterLink
+	Tags     []FilterLink
 	// Notice is the fixed text to announce, or empty.
 	Notice string
 }
@@ -86,12 +88,17 @@ func current(isCurrent bool) attr {
 func filterList(filters []FilterLink) node {
 	items := make([]node, len(filters))
 	for i, filter := range filters {
-		items[i] = el("li", nil, el("a", []attr{a("href", filter.Href), current(filter.Current)},
-			text(filter.Label),
-			el("span", []attr{classes("count")}, number(filter.Count)),
-		))
+		items[i] = countedLink(filter)
 	}
 	return el("ul", nil, items...)
+}
+
+// countedLink is a sidebar entry with how many bookmarks it leads to.
+func countedLink(filter FilterLink) node {
+	return el("li", nil, el("a", []attr{a("href", filter.Href), current(filter.Current)},
+		text(filter.Label),
+		el("span", []attr{classes("count")}, number(filter.Count)),
+	))
 }
 
 func sectionLink(href, label string, isCurrent bool) node {
@@ -101,7 +108,7 @@ func sectionLink(href, label string, isCurrent bool) node {
 func sectionList(shell Shell) node {
 	on := func(section Section) bool { return shell.Section == section }
 	return el("ul", nil,
-		sectionLink("/", "All bookmarks", shell.AllCurrent),
+		countedLink(FilterLink{Label: "All bookmarks", Count: shell.Total, Href: "/", Current: shell.AllCurrent}),
 		sectionLink("/transfer", "Import and export", on(SectionTransfer)),
 		sectionLink("/settings", "Settings", on(SectionSettings)),
 		maybe(!shell.Forwarded, func() node { return sectionLink("/account", "Account", on(SectionAccount)) }),

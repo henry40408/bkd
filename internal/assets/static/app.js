@@ -46,8 +46,9 @@
   }
 
   // Replaces the page's content with the one in `doc`. The signed-in frame keeps its
-  // menu toggle and top bar, so only the sidebar and `main` change.
-  function swapIn(doc) {
+  // menu toggle and top bar, so only the sidebar and `main` change. `refocus` false
+  // leaves the focus alone, for a swap the reader did not move away from.
+  function swapIn(doc, refocus) {
     inlinePanel = null;
     document.title = doc.title;
     const framed = document.querySelector(".app") && doc.querySelector(".app");
@@ -62,8 +63,9 @@
     }
     localizeTimes(document);
     showScriptOnly(document);
+    addSearchHint();
     updateSelectionCount();
-    focusNewPage();
+    if (refocus) focusNewPage();
   }
 
   function abortCheck() {
@@ -73,7 +75,8 @@
     run.controller.abort();
   }
 
-  // `history`: "push" for a new page, "replace" for the same address, "none" for back/forward.
+  // `history`: "push" for a new page, "replace" for the same page made longer (the scroll
+  // position and the focus stay), "none" for back/forward.
   // Answers whether the page was swapped in (false when a newer load took over).
   // `keepInline(doc)` gets an answer that is not a redirect and answers true when it
   // showed that answer itself, so the page is not swapped.
@@ -90,13 +93,14 @@
     inFlight = null;
     if (keepInline && !response.redirected && keepInline(doc)) return true;
     const finalUrl = new URL(response.url);
+    if (history === "replace") window.history.replaceState(null, "", finalUrl);
     if (history === "push") {
       // A POST answered without a redirect has no address of its own to come back to.
       const isNewAddress = !init || init.method !== "POST" || response.redirected;
       if (isNewAddress) window.history.pushState(null, "", finalUrl);
     }
-    swapIn(doc);
-    if (history !== "none") window.scrollTo(0, 0);
+    swapIn(doc, history !== "replace");
+    if (history === "push") window.scrollTo(0, 0);
     return true;
   }
 
@@ -340,6 +344,9 @@
   // ---- Inline forms: edit and delete open in their row, a bulk delete at the foot of the bulk bar ----
 
   const ROW_ACTION = /^\/bookmarks\/\d+\/(edit|delete)$/;
+  // A row of the list or the random pick holds the panel; its Edit and Delete links open it.
+  const PANEL_HOST = ".item, section.pick";
+  const PANEL_OPENER = ".item .actions, section.pick .btns";
   // The form of an edit page or of a delete question, whichever the page has.
   const INLINE_FORM = "main form.edit-form, main form:has(.danger-button)";
 
@@ -347,8 +354,8 @@
     if (!inlinePanel) return;
     const { node, opener } = inlinePanel;
     inlinePanel = null;
-    const item = node.closest(".item");
-    if (item) item.classList.remove("editing", "confirming");
+    const host = node.closest(PANEL_HOST);
+    if (host) host.classList.remove("editing", "confirming");
     node.remove();
     if (refocus && opener.isConnected) opener.focus();
   }
@@ -372,6 +379,7 @@
     const summary = doc.querySelector("main .summary");
     if (summary) node.append(document.importNode(summary, true));
     node.append(document.importNode(form, true));
+    showScriptOnly(node);
     return node;
   }
 
@@ -394,14 +402,14 @@
     if (!response.ok || !type.startsWith("text/html")) throw new Error("not a form");
     const node = panelFrom(new DOMParser().parseFromString(await response.text(), "text/html"));
     if (!node) throw new Error("not a form");
-    const item = link.closest(".item");
-    if (request !== rowPanelRequest || !item.isConnected) return false;
+    const host = link.closest(PANEL_HOST);
+    if (request !== rowPanelRequest || !host.isConnected) return false;
     const state = url.pathname.endsWith("/edit") ? "editing" : "confirming";
     // The row already says what is edited, and the question already names what is deleted.
     node.querySelector(state === "editing" ? ".inline-title" : ".summary").remove();
     showPanel(node, link, (panel) => {
-      item.classList.add(state);
-      item.append(panel);
+      host.classList.add(state);
+      host.append(panel);
     });
     return true;
   }
@@ -452,7 +460,7 @@
   // The question holds the ticks it was asked with, so a change to the ticks withdraws it.
   document.addEventListener("change", (event) => {
     const changed = event.target instanceof Element && event.target.closest(".pick-box");
-    if (changed && inlinePanel && !inlinePanel.node.closest(".item")) closeInlinePanel({ refocus: false });
+    if (changed && inlinePanel && !inlinePanel.node.closest(PANEL_HOST)) closeInlinePanel({ refocus: false });
   });
 
   // ---- Forms ----
@@ -508,6 +516,81 @@
     updateSelectionCount();
   });
 
+  // ---- Load more: the list grows in place ----
+
+  const tickedRowIds = () =>
+    Array.from(document.querySelectorAll(".pick-box input:checked"), (box) => Number(box.name.slice(3)));
+
+  // The row that follows `rowId` once the longer page is in, or null.
+  const rowAfter = (rowId) => {
+    const row = document.getElementById(rowId);
+    return row ? row.nextElementSibling : null;
+  };
+
+  function focusNewRow(rowId) {
+    const first = rowAfter(rowId);
+    const target = first && first.querySelector(".pick-box input, h3 a");
+    if (target) target.focus({ preventScroll: true });
+  }
+
+  // The page is fetched without the fragment: the swap keeps the scroll position instead.
+  async function loadMoreRows(link) {
+    const lastShownId = link.hash.slice(1);
+    const hadFocus = document.activeElement === link;
+    const ticked = tickedRowIds();
+    const url = new URL(link.href);
+    url.hash = "";
+    link.setAttribute("aria-disabled", "true");
+    link.textContent = "Loading…";
+    const swapped = await load(url, undefined, "replace");
+    if (!swapped) return;
+    tickAgain(ticked);
+    if (hadFocus) focusNewRow(lastShownId);
+  }
+
+  document.addEventListener("click", (event) => {
+    if (wantsBrowserDefault(event)) return;
+    const link = event.target instanceof Element ? event.target.closest("a#load-more") : null;
+    if (!link) return;
+    event.preventDefault();
+    if (link.getAttribute("aria-disabled") === "true") return;
+    enhance(
+      () => loadMoreRows(link),
+      () => location.assign(link.href),
+    );
+  });
+
+  // ---- Moved links: the edit form can take the address the link moved to ----
+
+  const MOVED_FILLED = "New address filled in. Save to keep it; the link is checked again later.";
+
+  // The address comes from a remote server's answer, so only a web address is used.
+  function isWebAddress(value) {
+    try {
+      const { protocol } = new URL(value);
+      return protocol === "http:" || protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
+  function useMovedAddress(button) {
+    const form = button.closest("form");
+    const field = form && form.querySelector('input[name="url"]');
+    const target = button.dataset.movedTo;
+    if (!field || !isWebAddress(target)) return;
+    field.value = target;
+    button.hidden = true;
+    const hint = form.querySelector(".hint.moved");
+    if (hint) hint.textContent = MOVED_FILLED;
+    field.focus();
+  }
+
+  document.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest("button[data-moved-to]") : null;
+    if (button) useMovedAddress(button);
+  });
+
   document.addEventListener("click", (event) => {
     if (wantsBrowserDefault(event)) return;
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
@@ -518,7 +601,7 @@
       return;
     }
     const url = new URL(link.href);
-    if (!link.closest(".item .actions") || !sameOrigin(url) || !ROW_ACTION.test(url.pathname)) return;
+    if (!link.closest(PANEL_OPENER) || !sameOrigin(url) || !ROW_ACTION.test(url.pathname)) return;
     event.preventDefault();
     enhance(
       () => openRowPanel(link, url),
@@ -580,6 +663,28 @@
     target instanceof Element &&
     (target.matches("input:not([type=checkbox]), textarea, select") || target.isContentEditable);
 
+  const searchField = () => document.querySelector('main [role="search"] input[type="search"]');
+
+  // The hint is added here, not by the server: without the script the key does nothing.
+  function addSearchHint() {
+    const field = searchField();
+    if (!field || field.parentElement.querySelector("kbd")) return;
+    const hint = document.createElement("kbd");
+    hint.setAttribute("aria-hidden", "true");
+    hint.textContent = "/";
+    field.after(hint);
+  }
+
+  // "/" outside a field jumps to the search field.
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "/" || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (isTextEntry(event.target)) return;
+    const field = searchField();
+    if (!field) return;
+    event.preventDefault();
+    field.focus();
+  });
+
   // Escape closes the menu on a narrow screen; in select mode it leaves select mode.
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !event.defaultPrevented && inlinePanel && inlinePanel.node.contains(event.target)) {
@@ -623,5 +728,6 @@
 
   localizeTimes(document);
   showScriptOnly(document);
+  addSearchHint();
   updateSelectionCount();
 })();

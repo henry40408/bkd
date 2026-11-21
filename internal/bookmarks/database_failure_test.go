@@ -29,6 +29,7 @@ func storeOperations(t *testing.T) []failureCase {
 		{"Delete", func(s *Store) error { _, err := s.Delete(bg, 1, 1); return err }},
 		{"Get", func(s *Store) error { _, _, err := s.Get(bg, 1, 1); return err }},
 		{"List", func(s *Store) error { _, err := s.List(bg, 1, nil, NewPage(nil, nil)); return err }},
+		{"Count", func(s *Store) error { _, err := s.Count(bg, 1, nil); return err }},
 		{"Random", func(s *Store) error { _, _, err := s.Random(bg, 1, nil); return err }},
 		{"All", func(s *Store) error { _, err := s.All(bg, 1); return err }},
 		{"TagCounts", func(s *Store) error { _, err := s.TagCounts(bg, 1); return err }},
@@ -162,6 +163,10 @@ func TestListAndRandomApplyTheFilterTheyAreGiven(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].Title != "keep" {
 		t.Fatalf("List = %+v, want only the bookmark named keep", list)
+	}
+	count, err := store.Count(bg, user, titleIs("keep"))
+	if err != nil || count != 1 {
+		t.Fatalf("Count = %d, %v, want 1", count, err)
 	}
 	random, found, err := store.Random(bg, user, titleIs("drop"))
 	if err != nil || !found || random.Title != "drop" {

@@ -198,6 +198,17 @@ func (s *Store) List(ctx context.Context, userID int64, filter Filter, page Page
 	return s.query(ctx, query, append(args, int64(page.Limit), int64(page.Offset))...)
 }
 
+// Count is how many of the user's bookmarks filter lets through.
+func (s *Store) Count(ctx context.Context, userID int64, filter Filter) (int64, error) {
+	conditions, args := filterSQL(filter)
+	query := "SELECT COUNT(*) FROM bookmarks WHERE bookmarks.user_id = ?" + conditions
+	var count int64
+	if err := s.db.QueryRowContext(ctx, query, append([]any{userID}, args...)...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count bookmarks: %w", err)
+	}
+	return count, nil
+}
+
 // Random returns one bookmark chosen at random from those filter lets through.
 func (s *Store) Random(ctx context.Context, userID int64, filter Filter) (bookmark Bookmark, found bool, err error) {
 	conditions, args := filterSQL(filter)

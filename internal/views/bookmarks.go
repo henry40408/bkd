@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
-	"strings"
 )
 
 // PageSize is how many bookmarks a list page shows.
@@ -67,8 +66,13 @@ type BookmarksView struct {
 	Pick      *BookmarkRow
 	PickEmpty bool
 	Rows      []BookmarkRow
-	HasNext   bool
+	// Matching is how many bookmarks the filter lets through; Rows is the
+	// first part of them.
+	Matching int64
 }
+
+// Shown is how many bookmarks the page lists.
+func (view BookmarksView) Shown() int64 { return int64(len(view.Rows)) }
 
 type linkNote struct {
 	status  string
@@ -167,6 +171,9 @@ func (row BookmarkRow) linkLine(now int64) node {
 	return maybe(note != nil, func() node { return linkNoteLine(note) })
 }
 
+// rowAnchor is the id of a row, so that a link can return to it.
+func rowAnchor(id int64) string { return "bookmark-" + strconv.FormatInt(id, 10) }
+
 func pickBox(row BookmarkRow, ticked bool) node {
 	id := strconv.FormatInt(row.ID, 10)
 	return el("label", []attr{classes("pick-box")},
@@ -196,7 +203,7 @@ func rowBody(row BookmarkRow, now int64) node {
 // whether the row's box starts ticked.
 func bookmarkItem(row BookmarkRow, now int64, back string, ticked *bool) node {
 	box := maybe(ticked != nil, func() node { return pickBox(row, *ticked) })
-	return el("li", []attr{classes("item"), a("data-id", strconv.FormatInt(row.ID, 10))},
+	return el("li", []attr{classes("item"), a("id", rowAnchor(row.ID)), a("data-id", strconv.FormatInt(row.ID, 10))},
 		box,
 		el("div", []attr{classes("site")}, el("span", nil, row.domain()), timeTag(NewSavedTime(now, row.CreatedAt))),
 		rowBody(row, now),
@@ -292,6 +299,7 @@ func pickSection(view BookmarksView, back string) node {
 		el("div", []attr{classes("btns")},
 			toolLink(randomHref, iconShuffle, "Another", "primary"),
 			toolLink(pick.editHref(back), iconEdit, "Edit", "quiet"),
+			toolLink(pick.deleteHref(back), iconTrash, "Delete", "quiet", "danger-text"),
 			toolLink(view.List.Href(), iconBroken, "Close"),
 		),
 	)
@@ -305,7 +313,7 @@ func bulkSubmit(action string, name iconName, label string, extra ...string) nod
 
 func bulkPanel(view BookmarksView) node {
 	list := view.List
-	toggle := "Select all on this page"
+	toggle := selectAllLabel(view.Shown(), view.Matching)
 	if list.All {
 		toggle = "Clear selection"
 	}
@@ -333,7 +341,7 @@ func bulkPanel(view BookmarksView) node {
 }
 
 func emptyText(list ListView) string {
-	if strings.TrimSpace(list.Q) != "" || list.Tag != "" || list.Status != "" {
+	if list.Filtered() {
 		return "No bookmarks match."
 	}
 	return "No bookmarks yet. Add one above, or import a file."
@@ -343,8 +351,6 @@ func rowList(view BookmarksView, back string) node {
 	if len(view.Rows) == 0 {
 		return el("div", []attr{classes("empty")}, text(emptyText(view.List)))
 	}
-	offset := (int64(view.List.Page) - 1) * PageSize
-	summary := fmt.Sprintf("Showing %d–%d", offset+1, offset+int64(len(view.Rows)))
 	items := make([]node, len(view.Rows))
 	for i, row := range view.Rows {
 		var ticked *bool
@@ -358,36 +364,76 @@ func rowList(view BookmarksView, back string) node {
 	if view.List.Select {
 		listClass = append(listClass, "selecting")
 	}
-	return group(
-		el("p", []attr{classes("summary")}, text(summary)),
-		el("ul", []attr{classes(listClass...)}, items...),
+	return el("ul", []attr{classes(listClass...)}, items...)
+}
+
+// listHead is the heading of the list and how many bookmarks it holds.
+func listHead(view BookmarksView) node {
+	count := countLabel(view.List.Filtered(), view.Matching, view.Shell.Total)
+	return el("div", []attr{classes("head")},
+		el("h1", nil, text(listHeading(view.List))),
+		el("span", []attr{classes("count"), a("role", "status")}, text(count)),
 	)
 }
 
-func pager(view BookmarksView) node {
-	hasPrev := view.List.Page > 1
-	if !hasPrev && !view.HasNext {
+// filterChip is a link that removes one filter.
+func filterChip(label, removeHref string) node {
+	return el("a", []attr{classes("chip"), a("href", removeHref)},
+		text(label),
+		el("span", []attr{classes("sr-only")}, text(" Remove filter")),
+		el("span", []attr{a("aria-hidden", "true")}, text("×")),
+	)
+}
+
+// activeFilters is a chip for each tag or status filter; nothing when there is none.
+func activeFilters(list ListView) node {
+	var chips []node
+	if list.Tag != "" {
+		chips = append(chips, filterChip("Tag: "+list.Tag, list.WithoutTag().Href()))
+	}
+	if list.Status != "" {
+		name := list.Status
+		if names, known := statusNames[list.Status]; known {
+			name = names.chip
+		}
+		chips = append(chips, filterChip("Status: "+name, list.WithoutStatus().Href()))
+	}
+	if len(chips) == 0 {
 		return ""
 	}
-	link := func(page uint32, rel, label string) node {
-		return el("a", []attr{classes("btn"), a("href", view.List.HrefForPage(page)), a("rel", rel)}, text(label))
+	return el("div", []attr{classes("active")}, chips...)
+}
+
+// loadMore is the link to the next, longer page of the list. It returns to the
+// last row shown, so that without a script the reader is not left at the top.
+func loadMore(view BookmarksView) node {
+	if len(view.Rows) == 0 || view.Shown() >= view.Matching {
+		return ""
 	}
-	return el("nav", []attr{classes("pager"), a("aria-label", "Pages")},
-		maybe(hasPrev, func() node { return link(view.List.Page-1, "prev", "Newer") }),
-		maybe(view.HasNext, func() node { return link(view.List.Page+1, "next", "Older") }),
-	)
+	last := view.Rows[len(view.Rows)-1]
+	href := view.List.HrefForPage(view.List.Page+1) + "#" + rowAnchor(last.ID)
+	return el("a", []attr{classes("btn"), a("id", "load-more"), a("href", href)}, text("Load more"))
+}
+
+// listFoot says how much of the list is shown and offers the rest.
+func listFoot(view BookmarksView) node {
+	summary := footText(view.Shown(), view.Matching)
+	if summary == "" {
+		return ""
+	}
+	return el("div", []attr{classes("foot")}, el("p", nil, text(summary)), loadMore(view))
 }
 
 // BookmarksPage renders the bookmark list.
 func BookmarksPage(view BookmarksView) string {
 	back := view.List.Href()
-	body := rowList(view, back)
+	body := group(rowList(view, back), listFoot(view))
 	if view.List.Select {
 		// The bulk bar follows the list so that it can stick to the foot of the window.
 		body = el("form", []attr{classes("bulk-form"), a("method", "post"), a("action", "/bookmarks/bulk")},
 			body, bulkPanel(view))
 	}
-	content := group(searchBar(view), pickSection(view, back), body, pager(view))
+	content := group(listHead(view), searchBar(view), activeFilters(view.List), pickSection(view, back), body)
 	return framed("bkd", view.Shell, content)
 }
 
@@ -402,6 +448,22 @@ type EditView struct {
 	Error string
 	// Back is the list address to return to.
 	Back string
+	// MovedTo is the address a moved link now answers from; empty when the
+	// link did not move. It is shown as text only, never followed.
+	MovedTo string
+}
+
+// movedNote tells where a moved link went and, with a script, offers to use
+// that address.
+func movedNote(target string) node {
+	if target == "" {
+		return ""
+	}
+	return group(
+		el("p", []attr{classes("hint", "moved")}, text("This link moved to "+target)),
+		el("button", []attr{classes("btn"), a("type", "button"), a("data-moved-to", target), flag("data-script-only"), flag("hidden")},
+			text("Use new address")),
+	)
 }
 
 // EditPage renders the edit form.
@@ -411,6 +473,7 @@ func EditPage(view EditView) string {
 		el("form", []attr{classes("stack", "edit-form"), a("method", "post"), a("action", fmt.Sprintf("/bookmarks/%d/edit", view.ID))},
 			hidden("back", view.Back),
 			field("URL ", void("input", a("type", "url"), a("name", "url"), a("value", view.URL), a("placeholder", "https://"), flag("required"), flag("autofocus"))),
+			movedNote(view.MovedTo),
 			el("div", []attr{classes("grid2")},
 				field("Title ", void("input", a("type", "text"), a("name", "title"), a("value", view.Title), a("placeholder", "Leave blank to use the domain"))),
 				field("Tags, separated by commas ", void("input", a("type", "text"), a("name", "tags"), a("value", view.Tags))),

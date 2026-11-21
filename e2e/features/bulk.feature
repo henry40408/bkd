@@ -9,7 +9,7 @@ Feature: Bulk actions
   Scenario: Checkboxes show only in select mode
     When I open the site
     Then select mode is off
-    And the list does not show "Select all on this page"
+    And the list does not show "Select all"
     When I enter select mode
     Then select mode is on
     And the address is "/?select=1"
@@ -18,14 +18,14 @@ Feature: Bulk actions
     Then select mode is off
     And the address is "/"
 
-  Scenario: Ticking rows counts them, and Select all ticks every row on the page
+  Scenario: Ticking rows counts them, and Select all ticks every row
     When I open the site
     And I enter select mode
     And I tick "Alpha"
     Then the selection count says "1 selected"
     And "Alpha" is ticked
     And "Beta" is not ticked
-    When I select all on this page
+    When I select all
     Then the selection count says "3 selected"
     And "Beta" is ticked
     When I clear the selection
@@ -66,7 +66,7 @@ Feature: Bulk actions
     Given I have the bookmark "https://d.test" titled "Delta" tagged "rust"
     When I open the site
     And I enter select mode
-    And I select all on this page
+    And I select all
     And I remove the tag "rust" from the selection
     Then I am told "Done."
     And select mode is off

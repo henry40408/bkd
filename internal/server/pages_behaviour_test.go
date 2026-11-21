@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -100,6 +101,62 @@ func TestListPageFiltersByTagAndSearchAndPicksRandom(t *testing.T) {
 	empty := app.send(get("/random?tag=missing").as(token))
 	assertStatus(t, empty, http.StatusOK)
 	mustContain(t, empty, "Nothing to pick from here.")
+}
+
+func TestListPageNamesTheListCountsItAndOffersChips(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("olga", false)
+	app.createBookmark(token, "alpha", "x")
+	app.createBookmark(token, "beta")
+	app.exec("UPDATE bookmarks SET link_status = 'broken' WHERE title = 'alpha'")
+
+	all := app.send(get("/").as(token))
+	mustContain(t, all, "<h1>All bookmarks</h1>", ">2 bookmarks</span>", `<span class="count">2</span></a>`)
+	mustLack(t, all, `class="active"`)
+
+	tagged := app.send(get("/?tag=x&status=broken").as(token))
+	mustContain(t, tagged, "<h1>Tagged “x”</h1>", ">1 of 2</span>",
+		`<a class="chip" href="/?status=broken">Tag: x`, `<a class="chip" href="/?tag=x">Status: Broken`)
+	mustContain(t, app.send(get("/?status=broken").as(token)), "<h1>Broken links</h1>")
+	mustContain(t, app.send(get("/?q=beta&status=broken").as(token)), "<h1>Search results</h1>", ">0 of 2</span>")
+}
+
+func TestThePickCanBeEditedAndDeleted(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("olga", false)
+	id := idOf(app.createBookmark(token, "alpha"))
+	picked := app.send(get("/random").as(token))
+	mustContain(t, picked, fmt.Sprintf(`href="/bookmarks/%d/edit?back=%%2F"`, id),
+		fmt.Sprintf(`href="/bookmarks/%d/delete?back=%%2F"`, id))
+}
+
+func TestTheEditFormOffersTheNewAddressOnlyOfAMovedLink(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("olga", false)
+	id := idOf(app.createBookmark(token, "alpha"))
+	edit := fmt.Sprintf("/bookmarks/%d/edit", id)
+	cases := []struct {
+		name, status, detail string
+		offered              bool
+	}{
+		{"never checked", "", "", false},
+		{"moved", "redirected", "https://new.example/a?b=1", true},
+		{"moved without a target", "redirected", "", false},
+		{"broken", "broken", "https://new.example/a", false},
+		{"ok", "ok", "https://new.example/a", false},
+	}
+	for _, c := range cases {
+		app.exec("UPDATE bookmarks SET link_status = NULLIF(?1, ''), link_checked_at = 1, link_detail = ?2", c.status, c.detail)
+		r := app.send(get(edit).as(token))
+		assertStatus(t, r, http.StatusOK)
+		if c.offered {
+			mustContain(t, r, "This link moved to https://new.example/a?b=1", `data-moved-to="https://new.example/a?b=1"`)
+			continue
+		}
+		if strings.Contains(r.text, "data-moved-to") || strings.Contains(r.text, "This link moved") {
+			t.Errorf("%s: the form offers a new address", c.name)
+		}
+	}
 }
 
 func TestAccountPages(t *testing.T) {

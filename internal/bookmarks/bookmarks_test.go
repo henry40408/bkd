@@ -345,6 +345,28 @@ func TestLinkCountsCoverOnlyTheOwnerAndNameUnchecked(t *testing.T) {
 	assertEqual(t, counts, []LinkCount{{"broken", 2}, {"unchecked", 1}})
 }
 
+func TestCountCoversOnlyTheOwnerAndTheFilter(t *testing.T) {
+	store, pool := newStore(t)
+	henry := dbtest.InsertUser(t, pool, "henry")
+	mei := dbtest.InsertUser(t, pool, "mei")
+	count := func(user int64, filter Filter) int64 {
+		t.Helper()
+		got, err := store.Count(bg, user, filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	assertEqual(t, count(henry, nil), int64(0))
+	create(t, store, henry, valid(t, "one"), 1)
+	create(t, store, henry, valid(t, "two"), 2)
+	create(t, store, mei, valid(t, "one"), 3)
+	assertEqual(t, count(henry, nil), int64(2))
+	assertEqual(t, count(mei, nil), int64(1))
+	assertEqual(t, count(henry, titleIs("one")), int64(1))
+	assertEqual(t, count(henry, titleIs("none")), int64(0))
+}
+
 func TestRandomPicksOneOfTheOwnersBookmarks(t *testing.T) {
 	store, pool := newStore(t)
 	henry := dbtest.InsertUser(t, pool, "henry")

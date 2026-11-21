@@ -150,10 +150,20 @@ func (a *App) loadShell(ctx context.Context, user auth.SessionUser, active activ
 		Forwarded:  user.ViaProxy,
 		Section:    active.section,
 		AllCurrent: onList && active.tag == "" && active.status == "",
+		Total:      totalOf(links),
 		Statuses:   statusLinks(links, currentStatus),
 		Tags:       tagLinks(tags, currentTag),
 		Notice:     views.NoticeText(active.notice),
 	}, nil
+}
+
+// totalOf is how many bookmarks the counts add up to: each one has exactly one status.
+func totalOf(counts []bookmarks.LinkCount) int64 {
+	var total int64
+	for _, count := range counts {
+		total += count.Count
+	}
+	return total
 }
 
 // statusLinks lists the statuses that have bookmarks.
