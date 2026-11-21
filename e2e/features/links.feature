@@ -75,3 +75,20 @@ Feature: Link check
     And I enter select mode
     And I check the links of the selection
     Then I am told "Tick at least one bookmark first."
+
+  Scenario: The edit form offers the address a moved link went to
+    Given I have the bookmark "https://old.test/page" titled "Moved one" whose link moved to "https://new.test/page"
+    When I open the site
+    Then the list shows "Link moved"
+    When I start editing "Moved one"
+    Then the edit form says "This link moved to https://new.test/page"
+    And the new address button is offered
+    When I use the new address
+    Then the edit form holds "https://new.test/page" as the URL
+    And the new address button is not offered
+    And the edit form says "New address filled in. Save to keep it; the link is checked again later."
+    And the focus is on ".edit-form input[name=url]"
+    When I save the edit
+    Then I am told "Bookmark saved."
+    And the list shows "https://new.test/page"
+    And the list does not show "Link moved"

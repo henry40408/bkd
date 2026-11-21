@@ -99,3 +99,14 @@ Feature: The pages work without a script
     When I open Account
     And I change my password from "correct-horse-battery" to "a-brand-new-password" but repeat "a-brand-new-passwore"
     Then I see the error "are different"
+
+  Scenario: The edit page of a moved link shows where it went but has no button
+    Given I have the bookmark "https://old.test/page" titled "Moved one" whose link moved to "https://new.test/page"
+    When I open the site
+    And I start editing "Moved one"
+    Then the edit form says "This link moved to https://new.test/page"
+    And the new address button is not offered
+
+  Scenario: The import page does not offer dropping a file
+    When I open Import and export
+    Then the import box does not offer dropping a file

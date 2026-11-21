@@ -38,3 +38,7 @@ Feature: Importing and exporting bookmarks
   Scenario: The export links download both formats
     When I open Import and export
     Then the download links point to the HTML and JSON exports
+
+  Scenario: The import box says a file can be dropped on it
+    When I open Import and export
+    Then the import box offers dropping a file

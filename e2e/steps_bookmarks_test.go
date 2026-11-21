@@ -132,11 +132,19 @@ func (w *world) createBookmark(bookmark harness.NewBookmark) error {
 }
 
 func (w *world) haveBulkBookmarks(count int) error {
+	return w.haveTaggedBulkBookmarks(count, "")
+}
+
+// haveTaggedBulkBookmarks makes bulk bookmarks, tagged when tag is not empty.
+func (w *world) haveTaggedBulkBookmarks(count int, tag string) error {
 	for range count {
 		w.bulkCount++
 		bookmark := harness.NewBookmark{
 			URL:   fmt.Sprintf("https://bulk.test/%d", w.bulkCount),
 			Title: fmt.Sprintf("Bulk %d", w.bulkCount),
+		}
+		if tag != "" {
+			bookmark.Tags = []string{tag}
 		}
 		if err := w.createBookmark(bookmark); err != nil {
 			return err

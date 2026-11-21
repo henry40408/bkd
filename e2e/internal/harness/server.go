@@ -175,6 +175,31 @@ func (s *Server) AgeConfirmations() error {
 	return err
 }
 
+// SetLinkCheck stores a link check result on the bookmark with this URL. The
+// checker only contacts public addresses, so a scenario cannot make a real
+// server answer "moved" or "broken"; this puts the stored result in place.
+func (s *Server) SetLinkCheck(url, status, detail string) error {
+	db, err := sql.Open("sqlite", s.DBPath+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	result, err := db.Exec(
+		"UPDATE bookmarks SET link_status = ?, link_checked_at = ?, link_detail = ? WHERE url = ?",
+		status, time.Now().Unix(), detail, url)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return fmt.Errorf("no bookmark has the URL %s", url)
+	}
+	return nil
+}
+
 // freeAddress is an unused loopback address. Racy (released before the server
 // claims it); a clash makes the new server exit, which waitUntilAnswering
 // reports.
