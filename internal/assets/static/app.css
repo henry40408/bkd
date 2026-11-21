@@ -67,7 +67,7 @@ label.inline { display: flex; align-items: center; gap: var(--sp-2); }
 .btns { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
 .btns .btn.quiet { padding: 0 var(--sp-2); }
 /* Under fields, a button row has no label above it, so it needs more room than the gap between fields. */
-form:has(label) .btns { margin-top: var(--sp-2); }
+form:has(label) > .btns { margin-top: var(--sp-2); }
 
 /* ---- Frame: the rail with sections and filters ---- */
 .app { display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); min-height: 100vh; min-height: 100dvh; }
