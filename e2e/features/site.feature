@@ -35,3 +35,19 @@ Feature: Page details
     Then I am told "Bookmark saved."
     And the list shows "Their title"
     And the list shows "A description"
+
+  Scenario: The edit form offers the page's description, and using it changes only the note field
+    Given I have the bookmark "https://example.test/read" titled "Mine" whose page says "Their title" and "What the page says about itself"
+    When I open the site
+    And I start editing "Mine"
+    Then the edit form says "Page description: What the page says about itself"
+    And the "note" field of the edit form holds ""
+    When I use the page description
+    Then the "note" field of the edit form holds "What the page says about itself"
+    And the page description button is not offered
+    And the edit form holds "Mine" as the title
+    When I save the edit
+    Then I am told "Bookmark saved."
+    And the list shows "Mine"
+    When I start editing "Mine"
+    Then the "note" field of the edit form holds "What the page says about itself"

@@ -481,6 +481,8 @@ type EditView struct {
 	MovedTo string
 	// SiteTitle is the title the page gives itself, when it was read.
 	SiteTitle string
+	// SiteDescription is the description the page gives itself, when it was read.
+	SiteDescription string
 }
 
 // movedNote tells where a moved link went and, with a script, offers to use
@@ -510,6 +512,20 @@ func siteTitleNote(siteTitle, current string) node {
 	)
 }
 
+// siteDescriptionNote shows the page's own description and, with a script,
+// offers to use it as the bookmark's note. Nothing is shown when the page's
+// description is what the bookmark already has.
+func siteDescriptionNote(siteDescription, current string) node {
+	if siteDescription == "" || siteDescription == current {
+		return ""
+	}
+	return group(
+		el("p", []attr{classes("hint", "site-description")}, text("Page description: "+siteDescription)),
+		el("button", []attr{classes("btn"), a("type", "button"), a("data-site-description", siteDescription), flag("data-script-only"), flag("hidden")},
+			text("Use page description")),
+	)
+}
+
 // EditPage renders the edit form.
 func EditPage(view EditView) string {
 	content := group(
@@ -526,6 +542,7 @@ func EditPage(view EditView) string {
 				field("Tags, separated by commas ", void("input", a("type", "text"), a("name", "tags"), a("value", view.Tags))),
 			),
 			field("Note ", el("textarea", []attr{a("name", "note"), a("rows", "3")}, text(view.Note))),
+			siteDescriptionNote(view.SiteDescription, view.Note),
 			errorLine(view.Error),
 			formButtons(
 				el("button", []attr{classes("btn", "primary"), a("type", "submit")}, iconLabel(iconOK, "Save")),

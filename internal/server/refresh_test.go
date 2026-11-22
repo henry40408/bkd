@@ -253,7 +253,7 @@ func TestRefreshFormReturnsToWhereThePersonWasWithANotice(t *testing.T) {
 	mustContain(t, app.send(get("/").as(token)), `<p class="site-desc">Og description</p>`)
 }
 
-func TestEditPageOffersTheRefreshedPageTitle(t *testing.T) {
+func TestEditPageOffersTheRefreshedPageTitleAndDescription(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
 	site := pageSite(describedPage)
@@ -261,11 +261,13 @@ func TestEditPageOffersTheRefreshedPageTitle(t *testing.T) {
 	id := app.addBookmarkAt(token, site.URL+"/edit")
 	editPath := "/bookmarks/" + strconv.FormatInt(id, 10) + "/edit"
 
-	if strings.Contains(app.send(get(editPath).as(token)).text, "data-site-title") {
-		t.Fatal("a page title is offered before any refresh")
+	before := app.send(get(editPath).as(token)).text
+	if strings.Contains(before, "data-site-title") || strings.Contains(before, "data-site-description") {
+		t.Fatal("page details are offered before any refresh")
 	}
 	assertStatus(t, app.send(refreshAs(token, id)), http.StatusOK)
-	mustContain(t, app.send(get(editPath).as(token)), `data-site-title="Og title"`)
+	after := app.send(get(editPath).as(token))
+	mustContain(t, after, `data-site-title="Og title"`, `data-site-description="Og description"`)
 }
 
 func TestRefreshFormNeverLeavesTheSite(t *testing.T) {

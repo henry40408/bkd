@@ -63,6 +63,23 @@ func TestEditPageShowsThePagesTitleOnlyWhenItDiffers(t *testing.T) {
 		`<button class="btn" type="button" data-site-title="Theirs &lt;i&gt;&quot;x&quot;&lt;/i&gt;" data-script-only hidden>Use page title</button>`)
 }
 
+func TestEditPageShowsThePagesDescriptionOnlyWhenItDiffers(t *testing.T) {
+	view := EditView{Shell: alice(SectionBookmarks), ID: 7, URL: "https://a.test/", Note: "Mine", Back: "/"}
+	requireAbsent(t, EditPage(view), "site-description", "data-site-description")
+
+	view.SiteDescription = "Mine"
+	requireAbsent(t, EditPage(view), "site-description", "data-site-description")
+
+	view.SiteDescription = `Theirs <i>"x"</i>`
+	body := EditPage(view)
+	requireContains(t, body,
+		`<p class="hint site-description">Page description: Theirs &lt;i&gt;&quot;x&quot;&lt;/i&gt;</p>`,
+		`<button class="btn" type="button" data-site-description="Theirs &lt;i&gt;&quot;x&quot;&lt;/i&gt;" data-script-only hidden>Use page description</button>`)
+	if strings.Index(body, "<textarea") > strings.Index(body, "site-description") {
+		t.Fatal("the page's description should come after the Note field")
+	}
+}
+
 func TestRefreshedNoticeHasFixedText(t *testing.T) {
 	if got := NoticeText("site-refreshed"); got != "Page details updated." {
 		t.Fatalf("got %q", got)

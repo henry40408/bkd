@@ -231,11 +231,13 @@ func movedTo(bookmark bookmarks.Bookmark) string {
 	return bookmark.Link.Detail
 }
 
-func siteTitleOf(bookmark bookmarks.Bookmark) string {
-	if bookmark.Site == nil {
-		return ""
+// siteTextOf is what the page said about itself; empty for a page never read.
+func siteTextOf(bookmark bookmarks.Bookmark) views.SiteInfo {
+	info := siteOf(bookmark.Site)
+	if info == nil {
+		return views.SiteInfo{}
 	}
-	return bookmark.Site.Title
+	return *info
 }
 
 func (a *App) pageEditForm(w http.ResponseWriter, r *http.Request, user auth.SessionUser) *pageError {
@@ -247,10 +249,11 @@ func (a *App) pageEditForm(w http.ResponseWriter, r *http.Request, user auth.Ses
 	if failure != nil {
 		return failure
 	}
+	site := siteTextOf(bookmark)
 	writeHTML(w, http.StatusOK, views.EditPage(views.EditView{
 		Shell: shell, ID: id, URL: bookmark.URL, Title: bookmark.Title, Note: bookmark.Note,
 		Tags: strings.Join(bookmark.Tags, ", "), Back: pathOrHome(r.URL.Query().Get("back")),
-		MovedTo: movedTo(bookmark), SiteTitle: siteTitleOf(bookmark),
+		MovedTo: movedTo(bookmark), SiteTitle: site.Title, SiteDescription: site.Description,
 	}))
 	return nil
 }

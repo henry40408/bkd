@@ -644,6 +644,22 @@
     if (button) usePageTitle(button);
   });
 
+  // Like the title, the description comes from a remote page and only fills a text field.
+  function usePageDescription(button) {
+    const form = button.closest("form");
+    const field = form && form.querySelector('textarea[name="note"]');
+    if (!field) return;
+    field.value = button.dataset.siteDescription;
+    syncSubmitState(form);
+    button.hidden = true;
+    field.focus();
+  }
+
+  document.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest("button[data-site-description]") : null;
+    if (button) usePageDescription(button);
+  });
+
   document.addEventListener("click", (event) => {
     if (wantsBrowserDefault(event)) return;
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
