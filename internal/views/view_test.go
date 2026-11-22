@@ -477,8 +477,21 @@ func TestTheOffNoteSitsUnderTheCheckboxAndLeavesTheUserAgentOut(t *testing.T) {
 	if checkbox < 0 || note < checkbox || note > box {
 		t.Errorf("positions: checkbox %d, note %d, box %d; want the note between them", checkbox, note, box)
 	}
-	requireContains(t, page, "the box above has no effect", `still applies to the &quot;Check links&quot; button`)
+	requireContains(t, page, "the box above has no effect", `still applies to the &quot;Check links&quot; button and to reading a page`)
 	requireAbsent(t, page, "this setting has no effect")
+}
+
+// A post without the checkbox turns the background check off, so the two
+// settings must never be sent by separate forms.
+func TestTheUserAgentHasItsOwnHeadingButSharesTheFormWithTheCheckbox(t *testing.T) {
+	page := SettingsPage(SettingsView{Shell: alice(SectionSettings), MaxUserAgentLength: 200})
+	requireContains(t, page, "<h2>Link check</h2>", "<h2>User-Agent</h2>")
+	if got := strings.Count(page, `action="/settings"`); got != 1 {
+		t.Fatalf("settings forms = %d, want 1", got)
+	}
+	start := strings.Index(page, `action="/settings"`)
+	form := page[start : start+strings.Index(page[start:], "</form>")]
+	requireContains(t, form, `name="link_check_enabled"`, `name="link_check_user_agent"`)
 }
 
 func TestTheSettingsPageShowsAnErrorOnlyWhenThereIsOne(t *testing.T) {

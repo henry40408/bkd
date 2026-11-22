@@ -125,17 +125,17 @@ jobs:
       matrix:
         shard:
           - name: server-api
-            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|auth|backgroundcheck|bookmarks|db|dbtest|importer|linkcheck|netscape|search|truncate|users|version|views)/|^internal/server/(pages|forms|guard|routes|app|cookie|sse|middleware|pageerror)'
+            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|auth|backgroundcheck|bookmarks|db|dbtest|importer|linkcheck|netscape|search|sitemeta|truncate|users|version|views)/|^internal/server/(pages|forms|guard|routes|app|cookie|sse|middleware|pageerror)'
           - name: server-pages
-            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|auth|backgroundcheck|bookmarks|db|dbtest|importer|linkcheck|netscape|search|truncate|users|version|views)/|^internal/server/(api|service|json|request)'
+            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|auth|backgroundcheck|bookmarks|db|dbtest|importer|linkcheck|netscape|search|sitemeta|truncate|users|version|views)/|^internal/server/(api|service|json|request)'
           - name: auth-users-db
-            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|backgroundcheck|bookmarks|dbtest|importer|linkcheck|netscape|search|truncate|server|version|views)/'
+            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|backgroundcheck|bookmarks|dbtest|importer|linkcheck|netscape|search|sitemeta|truncate|server|version|views)/'
           - name: linkcheck
-            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|auth|bookmarks|db|dbtest|importer|netscape|search|truncate|server|users|version|views)/'
+            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|auth|bookmarks|db|dbtest|importer|netscape|search|sitemeta|truncate|server|users|version|views)/'
           - name: bookmarks-netscape-search
             exclude: '^(e2e|vendor|cmd)/|^internal/(assets|auth|backgroundcheck|db|dbtest|linkcheck|server|users|version|views)/'
           - name: views-cmd
-            exclude: '^(e2e|vendor)/|^internal/(auth|backgroundcheck|bookmarks|db|importer|linkcheck|netscape|search|truncate|server|users)/'
+            exclude: '^(e2e|vendor)/|^internal/(auth|backgroundcheck|bookmarks|db|importer|linkcheck|netscape|search|sitemeta|truncate|server|users)/'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

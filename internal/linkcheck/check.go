@@ -115,12 +115,11 @@ func (c *Checker) Inspect(ctx context.Context, address, userAgent string) Inspec
 	if !c.guard.allowsURL(target) {
 		return withoutBackoff(Verdict{StatusUnknown, detailNotPublic})
 	}
-	select {
-	case c.inFlight <- struct{}{}:
-		defer func() { <-c.inFlight }()
-	case <-ctx.Done():
+	release, ok := c.acquireSlot(ctx)
+	if !ok {
 		return withoutBackoff(Verdict{StatusUnknown, detailCouldNotConnect})
 	}
+	defer release()
 	// HEAD and the GET after it share one budget, so a slow site costs 10 seconds, not 20.
 	ctx, cancel := context.WithTimeout(ctx, c.budget)
 	defer cancel()
@@ -128,6 +127,17 @@ func (c *Checker) Inspect(ctx context.Context, address, userAgent string) Inspec
 		userAgent = DefaultUserAgent()
 	}
 	return c.request(ctx, target, userAgent)
+}
+
+// acquireSlot waits for one of the requests allowed at once. It gives up when
+// ctx ends, and then reports false.
+func (c *Checker) acquireSlot(ctx context.Context) (release func(), ok bool) {
+	select {
+	case c.inFlight <- struct{}{}:
+		return func() { <-c.inFlight }, true
+	case <-ctx.Done():
+		return nil, false
+	}
 }
 
 func (c *Checker) request(ctx context.Context, target *url.URL, userAgent string) Inspection {

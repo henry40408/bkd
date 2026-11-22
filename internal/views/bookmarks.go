@@ -45,6 +45,8 @@ type AddForm struct {
 	Note  string
 	Tags  string
 	Error string
+	// Site is what the page at URL said when the form was last sent.
+	Site SiteDetails
 }
 
 // BulkState is what a refused bulk action shows again: the ticked rows, the
@@ -270,13 +272,14 @@ func searchBar(view BookmarksView) node {
 func addForm(add AddForm) node {
 	return el("details", []attr{classes("add"), a("id", "add"), when(add.Open, flag("open"))},
 		el("summary", []attr{classes("btn", "primary", "ico"), a("title", "Add bookmark")}, iconLabel(iconPlus, "Add bookmark")),
-		el("form", []attr{classes("stack", "panel"), a("method", "post"), a("action", "/bookmarks"), a("data-submit-when-valid", "")},
+		el("form", []attr{classes("stack", "panel"), a("method", "post"), a("action", "/bookmarks"), a("data-submit-when-valid", ""), a("data-site-preview", "")},
 			field("URL ", void("input", a("type", "url"), a("name", "url"), a("value", add.URL), a("placeholder", "https://"), flag("required"))),
+			siteFields(add.Site),
 			el("div", []attr{classes("grid2")},
-				field("Title ", void("input", a("type", "text"), a("name", "title"), a("value", add.Title), a("placeholder", "Leave blank to use the domain"))),
+				titleField(add.Title, add.Site),
 				field("Tags, separated by commas ", void("input", a("type", "text"), a("name", "tags"), a("value", add.Tags), a("placeholder", "rust, reading"))),
 			),
-			field("Note ", el("textarea", []attr{a("name", "note"), a("rows", "2")}, text(add.Note))),
+			noteField(add.Note, add.Site, "2"),
 			errorLine(add.Error),
 			formButtons(el("button", []attr{classes("btn", "primary"), a("type", "submit")}, iconLabel(iconOK, "Save bookmark"))),
 		),
@@ -450,6 +453,8 @@ type EditView struct {
 	// MovedTo is the address a moved link now answers from; empty when the
 	// link did not move. It is shown as text only, never followed.
 	MovedTo string
+	// Site is what the page at URL says about itself, as stored or as last sent.
+	Site SiteDetails
 }
 
 // movedNote tells where a moved link went and, with a script, offers to use
@@ -469,15 +474,16 @@ func movedNote(target string) node {
 func EditPage(view EditView) string {
 	content := group(
 		el("h1", nil, text("Edit bookmark")),
-		el("form", []attr{classes("stack", "edit-form"), a("method", "post"), a("action", fmt.Sprintf("/bookmarks/%d/edit", view.ID)), a("data-submit-when-valid", "")},
+		el("form", []attr{classes("stack", "edit-form"), a("method", "post"), a("action", fmt.Sprintf("/bookmarks/%d/edit", view.ID)), a("data-submit-when-valid", ""), a("data-site-preview", "")},
 			hidden("back", view.Back),
 			field("URL ", void("input", a("type", "url"), a("name", "url"), a("value", view.URL), a("placeholder", "https://"), flag("required"), flag("autofocus"))),
+			siteFields(view.Site),
 			movedNote(view.MovedTo),
 			el("div", []attr{classes("grid2")},
-				field("Title ", void("input", a("type", "text"), a("name", "title"), a("value", view.Title), a("placeholder", "Leave blank to use the domain"))),
+				titleField(view.Title, view.Site),
 				field("Tags, separated by commas ", void("input", a("type", "text"), a("name", "tags"), a("value", view.Tags))),
 			),
-			field("Note ", el("textarea", []attr{a("name", "note"), a("rows", "3")}, text(view.Note))),
+			noteField(view.Note, view.Site, "3"),
 			errorLine(view.Error),
 			formButtons(
 				el("button", []attr{classes("btn", "primary"), a("type", "submit")}, iconLabel(iconOK, "Save")),

@@ -70,12 +70,19 @@ func NewStore(pool *sql.DB) *Store { return &Store{db: pool} }
 const selectBookmark = `SELECT bookmarks.id, bookmarks.url, bookmarks.title, bookmarks.note,
     bookmarks.created_at, bookmarks.updated_at,
     bookmarks.link_status, bookmarks.link_checked_at, bookmarks.link_detail,
+    bookmarks.site_title, bookmarks.site_description,
     (SELECT group_concat(tag, char(31))
      FROM (SELECT tag FROM bookmark_tags WHERE bookmark_id = bookmarks.id ORDER BY tag)) AS tags
     FROM bookmarks`
 
-const insertBookmark = `INSERT INTO bookmarks (user_id, url, title, note, created_at, updated_at)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?5) RETURNING id`
+// An empty page title or description is stored as NULL: the page said nothing.
+const insertBookmark = `INSERT INTO bookmarks (user_id, url, title, note, site_title, site_description, created_at, updated_at)
+    VALUES (?1, ?2, ?3, ?4, NULLIF(?5, ''), NULLIF(?6, ''), ?7, ?7) RETURNING id`
+
+func insertArgs(userID int64, bookmark Valid, createdAt int64) []any {
+	return []any{userID, bookmark.URL, bookmark.Title, bookmark.Note,
+		bookmark.Site.Title, bookmark.Site.Description, createdAt}
+}
 
 // execer is what insertTags needs from a transaction or a connection.
 type execer interface {
@@ -91,7 +98,7 @@ func (s *Store) Create(ctx context.Context, userID int64, bookmark Valid, now in
 	defer func() { _ = tx.Rollback() }()
 
 	var id int64
-	err = tx.QueryRowContext(ctx, insertBookmark, userID, bookmark.URL, bookmark.Title, bookmark.Note, now).Scan(&id)
+	err = tx.QueryRowContext(ctx, insertBookmark, insertArgs(userID, bookmark, now)...).Scan(&id)
 	if err != nil {
 		return Bookmark{}, fmt.Errorf("insert bookmark: %w", err)
 	}
@@ -138,15 +145,19 @@ func (s *Store) Update(ctx context.Context, req UpdateRequest) (updated Bookmark
 }
 
 func updateRow(ctx context.Context, tx *sql.Tx, req UpdateRequest) (bool, error) {
-	// A check describes one address, so it is dropped when the URL changes. In
-	// SET, `url` is still the old value.
+	// A check and a page's details describe one address, so a check is dropped
+	// when the URL changes and the details are replaced by those of the new
+	// page. In SET, `url` is still the old value.
 	result, err := tx.ExecContext(ctx, `UPDATE bookmarks SET
-             link_status     = CASE WHEN url = ?1 THEN link_status     END,
-             link_checked_at = CASE WHEN url = ?1 THEN link_checked_at END,
-             link_detail     = CASE WHEN url = ?1 THEN link_detail     END,
+             link_status      = CASE WHEN url = ?1 THEN link_status      END,
+             link_checked_at  = CASE WHEN url = ?1 THEN link_checked_at  END,
+             link_detail      = CASE WHEN url = ?1 THEN link_detail      END,
+             site_title       = CASE WHEN url = ?1 THEN site_title       ELSE NULLIF(?7, '') END,
+             site_description = CASE WHEN url = ?1 THEN site_description ELSE NULLIF(?8, '') END,
              url = ?1, title = ?2, note = ?3, updated_at = ?4
          WHERE id = ?5 AND user_id = ?6`,
-		req.Bookmark.URL, req.Bookmark.Title, req.Bookmark.Note, req.Now, req.ID, req.UserID)
+		req.Bookmark.URL, req.Bookmark.Title, req.Bookmark.Note, req.Now, req.ID, req.UserID,
+		req.Bookmark.Site.Title, req.Bookmark.Site.Description)
 	if err != nil {
 		return false, fmt.Errorf("update bookmark: %w", err)
 	}
@@ -260,10 +271,12 @@ func scanBookmark(rows *sql.Rows) (Bookmark, error) {
 		status    sql.NullString
 		checkedAt sql.NullInt64
 		detail    sql.NullString
+		site      siteColumns
 		tags      sql.NullString
 	)
 	err := rows.Scan(&bookmark.ID, &bookmark.URL, &bookmark.Title, &bookmark.Note,
-		&bookmark.CreatedAt, &bookmark.UpdatedAt, &status, &checkedAt, &detail, &tags)
+		&bookmark.CreatedAt, &bookmark.UpdatedAt, &status, &checkedAt, &detail,
+		&site.title, &site.description, &tags)
 	if err != nil {
 		return Bookmark{}, fmt.Errorf("scan bookmark: %w", err)
 	}
@@ -274,7 +287,21 @@ func scanBookmark(rows *sql.Rows) (Bookmark, error) {
 	if status.Valid {
 		bookmark.Link = &LinkCheck{Status: status.String, CheckedAt: checkedAt.Int64, Detail: detail.String}
 	}
+	bookmark.Site = site.value()
 	return bookmark, nil
+}
+
+// siteColumns is the site_* columns, which are NULL when the page said nothing.
+type siteColumns struct {
+	title       sql.NullString
+	description sql.NullString
+}
+
+func (c siteColumns) value() *Site {
+	if !c.title.Valid && !c.description.Valid {
+		return nil
+	}
+	return &Site{Title: c.title.String, Description: c.description.String}
 }
 
 // TagCounts lists every tag the user has used, with how many bookmarks carry it.
@@ -390,8 +417,7 @@ func existingURLs(ctx context.Context, conn *sql.Conn, userID int64) (map[string
 func importEntry(ctx context.Context, conn *sql.Conn, userID int64, entry ImportEntry) error {
 	var id int64
 	bookmark := entry.Bookmark
-	err := conn.QueryRowContext(ctx, insertBookmark,
-		userID, bookmark.URL, bookmark.Title, bookmark.Note, entry.CreatedAt).Scan(&id)
+	err := conn.QueryRowContext(ctx, insertBookmark, insertArgs(userID, bookmark, entry.CreatedAt)...).Scan(&id)
 	if err != nil {
 		return fmt.Errorf("insert imported bookmark: %w", err)
 	}

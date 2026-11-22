@@ -141,6 +141,7 @@ func (a *App) mountAPI(mux *http.ServeMux) {
 	route("/bookmarks/bulk", onPost(signedIn(a.handleBulkBookmarks)))
 	route("/bookmarks/check", onPost(signedIn(a.handleCheck)))
 	route("/bookmarks/{id}", onPut(signedIn(a.handleUpdateBookmark)), onDelete(signedIn(a.handleDeleteBookmark)))
+	route("/site-preview", onPost(signedIn(a.handleSitePreview)))
 	route("/tags", onGet(signedIn(a.handleTags)))
 	mux.Handle("/api/import", a.api(maxImportBytes, byMethod(onPost(signedIn(a.handleImport)))))
 	route("/export", onGet(signedIn(a.handleExport)))

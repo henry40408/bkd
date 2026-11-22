@@ -200,6 +200,31 @@ func (s *Server) SetLinkCheck(url, status, detail string) error {
 	return nil
 }
 
+// SetSite stores what a page said about itself on the bookmark with this URL.
+// The server only contacts public addresses, so a scenario cannot make a real
+// server answer with a page; this puts the stored details in place.
+func (s *Server) SetSite(url, title, description string) error {
+	db, err := sql.Open("sqlite", s.DBPath+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	result, err := db.Exec(
+		"UPDATE bookmarks SET site_title = ?, site_description = ? WHERE url = ?",
+		title, description, url)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return fmt.Errorf("no bookmark has the URL %s", url)
+	}
+	return nil
+}
+
 // freeAddress is an unused loopback address. Racy (released before the server
 // claims it); a clash makes the new server exit, which waitUntilAnswering
 // reports.

@@ -56,7 +56,7 @@ func goMigrations(t *testing.T, pool *sql.DB) []rustMigration {
 // goOnlyMigrations is how many migrations come after the last one the Rust
 // server knew. The fixtures in testdata stay as Rust wrote them, so add one
 // here, and its schema change to withGoOnlyChanges, with each new migration.
-const goOnlyMigrations = 1
+const goOnlyMigrations = 2
 
 func TestNewDatabaseRecordsTheRustMigrationsThenTheGoOnlyOnes(t *testing.T) {
 	got := goMigrations(t, openTemp(t))
@@ -75,6 +75,8 @@ func TestNewDatabaseRecordsTheRustMigrationsThenTheGoOnlyOnes(t *testing.T) {
 func withGoOnlyChanges(rust map[string]string) map[string]string {
 	rust["users"] = strings.TrimSuffix(rust["users"], ") STRICT") +
 		", link_check_user_agent TEXT NOT NULL DEFAULT '') STRICT"
+	rust["bookmarks"] = strings.TrimSuffix(rust["bookmarks"], ") STRICT") +
+		", site_title TEXT, site_description TEXT) STRICT"
 	return rust
 }
 

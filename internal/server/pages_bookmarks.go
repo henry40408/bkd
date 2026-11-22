@@ -150,6 +150,8 @@ type bookmarkForm struct {
 	url, title, note, tags string
 	// back is the list address to return to after editing; ignored when adding.
 	back string
+	// siteURL is the address the page details below were read from.
+	siteURL, siteTitle, siteDescription string
 }
 
 func readBookmarkForm(r *http.Request) (bookmarkForm, *pageError) {
@@ -160,21 +162,56 @@ func readBookmarkForm(r *http.Request) (bookmarkForm, *pageError) {
 	return bookmarkForm{
 		url: values[0], title: fields.text("title"), note: fields.text("note"),
 		tags: fields.text("tags"), back: fields.text("back"),
+		siteURL: fields.text("site_url"), siteTitle: fields.text("site_title"),
+		siteDescription: fields.text("site_description"),
 	}, nil
 }
 
-// input trims what the person typed. A blank title falls back to the domain, as
-// the old front end did.
+// site is what the page at the address saved says about itself. Details read
+// from another address are dropped: a script that did not run, or a form sent
+// before the address changed, must not give a bookmark another page's details.
+// The text is cut here, not only when stored: a blank title or note becomes it,
+// and a title over the limit would be refused although the person wrote nothing.
+func (f bookmarkForm) site() bookmarks.Site {
+	if strings.TrimSpace(f.siteURL) != strings.TrimSpace(f.url) {
+		return bookmarks.Site{}
+	}
+	return bookmarks.Site{Title: f.siteTitle, Description: f.siteDescription}.Fitted()
+}
+
+// siteDetails is site for a form shown again.
+func (f bookmarkForm) siteDetails() views.SiteDetails {
+	site := f.site()
+	if site == (bookmarks.Site{}) {
+		return views.SiteDetails{}
+	}
+	return views.SiteDetails{URL: strings.TrimSpace(f.url), Title: site.Title, Description: site.Description}
+}
+
+// input trims what the person typed. A title or a note left blank is what the
+// page says about itself; a title still blank falls back to the domain, as the
+// old front end did.
 func (f bookmarkForm) input() bookmarks.Input {
 	address := strings.TrimSpace(f.url)
-	title := strings.TrimSpace(f.title)
+	site := f.site()
+	title := firstFilled(f.title, site.Title)
 	if title == "" {
 		title = views.DomainOf(address)
 	}
 	return bookmarks.Input{
-		URL: address, Title: title, Note: strings.TrimSpace(f.note),
-		Tags: strings.Split(f.tags, ","),
+		URL: address, Title: title, Note: firstFilled(f.note, site.Description),
+		Tags: strings.Split(f.tags, ","), Site: site,
 	}
+}
+
+// firstFilled is the first value that is not blank, trimmed.
+func firstFilled(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (a *App) pageCreateBookmark(w http.ResponseWriter, r *http.Request, user auth.SessionUser) *pageError {
@@ -191,7 +228,10 @@ func (a *App) pageCreateBookmark(w http.ResponseWriter, r *http.Request, user au
 	if other != nil {
 		return other
 	}
-	add := views.AddForm{Open: true, URL: form.url, Title: form.title, Note: form.note, Tags: form.tags, Error: message}
+	add := views.AddForm{
+		Open: true, URL: form.url, Title: form.title, Note: form.note, Tags: form.tags,
+		Error: message, Site: form.siteDetails(),
+	}
 	return a.writeListPage(w, r, status, user, listContext{view: views.ListView{Page: 1}, add: add})
 }
 
@@ -233,10 +273,12 @@ func (a *App) pageEditForm(w http.ResponseWriter, r *http.Request, user auth.Ses
 	if failure != nil {
 		return failure
 	}
+	site := bookmark.Site.Value()
 	writeHTML(w, http.StatusOK, views.EditPage(views.EditView{
 		Shell: shell, ID: id, URL: bookmark.URL, Title: bookmark.Title, Note: bookmark.Note,
 		Tags: strings.Join(bookmark.Tags, ", "), Back: pathOrHome(r.URL.Query().Get("back")),
 		MovedTo: movedTo(bookmark),
+		Site:    views.SiteDetails{URL: bookmark.URL, Title: site.Title, Description: site.Description},
 	}))
 	return nil
 }
@@ -269,7 +311,7 @@ func (a *App) pageEditSubmit(w http.ResponseWriter, r *http.Request, user auth.S
 	}
 	writeHTML(w, status, views.EditPage(views.EditView{
 		Shell: shell, ID: id, URL: form.url, Title: form.title, Note: form.note,
-		Tags: form.tags, Error: message, Back: back,
+		Tags: form.tags, Error: message, Back: back, Site: form.siteDetails(),
 	}))
 	return nil
 }

@@ -583,10 +583,6 @@
     );
   });
 
-  // ---- Moved links: the edit form can take the address the link moved to ----
-
-  const MOVED_FILLED = "New address filled in. Save to keep it; the link is checked again later.";
-
   // The address comes from a remote server's answer, so only a web address is used.
   function isWebAddress(value) {
     try {
@@ -597,6 +593,198 @@
     }
   }
 
+  // ---- Page details: the add and edit forms read what the page behind the address says ----
+  // The title and the note show the page's title and description as placeholders; the
+  // server saves them for a field left blank. Hidden fields carry them back with the form.
+
+  const SITE_PREVIEW_URL = "/api/site-preview";
+  const SITE_TYPING_PAUSE_MS = 500;
+  // A form sent while its page is being read waits this long for the answer, at most.
+  const SITE_SUBMIT_WAIT_MS = 5000;
+  const SITE_READING = "Reading the page…";
+  const SITE_NOTHING = "The page says nothing about itself.";
+  const SITE_UNREACHABLE = "Could not read the page: bkd did not answer.";
+  const SITE_BUSY = "Could not read the page: a link check or another read is running. Try again in a moment.";
+
+  // Per form:
+  //   timer   the pause before a read, while the person is still typing
+  //   run     the read in flight (a promise that never rejects), or null
+  //   failed  { address, message } of a read that will fail again, so it is not repeated
+  //   waiting a submit is waiting for the read; resume lets its second try through
+  const siteStates = new WeakMap();
+
+  // `retryable` is a failure that is not the page's: asking again may work.
+  class SiteReadFailed extends Error {
+    constructor(message, retryable) {
+      super(message);
+      this.retryable = retryable;
+    }
+  }
+
+  const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
+  function siteStateOf(form) {
+    if (!siteStates.has(form)) siteStates.set(form, { timer: null, run: null, failed: null, waiting: false, resume: false });
+    return siteStates.get(form);
+  }
+
+  const siteInput = (form, name) => form.querySelector(`[name="${name}"]`);
+
+  function setSiteStatus(form, message) {
+    const line = form.querySelector("[data-site-status]");
+    if (!line) return;
+    line.textContent = message;
+    line.hidden = message === "";
+  }
+
+  // The details belong to one address; they are put away as soon as the address changes.
+  function setSiteDetails(form, { url, title, description }) {
+    siteInput(form, "site_url").value = url;
+    siteInput(form, "site_title").value = title;
+    siteInput(form, "site_description").value = description;
+    const titleField = siteInput(form, "title");
+    titleField.placeholder = title || titleField.dataset.defaultPlaceholder;
+    const noteField = siteInput(form, "note");
+    if (description) noteField.placeholder = description;
+    else noteField.removeAttribute("placeholder");
+  }
+
+  const NO_SITE_DETAILS = { url: "", title: "", description: "" };
+
+  // The address as typed, when it is one the server can read.
+  function readableAddress(form) {
+    const field = siteInput(form, "url");
+    const address = field.value.trim();
+    return field.validity.valid && isWebAddress(address) ? address : "";
+  }
+
+  async function fetchSiteDetails(address) {
+    let response;
+    try {
+      response = await fetch(SITE_PREVIEW_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: address }),
+        credentials: "same-origin",
+      });
+    } catch {
+      throw new SiteReadFailed(SITE_UNREACHABLE, true);
+    }
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 429) throw new SiteReadFailed(SITE_BUSY, true);
+    if (!response.ok) {
+      throw new SiteReadFailed(typeof body.error === "string" ? sentence(body.error) : SITE_UNREACHABLE, false);
+    }
+    return { url: address, title: body.title || "", description: body.description || "" };
+  }
+
+  // Starts reading the address in the field, unless it is being read, has no details to
+  // read or already has them. Returns the read in flight, if any.
+  function readSiteDetails(form) {
+    const state = siteStateOf(form);
+    const address = readableAddress(form);
+    if (!form.isConnected || state.run || !address || address === siteInput(form, "site_url").value) return state.run;
+    state.run = runSiteRead(form, address);
+    return state.run;
+  }
+
+  // One request at a time per form. An answer for an address that was typed over is
+  // dropped and the address now in the field is read; aborting the request instead
+  // could leave the server's one slot for this user taken when the next one arrives.
+  async function runSiteRead(form, address) {
+    const state = siteStateOf(form);
+    setSiteStatus(form, SITE_READING);
+    let details = null;
+    let failure = null;
+    try {
+      details = await fetchSiteDetails(address);
+    } catch (error) {
+      failure = error instanceof SiteReadFailed ? error : new SiteReadFailed(SITE_UNREACHABLE, true);
+    }
+    state.run = null;
+    if (!form.isConnected) return;
+    if (readableAddress(form) !== address) {
+      setSiteStatus(form, "");
+      return readSiteDetails(form);
+    }
+    if (failure) {
+      state.failed = failure.retryable ? null : { address, message: failure.message };
+      setSiteStatus(form, failure.message);
+      return;
+    }
+    state.failed = null;
+    setSiteDetails(form, details);
+    setSiteStatus(form, details.title || details.description ? "" : SITE_NOTHING);
+  }
+
+  function addressChanged(form, pauseMs) {
+    if (!form.matches("[data-site-preview]")) return;
+    const state = siteStateOf(form);
+    clearTimeout(state.timer);
+    state.timer = null;
+    const address = readableAddress(form);
+    if (address === siteInput(form, "site_url").value) {
+      // Nothing to read or to put away; an error left from an address that is gone goes.
+      if (!address && !state.run) setSiteStatus(form, "");
+      return;
+    }
+    setSiteDetails(form, NO_SITE_DETAILS);
+    // A running read keeps its status line until it ends and is dropped or shown.
+    if (!state.run) setSiteStatus(form, "");
+    if (state.failed && state.failed.address === address) {
+      // The page will not read any better a second time; say so again, and spare the site.
+      if (!state.run) setSiteStatus(form, state.failed.message);
+      return;
+    }
+    state.timer = setTimeout(() => {
+      state.timer = null;
+      readSiteDetails(form);
+    }, pauseMs);
+  }
+
+  const urlFieldOf = (event) =>
+    event.target instanceof HTMLInputElement && event.target.name === "url" && event.target.form ? event.target : null;
+
+  document.addEventListener("input", (event) => {
+    const field = urlFieldOf(event);
+    if (field) addressChanged(field.form, SITE_TYPING_PAUSE_MS);
+  });
+
+  document.addEventListener("change", (event) => {
+    const field = urlFieldOf(event);
+    if (field) addressChanged(field.form, 0);
+  });
+
+  // A form sent while its page is still being read would go without the page's text.
+  // Returns true when the send was held back; it is tried again once the read ends.
+  function holdSubmitForSiteDetails(form, submitter) {
+    if (!form.matches("[data-site-preview]")) return false;
+    const state = siteStateOf(form);
+    if (state.resume) {
+      state.resume = false;
+      return false;
+    }
+    if (state.waiting) return true;
+    if (state.timer) {
+      clearTimeout(state.timer);
+      state.timer = null;
+      readSiteDetails(form);
+    }
+    if (!state.run) return false;
+    state.waiting = true;
+    Promise.race([state.run, wait(SITE_SUBMIT_WAIT_MS)]).then(() => {
+      state.waiting = false;
+      if (!form.isConnected) return;
+      state.resume = true;
+      form.requestSubmit(submitter);
+    });
+    return true;
+  }
+
+  // ---- Moved links: the edit form can take the address the link moved to ----
+
+  const MOVED_FILLED = "New address filled in. Save to keep it; the link is checked again later.";
+
   function useMovedAddress(button) {
     const form = button.closest("form");
     const field = form && form.querySelector('input[name="url"]');
@@ -604,6 +792,7 @@
     if (!field || !isWebAddress(target)) return;
     field.value = target;
     syncSubmitState(form);
+    addressChanged(form, 0);
     button.hidden = true;
     const hint = form.querySelector(".hint.moved");
     if (hint) hint.textContent = MOVED_FILLED;
@@ -657,6 +846,10 @@
     if (event.defaultPrevented) return;
     const form = event.target;
     const submitter = event.submitter;
+    if (holdSubmitForSiteDetails(form, submitter)) {
+      event.preventDefault();
+      return;
+    }
     // `formAction` is the page's own address when the button sets none, so ask the attribute.
     const own = (name) => submitter && submitter.hasAttribute(name);
     // `form.action` and `form.method` name a field instead when one is called that, as the

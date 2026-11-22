@@ -38,6 +38,7 @@ func initializeScenario(scenario *godog.ScenarioContext, binary string) {
 	registerLayoutSteps(scenario, w)
 	registerRedesignSteps(scenario, w)
 	registerLinkSteps(scenario, w)
+	registerSiteSteps(scenario, w)
 	registerTransferSteps(scenario, w)
 	registerUserSteps(scenario, w)
 }

@@ -17,6 +17,10 @@ const (
 	maxTitleChars = 300
 	maxNoteChars  = 5000
 	maxTagChars   = 50
+	// A page's own title and description are cut to these, not refused: the
+	// user did not write them.
+	maxSiteTitleChars       = 300
+	maxSiteDescriptionChars = 500
 	// MaxTagsPerBookmark is the most tags one bookmark may carry.
 	MaxTagsPerBookmark = 20
 )
@@ -32,6 +36,35 @@ type Bookmark struct {
 	UpdatedAt int64    `json:"updated_at"`
 	// Link is nil until the link is checked, and again after the URL changes.
 	Link *LinkCheck `json:"link"`
+	// Site is nil when the page's details were never read or the page had none.
+	Site *Site `json:"site"`
+}
+
+// Site is what the page itself says, read from its Open Graph tags, or from
+// its <title> and description when it has none. It is kept apart from the title
+// and the note, which the user owns; the forms offer it as their placeholders
+// and save it in place of a title or a note left blank.
+type Site struct {
+	// Title and Description may be empty, but not both in a stored Site.
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+// Value is the details, or the zero Site when there are none.
+func (s *Site) Value() Site {
+	if s == nil {
+		return Site{}
+	}
+	return *s
+}
+
+// Fitted cuts the details to the limits: a long one is cut, not refused,
+// because the user did not write it.
+func (s Site) Fitted() Site {
+	return Site{
+		Title:       truncate.Runes(strings.TrimSpace(s.Title), maxSiteTitleChars),
+		Description: truncate.Runes(strings.TrimSpace(s.Description), maxSiteDescriptionChars),
+	}
 }
 
 // LinkCheck is the result of the last link check.
@@ -65,6 +98,8 @@ type Input struct {
 	Title string
 	Note  string
 	Tags  []string
+	// Site is what the page at URL says about itself, when the client read it.
+	Site Site
 }
 
 // Valid is input that passed every rule. Only this type is stored.
@@ -73,6 +108,8 @@ type Valid struct {
 	Title string
 	Note  string
 	Tags  []string
+	// Site is stored when the bookmark is new or its URL changes.
+	Site Site
 }
 
 // Validate checks every rule and returns the cleaned-up bookmark.
@@ -93,7 +130,7 @@ func (in Input) Validate() (Valid, error) {
 	if err != nil {
 		return Valid{}, err
 	}
-	return Valid{URL: url, Title: title, Note: note, Tags: tags}, nil
+	return Valid{URL: url, Title: title, Note: note, Tags: tags, Site: in.Site.Fitted()}, nil
 }
 
 // Fitted is for an imported file, where one long title must not cost the whole
