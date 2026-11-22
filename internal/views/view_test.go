@@ -481,6 +481,19 @@ func TestTheOffNoteSitsUnderTheCheckboxAndLeavesTheUserAgentOut(t *testing.T) {
 	requireAbsent(t, page, "this setting has no effect")
 }
 
+// A post without the checkbox turns the background check off, so the two
+// settings must never be sent by separate forms.
+func TestTheUserAgentHasItsOwnHeadingButSharesTheFormWithTheCheckbox(t *testing.T) {
+	page := SettingsPage(SettingsView{Shell: alice(SectionSettings), MaxUserAgentLength: 200})
+	requireContains(t, page, "<h2>Link check</h2>", "<h2>User-Agent</h2>")
+	if got := strings.Count(page, `action="/settings"`); got != 1 {
+		t.Fatalf("settings forms = %d, want 1", got)
+	}
+	start := strings.Index(page, `action="/settings"`)
+	form := page[start : start+strings.Index(page[start:], "</form>")]
+	requireContains(t, form, `name="link_check_enabled"`, `name="link_check_user_agent"`)
+}
+
 func TestTheSettingsPageShowsAnErrorOnlyWhenThereIsOne(t *testing.T) {
 	page := SettingsPage(SettingsView{Shell: alice(SectionSettings), Error: "user agent is too long"})
 	requireContains(t, page, `<p class="err" role="alert">user agent is too long</p>`)
