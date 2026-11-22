@@ -150,17 +150,18 @@ func (a *App) handleBulkBookmarks(w http.ResponseWriter, r *http.Request, user a
 }
 
 func (a *App) handleGetSettings(w http.ResponseWriter, r *http.Request, user auth.SessionUser) {
-	enabled, fault := a.linkCheckEnabled(r.Context(), user)
+	settings, fault := a.linkCheckSettings(r.Context(), user)
 	if fault != nil {
 		a.writeAPIError(w, fault)
 		return
 	}
-	writeJSON(w, http.StatusOK, settingsView{LinkCheckEnabled: enabled})
+	writeJSON(w, http.StatusOK, settings)
 }
 
 func (a *App) handlePutSettings(w http.ResponseWriter, r *http.Request, user auth.SessionUser) {
 	var request struct {
-		LinkCheckEnabled *bool `json:"link_check_enabled"`
+		LinkCheckEnabled   *bool   `json:"link_check_enabled"`
+		LinkCheckUserAgent *string `json:"link_check_user_agent"`
 	}
 	if failure := decodeJSON(r, &request); failure != nil {
 		failure.write(w)
@@ -170,9 +171,12 @@ func (a *App) handlePutSettings(w http.ResponseWriter, r *http.Request, user aut
 		failure.write(w)
 		return
 	}
-	if fault := a.setLinkCheckEnabled(r.Context(), user, *request.LinkCheckEnabled); fault != nil {
+	saved, fault := a.saveLinkCheckSettings(r.Context(), user, linkCheckChange{
+		Enabled: *request.LinkCheckEnabled, UserAgent: request.LinkCheckUserAgent,
+	})
+	if fault != nil {
 		a.writeAPIError(w, fault)
 		return
 	}
-	writeJSON(w, http.StatusOK, settingsView{LinkCheckEnabled: *request.LinkCheckEnabled})
+	writeJSON(w, http.StatusOK, saved)
 }

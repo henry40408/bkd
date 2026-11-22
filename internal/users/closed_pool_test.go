@@ -41,6 +41,7 @@ func TestEveryOperationReportsADatabaseFailure(t *testing.T) {
 		{"LinkCheckEnabled", func() error { _, err := LinkCheckEnabled(bg, pool, 1); return err }, "read user flag"},
 		{"WantsBackgroundCheck", func() error { _, err := WantsBackgroundCheck(bg, pool, 1); return err }, "read user flag"},
 		{"SetLinkCheckEnabled", func() error { return SetLinkCheckEnabled(bg, pool, 1, true) }, "set link check"},
+		{"LinkCheckUserAgent", func() error { _, err := LinkCheckUserAgent(bg, pool, 1); return err }, "read link check user agent"},
 		{"List", func() error { _, err := List(bg, pool); return err }, "list users"},
 		{"Create", func() error {
 			_, change, err := Create(bg, pool, 1, account("bob"))
@@ -120,6 +121,10 @@ func TestEveryWriteReportsARefusedChange(t *testing.T) {
 		{"ResetPassword", func() error { _, err := ResetPassword(bg, pool, admin, member, "hash"); return err }},
 		{"Delete", func() error { _, err := Delete(bg, pool, admin, member); return err }},
 		{"SetLinkCheckEnabled", func() error { return SetLinkCheckEnabled(bg, pool, member, true) }},
+		{"SetLinkCheck", func() error {
+			agent := "Agent/1"
+			return SetLinkCheck(bg, pool, member, LinkCheckChange{Enabled: true, UserAgent: &agent})
+		}},
 		{"ChangeOwnPassword", func() error {
 			_, err := ChangeOwnPassword(bg, pool, OwnPasswordChange{ID: member, VerifiedHash: "hash", NewHash: "new"})
 			return err

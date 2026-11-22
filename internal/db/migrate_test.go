@@ -53,17 +53,34 @@ func goMigrations(t *testing.T, pool *sql.DB) []rustMigration {
 	return got
 }
 
-func TestNewDatabaseRecordsTheSameMigrationsAsRust(t *testing.T) {
+// goOnlyMigrations is how many migrations come after the last one the Rust
+// server knew. The fixtures in testdata stay as Rust wrote them, so add one
+// here, and its schema change to withGoOnlyChanges, with each new migration.
+const goOnlyMigrations = 1
+
+func TestNewDatabaseRecordsTheRustMigrationsThenTheGoOnlyOnes(t *testing.T) {
 	got := goMigrations(t, openTemp(t))
 	want := readRustMigrations(t)
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("_sqlx_migrations differs from the Rust fixture\n got: %+v\nwant: %+v", got, want)
+	if len(got) != len(want)+goOnlyMigrations {
+		t.Fatalf("%d migrations recorded, want %d from Rust and %d for Go only", len(got), len(want), goOnlyMigrations)
+	}
+	if !reflect.DeepEqual(got[:len(want)], want) {
+		t.Fatalf("_sqlx_migrations differs from the Rust fixture\n got: %+v\nwant: %+v", got[:len(want)], want)
 	}
 }
 
-func TestNewDatabaseHasTheSameSchemaAsRust(t *testing.T) {
+// withGoOnlyChanges applies what the Go-only migrations do to the schema the
+// Rust server made. SQLite writes an added column before the closing bracket
+// of the table.
+func withGoOnlyChanges(rust map[string]string) map[string]string {
+	rust["users"] = strings.TrimSuffix(rust["users"], ") STRICT") +
+		", link_check_user_agent TEXT NOT NULL DEFAULT '') STRICT"
+	return rust
+}
+
+func TestNewDatabaseHasTheRustSchemaAndTheGoOnlyChanges(t *testing.T) {
 	pool := openTemp(t)
-	want := readRustSchema(t)
+	want := withGoOnlyChanges(readRustSchema(t))
 	rows, err := pool.Query("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +130,7 @@ func entryStart(line string, names []string) (name, rest string, ok bool) {
 	return "", "", false
 }
 
-func TestOpenDoesNotTouchADatabaseCreatedByRust(t *testing.T) {
+func TestOpenKeepsTheMigrationRowsOfADatabaseCreatedByRust(t *testing.T) {
 	path := copyRustDatabase(t)
 	before := rawMigrationRows(t, path)
 
@@ -123,11 +140,15 @@ func TestOpenDoesNotTouchADatabaseCreatedByRust(t *testing.T) {
 	}
 	defer func() { _ = pool.Close() }()
 
-	if after := rawMigrationRows(t, path); !reflect.DeepEqual(before, after) {
-		t.Fatalf("migration rows changed\nbefore: %v\n after: %v", before, after)
-	}
+	after := rawMigrationRows(t, path)
 	if got := len(before); got != len(readRustMigrations(t)) {
 		t.Fatalf("fixture has %d migration rows", got)
+	}
+	if len(after) != len(before)+goOnlyMigrations {
+		t.Fatalf("%d migration rows after opening, want the %d from Rust and %d for Go only", len(after), len(before), goOnlyMigrations)
+	}
+	if !reflect.DeepEqual(before, after[:len(before)]) {
+		t.Fatalf("migration rows changed\nbefore: %v\n after: %v", before, after[:len(before)])
 	}
 }
 
@@ -227,8 +248,8 @@ func TestNewDatabaseRecordsInstalledOnAndExecutionTime(t *testing.T) {
 		}
 		count++
 	}
-	if count != len(readRustMigrations(t)) {
-		t.Fatalf("%d migration rows", count)
+	if want := len(readRustMigrations(t)) + goOnlyMigrations; count != want {
+		t.Fatalf("%d migration rows, want %d", count, want)
 	}
 }
 

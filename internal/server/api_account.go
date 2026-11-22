@@ -180,4 +180,7 @@ func (a *App) handleRevokeOtherSessions(w http.ResponseWriter, r *http.Request, 
 type settingsView struct {
 	// LinkCheckEnabled: whether the server may check this user's bookmarks in the background.
 	LinkCheckEnabled bool `json:"link_check_enabled"`
+	// LinkCheckUserAgent is the User-Agent of this user's link checks; empty
+	// means the built-in one.
+	LinkCheckUserAgent string `json:"link_check_user_agent"`
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/henry40408/bkd/internal/auth"
 	"github.com/henry40408/bkd/internal/importer"
+	"github.com/henry40408/bkd/internal/linkcheck"
 	"github.com/henry40408/bkd/internal/views"
 )
 
@@ -109,17 +110,50 @@ func (a *App) pageRevokeOtherSessions(w http.ResponseWriter, r *http.Request, us
 }
 
 func (a *App) pageSettings(w http.ResponseWriter, r *http.Request, user auth.SessionUser) *pageError {
-	shell, failure := a.shellFor(r.Context(), user, views.SectionSettings, r.URL.Query().Get("notice"))
+	view, failure := a.settingsView(r, user, r.URL.Query().Get("notice"))
 	if failure != nil {
 		return failure
 	}
-	enabled, fault := a.linkCheckEnabled(r.Context(), user)
-	if fault != nil {
-		return fromAPI(fault)
+	writeHTML(w, http.StatusOK, views.SettingsPage(view))
+	return nil
+}
+
+func (a *App) settingsView(r *http.Request, user auth.SessionUser, notice string) (views.SettingsView, *pageError) {
+	shell, failure := a.shellFor(r.Context(), user, views.SectionSettings, notice)
+	if failure != nil {
+		return views.SettingsView{}, failure
 	}
-	writeHTML(w, http.StatusOK, views.SettingsPage(views.SettingsView{
-		Shell: shell, LinkCheckEnabled: enabled, ServerChecksLinks: a.backgroundOn,
-	}))
+	saved, fault := a.linkCheckSettings(r.Context(), user)
+	if fault != nil {
+		return views.SettingsView{}, fromAPI(fault)
+	}
+	return views.SettingsView{
+		Shell:              shell,
+		LinkCheckEnabled:   saved.LinkCheckEnabled,
+		LinkCheckUserAgent: saved.LinkCheckUserAgent,
+		DefaultUserAgent:   linkcheck.DefaultUserAgent(),
+		MaxUserAgentLength: linkcheck.MaxUserAgentLength,
+		ServerChecksLinks:  a.backgroundOn,
+	}, nil
+}
+
+// refusedSettings is a settings form that was refused, with what was typed in it.
+type refusedSettings struct {
+	formError
+	enabled   bool
+	userAgent string
+}
+
+// writeSettingsError shows the form again with the refused values, not the stored ones.
+func (a *App) writeSettingsError(w http.ResponseWriter, r *http.Request, user auth.SessionUser, refused refusedSettings) *pageError {
+	view, failure := a.settingsView(r, user, "")
+	if failure != nil {
+		return failure
+	}
+	view.LinkCheckEnabled = refused.enabled
+	view.LinkCheckUserAgent = refused.userAgent
+	view.Error = refused.message
+	writeHTML(w, refused.status, views.SettingsPage(view))
 	return nil
 }
 
@@ -130,11 +164,24 @@ func (a *App) pageSaveSettings(w http.ResponseWriter, r *http.Request, user auth
 	}
 	// A ticked checkbox sends a value; an unticked one sends nothing.
 	_, enabled := fields.lookup("link_check_enabled")
-	if fault := a.setLinkCheckEnabled(r.Context(), user, enabled); fault != nil {
-		return fromAPI(fault)
+	// A post without the box (a script, or a page from before the upgrade) keeps the User-Agent.
+	change := linkCheckChange{Enabled: enabled}
+	agent, hasAgent := fields.lookup("link_check_user_agent")
+	if hasAgent {
+		change.UserAgent = &agent
 	}
-	redirectWithNotice(w, "/settings", "settings-saved")
-	return nil
+	_, fault := a.saveLinkCheckSettings(r.Context(), user, change)
+	if fault == nil {
+		redirectWithNotice(w, "/settings", "settings-saved")
+		return nil
+	}
+	status, message, other := formRefusal(fault)
+	if other != nil {
+		return other
+	}
+	return a.writeSettingsError(w, r, user, refusedSettings{
+		formError: formError{status, message}, enabled: enabled, userAgent: agent,
+	})
 }
 
 func (a *App) writeTransferPage(ctx context.Context, w http.ResponseWriter, status int, user auth.SessionUser, view views.TransferView) *pageError {

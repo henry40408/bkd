@@ -201,12 +201,12 @@ func TestBulkRefusesForeignIDsAndBadInput(t *testing.T) {
 func TestSettingsRoundTrip(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
-	if r := app.send(get("/api/settings").as(token)); r.text != `{"link_check_enabled":false}` {
+	if r := app.send(get("/api/settings").as(token)); r.text != `{"link_check_enabled":false,"link_check_user_agent":""}` {
 		t.Fatalf("settings = %s", r.text)
 	}
 	r := app.send(put("/api/settings", map[string]any{"link_check_enabled": true}).as(token))
 	assertStatus(t, r, http.StatusOK)
-	if got := app.send(get("/api/settings").as(token)).text; got != `{"link_check_enabled":true}` {
+	if got := app.send(get("/api/settings").as(token)).text; got != `{"link_check_enabled":true,"link_check_user_agent":""}` {
 		t.Fatalf("settings = %s", got)
 	}
 	assertStatus(t, app.send(put("/api/settings", map[string]any{}).as(token)), http.StatusUnprocessableEntity)

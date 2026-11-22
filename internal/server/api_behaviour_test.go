@@ -153,6 +153,8 @@ func TestReadRoutesAnswer500WhenTheirQueryFails(t *testing.T) {
 		uris            []string
 	}{
 		{"link counts", "ALTER TABLE bookmarks DROP COLUMN link_status", []string{"/api/tags"}},
+		// Before "settings": once link_check_enabled is gone, the read of it fails first.
+		{"settings user agent", "ALTER TABLE users DROP COLUMN link_check_user_agent", []string{"/api/settings", "/settings"}},
 		{"settings", "ALTER TABLE users DROP COLUMN link_check_enabled", []string{"/api/settings", "/settings"}},
 		{"user list", "ALTER TABLE users DROP COLUMN created_at", []string{"/api/users", "/users"}},
 	}

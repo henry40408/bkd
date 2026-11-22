@@ -11,8 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/henry40408/bkd/internal/version"
 )
 
 const (
@@ -22,12 +20,6 @@ const (
 )
 
 var errTooManyRedirects = errors.New("too many redirects")
-
-// userAgent is honest about being a robot, and says where to ask about it. The
-// `Mozilla/5.0 (compatible; ...)` shape is the one crawlers such as Googlebot use.
-func userAgent() string {
-	return "Mozilla/5.0 (compatible; bkd-link-checker/" + version.Version() + "; +https://github.com/henry40408/bkd)"
-}
 
 // answer is what a site said, without its body.
 type answer struct {
@@ -137,14 +129,21 @@ func dialFirst(ctx context.Context, dialer *net.Dialer, target dialTarget) (net.
 	return nil, lastErr
 }
 
+// question is one request to a site: what to ask, and who says they are asking.
+type question struct {
+	method    string
+	target    *url.URL
+	userAgent string
+}
+
 // ask reads only the status line and headers. Closing the body drops the
 // connection, so a GET never downloads the page.
-func ask(ctx context.Context, client *http.Client, method string, target *url.URL) (answer, error) {
-	request, err := http.NewRequestWithContext(ctx, method, target.String(), nil)
+func ask(ctx context.Context, client *http.Client, q question) (answer, error) {
+	request, err := http.NewRequestWithContext(ctx, q.method, q.target.String(), nil)
 	if err != nil {
 		return answer{}, err
 	}
-	request.Header.Set("User-Agent", userAgent())
+	request.Header.Set("User-Agent", q.userAgent)
 	response, err := client.Do(request)
 	if err != nil {
 		return answer{}, err

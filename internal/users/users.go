@@ -238,12 +238,40 @@ func queryFlag(ctx context.Context, pool *sql.DB, query string, id int64) (bool,
 }
 
 func SetLinkCheckEnabled(ctx context.Context, pool *sql.DB, id int64, enabled bool) error {
+	return SetLinkCheck(ctx, pool, id, LinkCheckChange{Enabled: enabled})
+}
+
+// LinkCheckChange is the new link check settings of a user. A nil UserAgent
+// keeps the stored one; the caller validates a text before passing it.
+type LinkCheckChange struct {
+	Enabled   bool
+	UserAgent *string
+}
+
+// SetLinkCheck is one statement, so a failure leaves both settings as they were.
+func SetLinkCheck(ctx context.Context, pool *sql.DB, id int64, change LinkCheckChange) error {
 	_, err := pool.ExecContext(ctx,
-		"UPDATE users SET link_check_enabled = ?2 WHERE id = ?1", id, enabled)
+		"UPDATE users SET link_check_enabled = ?2, "+
+			"link_check_user_agent = COALESCE(?3, link_check_user_agent) WHERE id = ?1",
+		id, change.Enabled, change.UserAgent)
 	if err != nil {
 		return fmt.Errorf("set link check: %w", err)
 	}
 	return nil
+}
+
+// LinkCheckUserAgent is the User-Agent the user chose for their link checks;
+// empty means the built-in one, also for an account that does not exist.
+func LinkCheckUserAgent(ctx context.Context, pool *sql.DB, id int64) (string, error) {
+	var agent string
+	err := pool.QueryRowContext(ctx, "SELECT link_check_user_agent FROM users WHERE id = ?1", id).Scan(&agent)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read link check user agent: %w", err)
+	}
+	return agent, nil
 }
 
 type UserRecord struct {
