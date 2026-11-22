@@ -131,7 +131,7 @@ form .btn[data-moved-to], form .btn[data-site-title] { justify-self: start; }
 .panel h2 { font: var(--strong) var(--fs-3)/var(--lh-tight) var(--serif); margin: 0; }
 .panel h2 a { text-decoration: none; }
 .stack { display: grid; gap: var(--sp-3); }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); align-items: start; }
 .inline-form .inline-title { font: var(--strong) var(--fs-3)/var(--lh-tight) var(--serif); }
 .inline-form .summary, .inline-form form { margin: 0; }
 .item.confirming > .inline-form, .pick.confirming > .inline-form { border-left-color: var(--broken); }
