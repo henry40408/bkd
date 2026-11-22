@@ -89,13 +89,14 @@ Feature: The pages work without a script
     Then I am told "Done."
     And the list shows "Address is not public"
 
-  Scenario: Reading pages waits for the result and shows the list again
+  Scenario: Reading pages waits for the result and keeps the pages that were not read ticked
     Given I have the bookmark "http://127.0.0.1:1/page" titled "Private"
     When I open the site
     And I enter select mode
     And I tick "Private"
     And I read the pages of the selection
-    Then I am told "Done."
+    Then I am told "1 page was not read"
+    And "Private" is ticked
 
   Scenario: An admin creates a user with plain forms
     When I open Manage users
