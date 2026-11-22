@@ -41,6 +41,26 @@ func TestTargetsAreFoundOnlyWhenEveryIDIsTheUsers(t *testing.T) {
 	}
 }
 
+func TestTargetsCarryTheirOwnersUserAgent(t *testing.T) {
+	pool := dbtest.Open(t)
+	books := bookmarks.NewStore(pool)
+	alice, bob := dbtest.InsertUser(t, pool, "alice"), dbtest.InsertUser(t, pool, "bob")
+	if _, err := pool.Exec("UPDATE users SET link_check_user_agent = 'Alice/1' WHERE id = ?1", alice); err != nil {
+		t.Fatal(err)
+	}
+	mine := addBookmark(t, books, alice, "https://a.test/")
+	theirs := addBookmark(t, books, bob, "https://b.test/")
+	store := NewStore(pool)
+	ctx := context.Background()
+
+	targets, _, err := store.Targets(ctx, alice, ValidCheck{IDs: []int64{mine}})
+	assertEqual(t, err, nil)
+	assertEqual(t, targets, []Target{{ID: mine, URL: "https://a.test/", UserAgent: "Alice/1"}})
+	targets, _, err = store.Targets(ctx, bob, ValidCheck{IDs: []int64{theirs}})
+	assertEqual(t, err, nil)
+	assertEqual(t, targets, []Target{{ID: theirs, URL: "https://b.test/"}})
+}
+
 func TestVerdictsAreStoredAndShownOnTheBookmark(t *testing.T) {
 	pool := dbtest.Open(t)
 	books := bookmarks.NewStore(pool)

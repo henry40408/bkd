@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"reflect"
 	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -41,6 +43,15 @@ func addBookmark(t *testing.T, pool *sql.DB, userID int64, address string, check
 func optIn(t *testing.T, pool *sql.DB, userID int64) {
 	t.Helper()
 	if err := users.SetLinkCheckEnabled(context.Background(), pool, userID, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// chooseUserAgent sets the User-Agent and keeps the user opted in.
+func chooseUserAgent(t *testing.T, pool *sql.DB, userID int64, agent string) {
+	t.Helper()
+	change := users.LinkCheckChange{Enabled: true, UserAgent: &agent}
+	if err := users.SetLinkCheck(context.Background(), pool, userID, change); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -281,6 +292,43 @@ func TestASiteThatSaysSlowDownIsAskedOnceAndThenLeftAlone(t *testing.T) {
 	assertEqual(t, err, nil)
 	assertEqual(t, count, 0)
 	assertEqual(t, requests.Load(), int32(1))
+}
+
+func TestARoundAsksAsEachOwnerChose(t *testing.T) {
+	var mu sync.Mutex
+	seen := map[string]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen[r.URL.Path] = r.Header.Get("User-Agent")
+		mu.Unlock()
+	}))
+	defer server.Close()
+	pool := dbtest.Open(t)
+	mei := dbtest.InsertUser(t, pool, "mei")
+	ana := dbtest.InsertUser(t, pool, "ana")
+	chooseUserAgent(t, pool, mei, "Mei/1")
+	optIn(t, pool, ana)
+	// Two names for this machine are two sites, so the 1.5 second pause between
+	// requests to one site does not slow the test.
+	addBookmark(t, pool, mei, server.URL+"/mei", nil)
+	addBookmark(t, pool, ana, strings.Replace(server.URL, "127.0.0.1", "localhost", 1)+"/ana", nil)
+	w := newTestWorker(pool, linkcheck.New(linkcheck.Config{Allow: netip.Addr.IsLoopback}))
+
+	count, err := w.runRound(context.Background())
+	assertEqual(t, err, nil)
+	assertEqual(t, count, 2)
+	assertEqual(t, seen, map[string]string{"/mei": "Mei/1", "/ana": linkcheck.DefaultUserAgent()})
+}
+
+func TestDueBookmarksCarryTheirOwnersUserAgent(t *testing.T) {
+	pool := dbtest.Open(t)
+	mei := dbtest.InsertUser(t, pool, "mei")
+	chooseUserAgent(t, pool, mei, "Mei/1")
+	id := addBookmark(t, pool, mei, "http://example.test/", nil)
+
+	items, err := dueBookmarks(context.Background(), pool, now, 10)
+	assertEqual(t, err, nil)
+	assertEqual(t, items, []due{{id: id, userID: mei, url: "http://example.test/", userAgent: "Mei/1"}})
 }
 
 func TestRunStopsWhenTheContextEnds(t *testing.T) {

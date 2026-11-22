@@ -86,7 +86,7 @@ func TestAnEmptyValueDoesNotHideALaterOne(t *testing.T) {
 
 func TestTagsAfterTheBodyStartsAreNotRead(t *testing.T) {
 	got := parse(`<head></head><body><meta property="og:title" content="Late"><title>Late</title></body>`)
-	if !got.IsEmpty() {
+	if got != (Meta{}) {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -127,7 +127,7 @@ func TestInvalidUTF8IsReplacedNotKept(t *testing.T) {
 func TestAPageThatTellsNothingIsEmpty(t *testing.T) {
 	for _, page := range []string{"", "plain text", "<html><head></head><body>hi</body></html>",
 		`<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta content="orphan"></head>`} {
-		if got := parse(page); !got.IsEmpty() {
+		if got := parse(page); got != (Meta{}) {
 			t.Errorf("%q gave %+v", page, got)
 		}
 	}
@@ -154,19 +154,5 @@ func TestAReadErrorEndsTheParseWithWhatWasFound(t *testing.T) {
 	got := Parse(page)
 	if got != (Meta{Title: "Before", Description: "Then"}) {
 		t.Fatalf("got %+v", got)
-	}
-}
-
-func TestIsEmptyNeedsBothFieldsToBeEmpty(t *testing.T) {
-	cases := map[Meta]bool{
-		{}:                             true,
-		{Title: "t"}:                   false,
-		{Description: "d"}:             false,
-		{Title: "t", Description: "d"}: false,
-	}
-	for meta, want := range cases {
-		if got := meta.IsEmpty(); got != want {
-			t.Errorf("%+v: IsEmpty = %v", meta, got)
-		}
 	}
 }

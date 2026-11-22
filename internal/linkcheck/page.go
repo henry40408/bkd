@@ -27,10 +27,11 @@ type PageError string
 
 func (e PageError) Error() string { return string(e) }
 
-// ReadPage fetches the start of an HTML page. It goes through the same guard,
-// request slots and time budget as Inspect, so it too contacts public addresses
-// only, including through redirects and DNS answers.
-func (c *Checker) ReadPage(ctx context.Context, address string) (Page, error) {
+// ReadPage fetches the start of an HTML page, saying userAgent is asking; empty
+// means DefaultUserAgent. It goes through the same guard, request slots and time
+// budget as Inspect, so it too contacts public addresses only, including through
+// redirects and DNS answers.
+func (c *Checker) ReadPage(ctx context.Context, address, userAgent string) (Page, error) {
 	target, err := url.Parse(address)
 	if err != nil || target.Scheme == "" {
 		return Page{}, PageError(detailNotValid)
@@ -45,15 +46,18 @@ func (c *Checker) ReadPage(ctx context.Context, address string) (Page, error) {
 	defer release()
 	ctx, cancel := context.WithTimeout(ctx, c.budget)
 	defer cancel()
-	return c.fetchPage(ctx, target)
+	if userAgent == "" {
+		userAgent = DefaultUserAgent()
+	}
+	return c.fetchPage(ctx, target, userAgent)
 }
 
-func (c *Checker) fetchPage(ctx context.Context, target *url.URL) (Page, error) {
+func (c *Checker) fetchPage(ctx context.Context, target *url.URL, userAgent string) (Page, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
 		return Page{}, PageError(detailNotValid)
 	}
-	request.Header.Set("User-Agent", userAgent())
+	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Accept", "text/html,application/xhtml+xml")
 	response, err := c.client.Do(request)
 	if err != nil {

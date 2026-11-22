@@ -21,6 +21,8 @@ const (
 type Target struct {
 	ID  int64
 	URL string
+	// UserAgent is what the owner chose to send; empty means DefaultUserAgent.
+	UserAgent string
 }
 
 // Checked is the result for one target.
@@ -153,7 +155,7 @@ func (r *hostRun) checkHost(ctx context.Context, host string, group []Target) {
 		if i > 0 && !sleep(ctx, r.pause) {
 			return
 		}
-		inspection := r.checker.Inspect(ctx, target.URL)
+		inspection := r.checker.Inspect(ctx, target.URL, target.UserAgent)
 		if ctx.Err() != nil {
 			return
 		}

@@ -1,53 +1,56 @@
 Feature: Page details
 
   # The server only contacts public addresses, so a scenario cannot serve a page
-  # to read. What the refresh finds on a real page (Open Graph, title, description,
-  # limits) is covered by the server's own tests, which can run a web server on the
-  # same machine. These scenarios use a private address for the failure, and put the
-  # stored details in place for what is shown.
+  # to read. What a page's title and description turn into (Open Graph, title,
+  # description, limits) is covered by the server's own tests, which can run a web
+  # server on the same machine. These scenarios use a private address for the
+  # failure, and put the stored details in place for what the edit form shows.
   Background:
     Given I am signed in as the admin "root"
 
-  Scenario: A page that cannot be read says why and changes nothing
-    Given I have the bookmark "http://127.0.0.1:1/page" titled "Private"
-    When I open the site
-    And I refresh the page details of "Private"
-    Then I am told "could not read the page: Address is not public"
-    And the list shows "Private"
+  Scenario: An address the server may not read says why, and the bookmark can still be saved
+    When I fill the add form with the URL "http://127.0.0.1:1/page" and the title ""
+    Then the add form says "Could not read the page: Address is not public"
+    And the "title" field of the add form shows "Leave blank to use the domain" as its placeholder
+    When I add the bookmark "http://127.0.0.1:1/page" titled "" tagged ""
+    Then the list shows "127.0.0.1"
 
-  Scenario: The list shows the description the page gave
+  Scenario: The edit form shows what the page said as placeholders and keeps the bookmark's own text
     Given I have the bookmark "https://example.test/read" titled "Mine" whose page says "Their title" and "What the page says about itself"
     When I open the site
-    Then the list shows "What the page says about itself"
-    And the list shows "Mine"
-    And the list does not show "Their title"
+    And I start editing "Mine"
+    Then the "title" field of the edit form shows "Their title" as its placeholder
+    And the "note" field of the edit form shows "What the page says about itself" as its placeholder
+    And the edit form holds "Mine" as the title
+    And the "note" field of the edit form holds ""
 
-  Scenario: The edit form offers the page's title, and using it changes only the field
-    Given I have the bookmark "https://example.test/read" titled "Mine" whose page says "Their title" and "A description"
+  Scenario: A title and a note left blank are saved as what the page said
+    Given I have the bookmark "https://example.test/read" titled "Mine" whose page says "Their title" and "What the page says about itself"
     When I open the site
     And I start editing "Mine"
-    Then the edit form says "Page title: Their title"
-    And the edit form holds "Mine" as the title
-    When I use the page title
-    Then the edit form holds "Their title" as the title
-    And the page title button is not offered
-    When I save the edit
+    And I clear the "title" field of the edit form
+    And I save the edit
     Then I am told "Bookmark saved."
     And the list shows "Their title"
-    And the list shows "A description"
+    And the list shows "What the page says about itself"
+    And the list does not show "Mine"
 
-  Scenario: The edit form offers the page's description, and using it changes only the note field
+  Scenario: A title that is typed is saved as typed, and the page's details stay for later
     Given I have the bookmark "https://example.test/read" titled "Mine" whose page says "Their title" and "What the page says about itself"
     When I open the site
     And I start editing "Mine"
-    Then the edit form says "Page description: What the page says about itself"
-    And the "note" field of the edit form holds ""
-    When I use the page description
-    Then the "note" field of the edit form holds "What the page says about itself"
-    And the page description button is not offered
-    And the edit form holds "Mine" as the title
-    When I save the edit
+    And I type "Renamed" in the "title" field of the edit form
+    And I save the edit
     Then I am told "Bookmark saved."
-    And the list shows "Mine"
-    When I start editing "Mine"
-    Then the "note" field of the edit form holds "What the page says about itself"
+    And the list shows "Renamed"
+    And the list does not show "Their title"
+    When I start editing "Renamed"
+    Then the "title" field of the edit form shows "Their title" as its placeholder
+
+  Scenario: Changing the address puts the old page's details away
+    Given I have the bookmark "https://example.test/read" titled "Mine" whose page says "Their title" and "What the page says about itself"
+    When I open the site
+    And I start editing "Mine"
+    And I type "http://127.0.0.1:1/elsewhere" in the "url" field of the edit form
+    Then the "title" field of the edit form shows "Leave blank to use the domain" as its placeholder
+    And the "note" field of the edit form has no placeholder

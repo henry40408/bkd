@@ -7,58 +7,56 @@ import (
 	"github.com/henry40408/bkd/internal/dbtest"
 )
 
-// siteRequest asks to store site for the bookmark, read from its own address.
-func siteRequest(user int64, saved Bookmark, site Site) SiteRequest {
-	return SiteRequest{UserID: user, ID: saved.ID, URL: saved.URL, Site: site}
+// withSite is bookmark as the form sends it after reading its page.
+func withSite(bookmark Valid, site Site) Valid {
+	bookmark.Site = site
+	return bookmark
 }
 
-func TestSiteIsNilUntilItIsRead(t *testing.T) {
+func TestSiteIsNilWhenThePageWasNotRead(t *testing.T) {
 	store, pool := newStore(t)
 	user := dbtest.InsertUser(t, pool, "henry")
 	saved := create(t, store, user, valid(t, "Page"), 100)
 	if saved.Site != nil {
 		t.Fatalf("site = %+v, want nil", saved.Site)
 	}
+	assertEqual(t, saved.Site.Value(), Site{})
 }
 
-func TestSetSiteStoresWhatThePageSaysAndLeavesTheRestAlone(t *testing.T) {
+func TestCreateStoresWhatThePageSaysApartFromTheTitleAndNote(t *testing.T) {
 	store, pool := newStore(t)
 	user := dbtest.InsertUser(t, pool, "henry")
-	input := valid(t, "Page", "reading")
-	input.Note = "my note"
-	saved := create(t, store, user, input, 100)
+	saved := create(t, store, user, withSite(valid(t, "Mine"), Site{Title: "Og title", Description: "About it"}), 100)
+	assertEqual(t, *saved.Site, Site{Title: "Og title", Description: "About it"})
+	assertEqual(t, []string{saved.Title, saved.Note}, []string{"Mine", ""})
 
-	updated, found, err := store.SetSite(bg, siteRequest(user, saved, Site{Title: "Og title", Description: "About it", FetchedAt: 500}))
-	if err != nil || !found {
-		t.Fatalf("found = %v, err = %v", found, err)
-	}
-	assertEqual(t, *updated.Site, Site{Title: "Og title", Description: "About it", FetchedAt: 500})
-	assertEqual(t, []any{updated.Title, updated.Note, updated.Tags, updated.UpdatedAt},
-		[]any{"Page", "my note", []string{"reading"}, int64(100)})
-	listed, _, err := store.Get(bg, user, saved.ID)
+	got, _, err := store.Get(bg, user, saved.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertEqual(t, listed.Site, updated.Site)
+	assertEqual(t, got.Site, saved.Site)
 }
 
-func TestSetSiteReplacesWhatWasStoredBefore(t *testing.T) {
+func TestAPageThatSaidOnlyOneThingKeepsItAndOneThatSaidNothingKeepsNothing(t *testing.T) {
 	store, pool := newStore(t)
 	user := dbtest.InsertUser(t, pool, "henry")
-	saved := create(t, store, user, valid(t, "Page"), 100)
-	for _, site := range []Site{{Title: "old", Description: "old text", FetchedAt: 1}, {Title: "new", FetchedAt: 2}} {
-		if _, _, err := store.SetSite(bg, siteRequest(user, saved, site)); err != nil {
-			t.Fatal(err)
-		}
+	cases := map[string]struct {
+		site Site
+		want *Site
+	}{
+		"title only":       {Site{Title: "T"}, &Site{Title: "T"}},
+		"description only": {Site{Description: "D"}, &Site{Description: "D"}},
+		"nothing":          {Site{}, nil},
 	}
-	got, _, _ := store.Get(bg, user, saved.ID)
-	assertEqual(t, *got.Site, Site{Title: "new", Description: "", FetchedAt: 2})
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			saved := create(t, store, user, withSite(valid(t, name), c.site), 100)
+			assertEqual(t, saved.Site, c.want)
+		})
+	}
 }
 
-func TestSetSiteCutsOnlyWhatIsOverTheLimits(t *testing.T) {
-	store, pool := newStore(t)
-	user := dbtest.InsertUser(t, pool, "henry")
-	saved := create(t, store, user, valid(t, "Page"), 100)
+func TestValidateCutsOnlyWhatIsOverTheLimitsAndTrimsIt(t *testing.T) {
 	cases := []struct {
 		name                       string
 		title, description         int
@@ -69,82 +67,70 @@ func TestSetSiteCutsOnlyWhatIsOverTheLimits(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			site := Site{Title: strings.Repeat("語", c.title), Description: strings.Repeat("d", c.description), FetchedAt: 9}
-			updated, _, err := store.SetSite(bg, siteRequest(user, saved, site))
+			checked, err := Input{
+				URL: "https://example.com/", Title: "Page",
+				Site: Site{Title: " " + strings.Repeat("語", c.title) + " ", Description: strings.Repeat("d", c.description) + "\n"},
+			}.Validate()
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertEqual(t, []int{len([]rune(updated.Site.Title)), len([]rune(updated.Site.Description))},
+			assertEqual(t, []int{len([]rune(checked.Site.Title)), len([]rune(checked.Site.Description))},
 				[]int{c.wantTitleLen, c.wantDescrLen})
 		})
 	}
 }
 
-func TestSetSiteIgnoresAnotherUsersBookmark(t *testing.T) {
-	store, pool := newStore(t)
-	owner := dbtest.InsertUser(t, pool, "owner")
-	other := dbtest.InsertUser(t, pool, "other")
-	saved := create(t, store, owner, valid(t, "Page"), 100)
-
-	_, found, err := store.SetSite(bg, siteRequest(other, saved, Site{Title: "x", FetchedAt: 1}))
-	if err != nil || found {
-		t.Fatalf("found = %v, err = %v", found, err)
-	}
-	got, _, _ := store.Get(bg, owner, saved.ID)
-	if got.Site != nil {
-		t.Fatalf("another user stored %+v", got.Site)
-	}
-}
-
-func TestSetSiteIgnoresAMissingBookmark(t *testing.T) {
+func TestUpdateKeepsTheSiteWhileTheURLStaysAndReplacesItWhenTheURLChanges(t *testing.T) {
 	store, pool := newStore(t)
 	user := dbtest.InsertUser(t, pool, "henry")
-	_, found, err := store.SetSite(bg, SiteRequest{UserID: user, ID: 999, URL: "https://a.test/", Site: Site{Title: "x"}})
-	if err != nil || found {
-		t.Fatalf("found = %v, err = %v", found, err)
-	}
-}
+	saved := create(t, store, user, withSite(valid(t, "Page"), Site{Title: "Og", Description: "d"}), 100)
 
-func TestSetSiteIgnoresAPageReadFromAnotherAddress(t *testing.T) {
-	store, pool := newStore(t)
-	user := dbtest.InsertUser(t, pool, "henry")
-	saved := create(t, store, user, valid(t, "Page"), 100)
-	request := siteRequest(user, saved, Site{Title: "x", FetchedAt: 1})
-	request.URL = "https://elsewhere.test/"
-
-	_, found, err := store.SetSite(bg, request)
-	if err != nil || found {
-		t.Fatalf("found = %v, err = %v", found, err)
-	}
-	got, _, _ := store.Get(bg, user, saved.ID)
-	if got.Site != nil {
-		t.Fatalf("stored %+v for a page that is not the bookmark's", got.Site)
-	}
-}
-
-func TestChangingTheURLForgetsTheSiteButEditingTheTitleKeepsIt(t *testing.T) {
-	store, pool := newStore(t)
-	user := dbtest.InsertUser(t, pool, "henry")
-	saved := create(t, store, user, valid(t, "Page"), 100)
-	if _, _, err := store.SetSite(bg, siteRequest(user, saved, Site{Title: "Og", Description: "d", FetchedAt: 5})); err != nil {
-		t.Fatal(err)
-	}
-
-	renamed := valid(t, "Page")
+	renamed := withSite(valid(t, "Page"), Site{Title: "ignored"})
 	renamed.Title = "Renamed"
 	kept, _, err := store.Update(bg, UpdateRequest{UserID: user, ID: saved.ID, Bookmark: renamed, Now: 200})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertEqual(t, kept.Site, &Site{Title: "Og", Description: "d", FetchedAt: 5})
+	assertEqual(t, kept.Site, &Site{Title: "Og", Description: "d"})
 
-	moved := renamed
+	moved := withSite(renamed, Site{Title: "Moved", Description: "elsewhere"})
 	moved.URL = "https://example.com/moved"
-	dropped, _, err := store.Update(bg, UpdateRequest{UserID: user, ID: saved.ID, Bookmark: moved, Now: 300})
+	replaced, _, err := store.Update(bg, UpdateRequest{UserID: user, ID: saved.ID, Bookmark: moved, Now: 300})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEqual(t, replaced.Site, &Site{Title: "Moved", Description: "elsewhere"})
+}
+
+func TestChangingTheURLToAPageThatSaysNothingForgetsTheOldDetails(t *testing.T) {
+	store, pool := newStore(t)
+	user := dbtest.InsertUser(t, pool, "henry")
+	saved := create(t, store, user, withSite(valid(t, "Page"), Site{Title: "Og", Description: "d"}), 100)
+
+	moved := valid(t, "Page")
+	moved.URL = "https://example.com/moved"
+	dropped, _, err := store.Update(bg, UpdateRequest{UserID: user, ID: saved.ID, Bookmark: moved, Now: 200})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if dropped.Site != nil {
 		t.Fatalf("site = %+v after the URL changed", dropped.Site)
+	}
+}
+
+func TestAnImportedBookmarkHasNoSite(t *testing.T) {
+	store, pool := newStore(t)
+	user := dbtest.InsertUser(t, pool, "henry")
+	added, err := store.Import(bg, user, []ImportEntry{{Bookmark: valid(t, "Imported"), CreatedAt: 50}})
+	if err != nil || added != 1 {
+		t.Fatalf("added = %d, err = %v", added, err)
+	}
+	list, err := store.List(bg, user, nil, NewPage(nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEqual(t, len(list), 1)
+	if list[0].Site != nil {
+		t.Fatalf("site = %+v", list[0].Site)
 	}
 }

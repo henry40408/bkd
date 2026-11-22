@@ -183,7 +183,7 @@ func TestIconsAllHaveAPathAndRender(t *testing.T) {
 	}
 	for _, name := range []iconName{iconOK, iconBroken, iconRedirected, iconUnknown, iconEdit, iconTrash, iconPlus,
 		iconShuffle, iconSelect, iconAll, iconTagAdd, iconTagRemove, iconLink, iconSearch, iconMenu,
-		iconUpload, iconDownload, iconSignOut, iconSignIn, iconKey, iconUserAdd, iconBan, iconRefresh} {
+		iconUpload, iconDownload, iconSignOut, iconSignIn, iconKey, iconUserAdd, iconBan} {
 		if _, ok := iconPaths[name]; !ok {
 			t.Errorf("icon %q is not drawn", name)
 		}
@@ -449,6 +449,41 @@ func TestForwardedUsersSeeNoAccountLinkOrSignOut(t *testing.T) {
 	if !strings.Contains(page, `name="link_check_enabled" value="on" checked>`) {
 		t.Error("the checkbox must start ticked")
 	}
+}
+
+func TestTheSettingsPageHasAUserAgentBoxThatKeepsAndEscapesItsValue(t *testing.T) {
+	page := SettingsPage(SettingsView{
+		Shell:              alice(SectionSettings),
+		LinkCheckUserAgent: `a"b<c>&d`,
+		DefaultUserAgent:   "Default/1 (+https://example.test)",
+		MaxUserAgentLength: 200,
+	})
+	requireContains(t, page,
+		`name="link_check_user_agent"`,
+		`value="a&quot;b&lt;c&gt;&amp;d"`,
+		`placeholder="Default/1 (+https://example.test)"`,
+		`maxlength="200"`,
+	)
+	requireAbsent(t, page, `role="alert"`)
+}
+
+// The User-Agent works for the "Check links" button even when the server runs
+// no background check, so the note must not sit above it or claim it is idle.
+func TestTheOffNoteSitsUnderTheCheckboxAndLeavesTheUserAgentOut(t *testing.T) {
+	page := SettingsPage(SettingsView{Shell: alice(SectionSettings), MaxUserAgentLength: 200})
+	note := strings.Index(page, "Background checks are turned off")
+	checkbox := strings.Index(page, `name="link_check_enabled"`)
+	box := strings.Index(page, `name="link_check_user_agent"`)
+	if checkbox < 0 || note < checkbox || note > box {
+		t.Errorf("positions: checkbox %d, note %d, box %d; want the note between them", checkbox, note, box)
+	}
+	requireContains(t, page, "the box above has no effect", `still applies to the &quot;Check links&quot; button and to reading a page`)
+	requireAbsent(t, page, "this setting has no effect")
+}
+
+func TestTheSettingsPageShowsAnErrorOnlyWhenThereIsOne(t *testing.T) {
+	page := SettingsPage(SettingsView{Shell: alice(SectionSettings), Error: "user agent is too long"})
+	requireContains(t, page, `<p class="err" role="alert">user agent is too long</p>`)
 }
 
 func TestInactiveUserRowsHideTheirActionsForYourself(t *testing.T) {

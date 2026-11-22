@@ -19,9 +19,6 @@ type Meta struct {
 	Description string
 }
 
-// IsEmpty says the page told nothing.
-func (m Meta) IsEmpty() bool { return m.Title == "" && m.Description == "" }
-
 // found collects the first value of each source. Parse picks between them
 // only at the end, because a page may list them in any order.
 type found struct {

@@ -145,8 +145,10 @@ func TestAccountRoutesAnswer500WhenTheUserTableRefusesChanges(t *testing.T) {
 	passwords := passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")
 	expectEvery500(t, app, token, []sent{
 		put("/api/settings", map[string]any{"link_check_enabled": true}),
+		put("/api/settings", map[string]any{"link_check_enabled": true, "link_check_user_agent": "Agent/1"}),
 		put("/api/account/password", map[string]any{"current": testPassword, "new": "a brand new secret"}),
 		formPost("/settings", "link_check_enabled=on"),
+		formPost("/settings", "link_check_enabled=on&link_check_user_agent=Agent%2F1"),
 		formPost("/account/password", passwords),
 	})
 }

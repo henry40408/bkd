@@ -201,7 +201,7 @@ func (s *Server) SetLinkCheck(url, status, detail string) error {
 }
 
 // SetSite stores what a page said about itself on the bookmark with this URL.
-// The refresh only contacts public addresses, so a scenario cannot make a real
+// The server only contacts public addresses, so a scenario cannot make a real
 // server answer with a page; this puts the stored details in place.
 func (s *Server) SetSite(url, title, description string) error {
 	db, err := sql.Open("sqlite", s.DBPath+"?_pragma=busy_timeout(5000)")
@@ -210,8 +210,8 @@ func (s *Server) SetSite(url, title, description string) error {
 	}
 	defer func() { _ = db.Close() }()
 	result, err := db.Exec(
-		"UPDATE bookmarks SET site_title = ?, site_description = ?, site_fetched_at = ? WHERE url = ?",
-		title, description, time.Now().Unix(), url)
+		"UPDATE bookmarks SET site_title = ?, site_description = ? WHERE url = ?",
+		title, description, url)
 	if err != nil {
 		return err
 	}

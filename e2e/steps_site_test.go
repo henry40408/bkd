@@ -8,11 +8,6 @@ import (
 	"github.com/henry40408/bkd/e2e/internal/harness"
 )
 
-const (
-	siteTitleButton       = editForm + " button[data-site-title]"
-	siteDescriptionButton = editForm + " button[data-site-description]"
-)
-
 func registerSiteSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^I have the bookmark `+quoted+` titled `+quoted+` whose page says `+quoted+` and `+quoted+`$`,
 		func(url, title, pageTitle, description string) error {
@@ -21,40 +16,38 @@ func registerSiteSteps(sc *godog.ScenarioContext, w *world) {
 			}
 			return w.server.SetSite(unquote(url), unquote(pageTitle), unquote(description))
 		})
-	sc.Step(`^I refresh the page details of `+quoted+`$`, withString(w.refreshPageDetails))
-	sc.Step(`^I use the page title$`, func() error { return w.click(siteTitleButton) })
-	sc.Step(`^I use the page description$`, func() error { return w.click(siteDescriptionButton) })
-	sc.Step(`^the page title button is not offered$`, func() error {
-		return w.buttonIsGone("the page title button", siteTitleButton)
-	})
-	sc.Step(`^the page description button is not offered$`, func() error {
-		return w.buttonIsGone("the page description button", siteDescriptionButton)
-	})
+	sc.Step(`^the add form says `+quoted+`$`, withString(func(text string) error { return w.textContains(addForm, text) }))
+	sc.Step(`^I clear the `+quoted+` field of the edit form$`, withString(func(name string) error {
+		return w.fill(fieldOf(editForm, name), "")
+	}))
+	sc.Step(`^I type `+quoted+` in the `+quoted+` field of the edit form$`, withTwoStrings(func(text, name string) error {
+		return w.fill(fieldOf(editForm, name), text)
+	}))
 	sc.Step(`^the `+quoted+` field of the edit form holds `+quoted+`$`, withTwoStrings(func(name, expected string) error {
 		return w.fieldHolds(editForm, name, expected)
 	}))
+	sc.Step(`^the `+quoted+` field of the add form shows `+quoted+` as its placeholder$`, withTwoStrings(func(name, expected string) error {
+		return w.placeholderIs(addForm, name, expected)
+	}))
+	sc.Step(`^the `+quoted+` field of the edit form shows `+quoted+` as its placeholder$`, withTwoStrings(func(name, expected string) error {
+		return w.placeholderIs(editForm, name, expected)
+	}))
+	sc.Step(`^the `+quoted+` field of the edit form has no placeholder$`, withString(func(name string) error {
+		return w.placeholderIs(editForm, name, "")
+	}))
 }
 
-// refreshPageDetails presses a row's refresh button, which shows only while the
-// pointer is over the row.
-func (w *world) refreshPageDetails(title string) error {
-	row, err := w.browser.Await(harness.XPath(rowOf(title)))
-	if err != nil {
-		return err
-	}
-	if err := row.Hover(); err != nil {
-		return err
-	}
-	return w.click(fmt.Sprintf("button[aria-label='Refresh page details of %s']", title))
-}
+func fieldOf(form, name string) string { return fmt.Sprintf("%s [name=%s]", form, name) }
 
-func (w *world) buttonIsGone(name, selector string) error {
-	return harness.Eventually(name+" is not offered", func() (bool, error) {
-		button, err := w.browser.First(harness.CSS(selector))
+// placeholderIs waits for the field's placeholder to be expected; "" means none.
+// The script changes placeholders after a request, so the first look may be early.
+func (w *world) placeholderIs(form, name, expected string) error {
+	return harness.Eventually(fmt.Sprintf("the %s field shows %q as its placeholder", name, expected), func() (bool, error) {
+		field, err := w.browser.First(harness.CSS(fieldOf(form, name)))
 		if err != nil {
 			return false, err
 		}
-		shown, err := button.Displayed()
-		return !shown, err
+		actual, _, err := field.Attr("placeholder")
+		return actual == expected, err
 	})
 }

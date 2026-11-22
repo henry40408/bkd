@@ -313,6 +313,55 @@ func TestADisabledForwardedAccountGetsNoAccess(t *testing.T) {
 	}
 }
 
+func TestTheLinkCheckUserAgentIsEmptyUntilChosenAndBelongsToOneUser(t *testing.T) {
+	pool := dbtest.Open(t)
+	henry := add(t, pool, "henry", false)
+	mei := add(t, pool, "mei", false)
+	read := func(id int64) string {
+		t.Helper()
+		agent, err := LinkCheckUserAgent(bg, pool, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return agent
+	}
+
+	if got := read(henry); got != "" {
+		t.Fatalf("new account has User-Agent %q", got)
+	}
+	custom, empty := "Custom/1.0", ""
+	if err := SetLinkCheck(bg, pool, henry, LinkCheckChange{Enabled: true, UserAgent: &custom}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(henry); got != "Custom/1.0" {
+		t.Errorf("henry's User-Agent = %q", got)
+	}
+	if enabled, _ := LinkCheckEnabled(bg, pool, henry); !enabled {
+		t.Error("the same change did not turn the check on")
+	}
+	if got := read(mei); got != "" {
+		t.Errorf("mei's User-Agent = %q, changed by henry's setting", got)
+	}
+	if err := SetLinkCheck(bg, pool, henry, LinkCheckChange{Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(henry); got != "Custom/1.0" {
+		t.Errorf("a change without a User-Agent left %q, want it kept", got)
+	}
+	if enabled, _ := LinkCheckEnabled(bg, pool, henry); enabled {
+		t.Error("the check stayed on")
+	}
+	if err := SetLinkCheck(bg, pool, henry, LinkCheckChange{UserAgent: &empty}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(henry); got != "" {
+		t.Errorf("cleared User-Agent = %q", got)
+	}
+	if got := read(9999); got != "" {
+		t.Errorf("a missing account has User-Agent %q", got)
+	}
+}
+
 func TestLookupsAndFlags(t *testing.T) {
 	pool := dbtest.Open(t)
 	id := add(t, pool, "henry", false)

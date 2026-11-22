@@ -15,7 +15,7 @@ import (
 )
 
 func readPage(checker *Checker, address string) (Page, error) {
-	return checker.ReadPage(context.Background(), address)
+	return checker.ReadPage(context.Background(), address, "")
 }
 
 func assertPageError(t *testing.T, err error, want string) {
@@ -50,6 +50,29 @@ func TestReadPageReturnsTheBodyOfAWorkingPage(t *testing.T) {
 	assertEqual(t, request.URL.Path, "/page")
 	assertEqual(t, request.Header.Get("Accept"), "text/html,application/xhtml+xml")
 	assertUserAgent(t, request)
+}
+
+func TestReadPageSendsTheGivenUserAgentOrTheDefault(t *testing.T) {
+	cases := map[string]struct{ given, want string }{
+		"chosen":  {"Custom/1.0", "Custom/1.0"},
+		"default": {"", DefaultUserAgent()},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var sent string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				sent = r.Header.Get("User-Agent")
+				htmlPage("<title>Hi</title>")(w, r)
+			}))
+			defer server.Close()
+
+			_, err := loopbackChecker(0).ReadPage(context.Background(), server.URL, tc.given)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertEqual(t, sent, tc.want)
+		})
+	}
 }
 
 func TestReadPageKeepsOnlyTheFirstBytesOfAHugePage(t *testing.T) {
@@ -255,7 +278,7 @@ func TestReadPageSaysWhenNoSlotIsFreeBeforeTheCallerGivesUp(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	_, err := checker.ReadPage(ctx, "http://example.test/")
+	_, err := checker.ReadPage(ctx, "http://example.test/", "")
 	assertPageError(t, err, "Could not connect")
 }
 
@@ -293,5 +316,5 @@ func TestInspectSaysNoSlotWhenTheCallerGivesUpBeforeOneIsFree(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	assertVerdict(t, checker.Inspect(ctx, "http://example.test/"), StatusUnknown, "Could not connect")
+	assertVerdict(t, checker.Inspect(ctx, "http://example.test/", ""), StatusUnknown, "Could not connect")
 }

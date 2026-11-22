@@ -123,15 +123,15 @@ details.add[open] { flex: 1 0 100%; }
 
 .active { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
 .chip { display: inline-flex; gap: var(--sp-2); align-items: center; min-height: var(--sp-6); padding: 0 var(--sp-3); border: 2px solid var(--ribbon); border-radius: var(--radius-pill); background: var(--sheet); font-weight: var(--strong); text-decoration: none; }
-.hint.moved, .hint.site-title, .hint.site-description { overflow-wrap: anywhere; }
-form .btn[data-moved-to], form .btn[data-site-title], form .btn[data-site-description] { justify-self: start; }
+.hint.moved, .hint[data-site-status] { overflow-wrap: anywhere; }
+form .btn[data-moved-to] { justify-self: start; }
 
 /* ---- Panels (add form, random pick, inline edit, confirm) ---- */
 .panel, .inline-form { background: var(--sheet); border: 1px solid var(--rule); border-left: 4px solid var(--ribbon); border-radius: 0 var(--radius) var(--radius) 0; padding: var(--sp-4); margin: var(--sp-3) 0; display: grid; gap: var(--sp-3); }
 .panel h2 { font: var(--strong) var(--fs-3)/var(--lh-tight) var(--serif); margin: 0; }
 .panel h2 a { text-decoration: none; }
-.stack { display: grid; gap: var(--sp-3); }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); align-items: start; }
+form.stack { display: grid; gap: var(--sp-3); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
 .inline-form .inline-title { font: var(--strong) var(--fs-3)/var(--lh-tight) var(--serif); }
 .inline-form .summary, .inline-form form { margin: 0; }
 .item.confirming > .inline-form, .pick.confirming > .inline-form { border-left-color: var(--broken); }
@@ -160,9 +160,6 @@ form .btn[data-moved-to], form .btn[data-site-title], form .btn[data-site-descri
 @media (hover: hover) { .body h3 a:hover { text-decoration: underline; text-decoration-color: var(--ribbon); text-decoration-thickness: 2px; text-underline-offset: 2px; } }
 .url { color: var(--soft); font-size: var(--fs-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .note { max-width: 70ch; overflow-wrap: anywhere; }
-.site-desc { max-width: 70ch; overflow-wrap: anywhere; color: var(--soft); font-size: var(--fs-1); }
-.pick .site-desc { max-width: none; }
-.row-refresh { display: contents; }
 .tags { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-2); }
 .tag { color: var(--link); font-size: var(--fs-1); text-decoration: none; }
 .tag::before { content: "#"; opacity: .6; }
