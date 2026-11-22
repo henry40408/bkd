@@ -17,6 +17,9 @@ func registerSiteSteps(sc *godog.ScenarioContext, w *world) {
 			return w.server.SetSite(unquote(url), unquote(pageTitle), unquote(description))
 		})
 	sc.Step(`^the add form says `+quoted+`$`, withString(func(text string) error { return w.textContains(addForm, text) }))
+	sc.Step(`^the page has asked the server to read an address (\d+) times?$`, w.pageAskedToReadTimes)
+	sc.Step(`^I read the page again in the add form$`, func() error { return w.click(addForm + " [data-site-reread]") })
+	sc.Step(`^I read the page again in the edit form$`, func() error { return w.click(editForm + " [data-site-reread]") })
 	sc.Step(`^I clear the `+quoted+` field of the edit form$`, withString(func(name string) error {
 		return w.fill(fieldOf(editForm, name), "")
 	}))
@@ -38,6 +41,17 @@ func registerSiteSteps(sc *godog.ScenarioContext, w *world) {
 }
 
 func fieldOf(form, name string) string { return fmt.Sprintf("%s [name=%s]", form, name) }
+
+// pageAskedToReadTimes waits for the page to have sent that many page-detail
+// requests. The status line says the same after a failed read and after a
+// failed read again, so only the request count shows that the button worked.
+func (w *world) pageAskedToReadTimes(expected int) error {
+	const countRequests = `performance.getEntriesByType("resource").filter(entry => entry.name.endsWith("/api/site-preview")).length`
+	return harness.Eventually(fmt.Sprintf("the page has asked the server to read an address %d times", expected), func() (bool, error) {
+		count, err := harness.Eval[int](w.browser, countRequests)
+		return count == expected, err
+	})
+}
 
 // placeholderIs waits for the field's placeholder to be expected; "" means none.
 // The script changes placeholders after a request, so the first look may be early.

@@ -108,7 +108,9 @@ type Valid struct {
 	Title string
 	Note  string
 	Tags  []string
-	// Site is stored when the bookmark is new or its URL changes.
+	// Site is stored when the bookmark is new, when its URL changes and, for an
+	// existing bookmark, whenever it is not empty. An empty one keeps what is
+	// stored, so a client that never reads pages cannot wipe the details.
 	Site Site
 }
 

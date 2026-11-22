@@ -604,6 +604,7 @@
   const SITE_READING = "Reading the page…";
   const SITE_NOTHING = "The page says nothing about itself.";
   const SITE_UNREACHABLE = "Could not read the page: bkd did not answer.";
+  const SITE_NO_ADDRESS = "There is no web address to read.";
   const SITE_BUSY = "Could not read the page: a link check or another read is running. Try again in a moment.";
 
   // Per form:
@@ -741,6 +742,28 @@
       readSiteDetails(form);
     }, pauseMs);
   }
+
+  // Reads the address in the field again, also when its details are already there or
+  // the last read failed: the page may have changed since, or the failure may be over.
+  // Nothing is saved until the form is sent.
+  function rereadSiteDetails(form) {
+    const state = siteStateOf(form);
+    if (state.run) return;
+    clearTimeout(state.timer);
+    state.timer = null;
+    const address = readableAddress(form);
+    if (!address) {
+      setSiteStatus(form, SITE_NO_ADDRESS);
+      return;
+    }
+    state.failed = null;
+    state.run = runSiteRead(form, address);
+  }
+
+  document.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest("button[data-site-reread]") : null;
+    if (button && button.form) rereadSiteDetails(button.form);
+  });
 
   const urlFieldOf = (event) =>
     event.target instanceof HTMLInputElement && event.target.name === "url" && event.target.form ? event.target : null;

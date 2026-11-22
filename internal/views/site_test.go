@@ -53,6 +53,16 @@ func TestTheDetailsAreNeverTheValueOfTheTitleOrTheNote(t *testing.T) {
 	requireAbsent(t, page, `value="Their title" placeholder`, `>Their description</textarea>`)
 }
 
+// The button reads the page with a script, so it stays hidden until one runs.
+func TestFormsOfferToReadThePageAgainButOnlyToAScript(t *testing.T) {
+	for name, page := range map[string]string{"add": addPageWith(SiteDetails{}), "edit": editPageWith(SiteDetails{})} {
+		t.Run(name, func(t *testing.T) {
+			requireContains(t, page,
+				`<button class="btn quiet" type="button" data-site-reread="" data-script-only hidden>Read the page again</button>`)
+		})
+	}
+}
+
 func TestTheListShowsNoPageDetails(t *testing.T) {
 	requireAbsent(t, BookmarksPage(BookmarksView{
 		Shell: emptyShell("alice", false), List: listView(1), Rows: realRows(),

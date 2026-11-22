@@ -147,17 +147,21 @@ func (s *Store) Update(ctx context.Context, req UpdateRequest) (updated Bookmark
 func updateRow(ctx context.Context, tx *sql.Tx, req UpdateRequest) (bool, error) {
 	// A check and a page's details describe one address, so a check is dropped
 	// when the URL changes and the details are replaced by those of the new
-	// page. In SET, `url` is still the old value.
+	// page. With the same URL the details are replaced only when the form sent
+	// some (it read the page again); both columns go together, because a title
+	// and a description from two readings do not describe one page. In SET,
+	// `url` is still the old value.
+	siteSent := req.Bookmark.Site != (Site{})
 	result, err := tx.ExecContext(ctx, `UPDATE bookmarks SET
              link_status      = CASE WHEN url = ?1 THEN link_status      END,
              link_checked_at  = CASE WHEN url = ?1 THEN link_checked_at  END,
              link_detail      = CASE WHEN url = ?1 THEN link_detail      END,
-             site_title       = CASE WHEN url = ?1 THEN site_title       ELSE NULLIF(?7, '') END,
-             site_description = CASE WHEN url = ?1 THEN site_description ELSE NULLIF(?8, '') END,
+             site_title       = CASE WHEN url = ?1 AND NOT ?9 THEN site_title       ELSE NULLIF(?7, '') END,
+             site_description = CASE WHEN url = ?1 AND NOT ?9 THEN site_description ELSE NULLIF(?8, '') END,
              url = ?1, title = ?2, note = ?3, updated_at = ?4
          WHERE id = ?5 AND user_id = ?6`,
 		req.Bookmark.URL, req.Bookmark.Title, req.Bookmark.Note, req.Now, req.ID, req.UserID,
-		req.Bookmark.Site.Title, req.Bookmark.Site.Description)
+		req.Bookmark.Site.Title, req.Bookmark.Site.Description, siteSent)
 	if err != nil {
 		return false, fmt.Errorf("update bookmark: %w", err)
 	}
