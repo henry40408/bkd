@@ -13,6 +13,7 @@ Feature: Page details
     When I open the site
     And I refresh the page details of "Private"
     Then I am told "could not read the page: Address is not public"
+    And the list shows "Private"
 
   Scenario: The list shows the description the page gave
     Given I have the bookmark "https://example.test/read" titled "Mine" whose page says "Their title" and "What the page says about itself"

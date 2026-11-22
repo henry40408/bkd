@@ -304,12 +304,12 @@
     return `${summary}. ${sites}, so some links were left unchecked: try again later.`;
   }
 
-  function showNotice(text) {
+  function showNotice(text, { failed = false } = {}) {
     const main = document.getElementById("main");
     if (!main) return;
     const notice = document.createElement("p");
-    notice.className = "notice";
-    notice.setAttribute("role", "status");
+    notice.className = failed ? "notice err" : "notice";
+    notice.setAttribute("role", failed ? "alert" : "status");
     notice.textContent = text;
     const old = main.querySelector(".notice");
     if (old) old.remove();
@@ -444,12 +444,22 @@
     };
   }
 
-  function submitKeepingScroll({ form, url, data, keepRefusal }) {
+  // The refusal of a refresh goes at the top of the list, so the page must be there to show it.
+  function showRefusalAtTop(doc) {
+    const reason = doc.querySelector(".err");
+    if (!reason) return false;
+    showNotice(reason.textContent, { failed: true });
+    return true;
+  }
+
+  function submitKeepingScroll({ form, url, data, keepRefusal, refusalAtTop = false }) {
     const scrolled = window.scrollY;
     // The row the user worked on is likely far down the list, so the page stays where it is.
     const loadKeepingScroll = async () => {
-      const swapped = await load(url, { method: "POST", body: new URLSearchParams(data) }, "push", keepRefusal);
-      if (swapped) window.scrollTo(0, scrolled);
+      let refused = false;
+      const keep = keepRefusal && ((doc) => (refused = keepRefusal(doc)));
+      const swapped = await load(url, { method: "POST", body: new URLSearchParams(data) }, "push", keep);
+      if (swapped) window.scrollTo(0, refused && refusalAtTop ? 0 : scrolled);
       return swapped;
     };
     return enhance(
@@ -668,7 +678,9 @@
   function finished(form, submitter, ids, url, data) {
     if (ids.length > 0) return runLinkCheck(form, ids);
     if (form.closest(".inline-form")) return submitInline({ form, url, data });
-    if (form.hasAttribute("data-keep-scroll")) return submitKeepingScroll({ form, url, data });
+    if (form.hasAttribute("data-keep-scroll")) {
+      return submitKeepingScroll({ form, url, data, keepRefusal: showRefusalAtTop, refusalAtTop: true });
+    }
     if (isBulkDelete(form, data)) return askBulkDelete({ form, submitter, url, data });
     return postForm({ form, submitter, url, data });
   }
