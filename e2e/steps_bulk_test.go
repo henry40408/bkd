@@ -31,6 +31,7 @@ func registerBulkSteps(sc *godog.ScenarioContext, w *world) {
 	}))
 	sc.Step(`^I start deleting the selection$`, func() error { return w.pressBulkButton("delete") })
 	sc.Step(`^I check the links of the selection$`, func() error { return w.pressBulkButton("check") })
+	sc.Step(`^I read the pages of the selection$`, func() error { return w.pressBulkButton("read") })
 	sc.Step(`^the bulk actions are disabled$`, func() error { return w.bulkActionsDisabled(true) })
 	sc.Step(`^the bulk actions are enabled$`, func() error { return w.bulkActionsDisabled(false) })
 	sc.Step(`^the selection count says `+quoted+`$`, withString(func(text string) error {

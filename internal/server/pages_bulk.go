@@ -143,8 +143,11 @@ func (a *App) confirmBulkDelete(w http.ResponseWriter, r *http.Request, user aut
 
 // runBulk does the action and returns the notice to show afterwards.
 func (a *App) runBulk(ctx context.Context, user auth.SessionUser, request bulkRequest) (string, *apiError) {
-	if request.action == "check" {
-		return a.checkLinks(ctx, user, request.ids)
+	switch request.action {
+	case "check":
+		return a.runPosted(ctx, user, request.ids, a.linkCheckRun())
+	case "read":
+		return a.runPosted(ctx, user, request.ids, a.pageReadRun())
 	}
 	input, ok := bulkInput(request)
 	if !ok {
@@ -183,11 +186,47 @@ func staleSelection() *apiError {
 	return &apiError{status: http.StatusNotFound, message: staleSelectionMessage}
 }
 
-// checkLinks waits for every check to finish and then shows the list again with
-// the results, as there is no live progress without a script. The notice says
-// whether some links were not checked: their site asked to be left alone, or the
+// postedRun is what differs between a link check and a page read that came as a
+// form post.
+type postedRun struct {
+	start func(context.Context, []linkcheck.Target) *linkcheck.RunningCheck
+	// store saves one finished target.
+	store func(context.Context, auth.SessionUser, linkcheck.Checked) error
+	// incomplete is the notice when a target was skipped or the time ran out.
+	incomplete string
+}
+
+func (a *App) linkCheckRun() postedRun {
+	return postedRun{
+		start: func(ctx context.Context, targets []linkcheck.Target) *linkcheck.RunningCheck {
+			return a.linkChecker.Start(ctx, targets)
+		},
+		store: func(ctx context.Context, user auth.SessionUser, checked linkcheck.Checked) error {
+			_, err := a.storeChecked(ctx, user, checked)
+			return err
+		},
+		incomplete: "check-incomplete",
+	}
+}
+
+func (a *App) pageReadRun() postedRun {
+	return postedRun{
+		start: func(ctx context.Context, targets []linkcheck.Target) *linkcheck.RunningCheck {
+			return a.linkChecker.StartReads(ctx, targets, 0)
+		},
+		store: func(ctx context.Context, user auth.SessionUser, checked linkcheck.Checked) error {
+			_, err := a.storeRead(ctx, user, checked)
+			return err
+		},
+		incomplete: "read-incomplete",
+	}
+}
+
+// runPosted waits for every check or read to finish and then shows the list again
+// with the results, as there is no live progress without a script. The notice says
+// whether some targets were left out: their site asked to be left alone, or the
 // time ran out.
-func (a *App) checkLinks(ctx context.Context, user auth.SessionUser, ids []int64) (string, *apiError) {
+func (a *App) runPosted(ctx context.Context, user auth.SessionUser, ids []int64, run postedRun) (string, *apiError) {
 	valid, err := linkcheck.CheckInput{IDs: ids}.Validate()
 	if err != nil {
 		return "", validationFault(err)
@@ -204,24 +243,24 @@ func (a *App) checkLinks(ctx context.Context, user auth.SessionUser, ids []int64
 	if !found {
 		return "", staleSelection()
 	}
-	complete, err := a.collectChecks(ctx, user, targets)
+	complete, err := a.collectRun(ctx, user, targets, run)
 	if err != nil {
 		return "", internal(err)
 	}
 	if !complete {
-		return "check-incomplete", nil
+		return run.incomplete, nil
 	}
 	return "bulk-done", nil
 }
 
-// collectChecks stores each verdict as it arrives. It returns false when a target
+// collectRun stores each result as it arrives. It returns false when a target
 // was skipped or the time limit ended the wait.
-func (a *App) collectChecks(ctx context.Context, user auth.SessionUser, targets []linkcheck.Target) (bool, error) {
-	ctx, endCheck := a.endsWhenStopping(ctx)
-	defer endCheck()
+func (a *App) collectRun(ctx context.Context, user auth.SessionUser, targets []linkcheck.Target, run postedRun) (bool, error) {
+	ctx, endRun := a.endsWhenStopping(ctx)
+	defer endRun()
 	waitCtx, cancel := context.WithTimeout(ctx, a.checkLimit)
 	defer cancel()
-	running := a.linkChecker.Start(waitCtx, targets)
+	running := run.start(waitCtx, targets)
 	defer running.Cancel()
 	complete := true
 	for {
@@ -236,7 +275,7 @@ func (a *App) collectChecks(ctx context.Context, user auth.SessionUser, targets 
 				complete = false
 				continue
 			}
-			if _, err := a.storeChecked(ctx, user, *event.Checked); err != nil {
+			if err := run.store(ctx, user, *event.Checked); err != nil {
 				return false, err
 			}
 		}

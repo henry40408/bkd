@@ -154,7 +154,8 @@ func TestBulkBarFollowsTheListAndHasNoTagsToggle(t *testing.T) {
 	}
 	requireAbsent(t, page, "bulk-tags-toggle")
 	requireContains(t, page, `name="action" value="add_tags"`, `name="action" value="remove_tags"`,
-		`name="action" value="check"`, `name="action" value="delete"`, `id="bulk-count"`)
+		`name="action" value="check"`, `name="action" value="read" title="Read pages"`,
+		`name="action" value="delete"`, `id="bulk-count"`)
 }
 
 func TestSelectLinkIsOnlyPressedInSelectMode(t *testing.T) {

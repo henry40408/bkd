@@ -64,6 +64,17 @@ Feature: Page details
     Then the page has asked the server to read an address 2 times
     And the add form says "Could not read the page: Address is not public"
 
+  Scenario: Reading the pages of a selection says how many could not be read
+    Given I have the bookmark "http://127.0.0.1:1/page" titled "Private"
+    When I open the site
+    And I enter select mode
+    And I tick "Private"
+    And the server answers requests for "/api/bookmarks/read" slowly
+    And I read the pages of the selection
+    Then the link check shows "Reading pages: 0 of 1"
+    And I am told "Read 0 of 1 page, 1 could not be read"
+    And "Private" is ticked
+
   Scenario: Changing the address puts the old page's details away
     Given I have the bookmark "https://example.test/read" titled "Mine" whose page says "Their title" and "What the page says about itself"
     When I open the site

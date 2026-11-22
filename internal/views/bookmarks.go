@@ -335,6 +335,7 @@ func bulkPanel(view BookmarksView) node {
 				bulkSubmit("add_tags", iconTagAdd, "Add tags"),
 				bulkSubmit("remove_tags", iconTagRemove, "Remove tags"),
 				bulkSubmit("check", iconLink, "Check links"),
+				bulkSubmit("read", iconPage, "Read pages"),
 				bulkSubmit("delete", iconTrash, "Delete", "danger"),
 			),
 			errorLine(view.Bulk.Error),

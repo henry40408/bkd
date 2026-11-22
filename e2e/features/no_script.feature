@@ -89,6 +89,14 @@ Feature: The pages work without a script
     Then I am told "Done."
     And the list shows "Address is not public"
 
+  Scenario: Reading pages waits for the result and shows the list again
+    Given I have the bookmark "http://127.0.0.1:1/page" titled "Private"
+    When I open the site
+    And I enter select mode
+    And I tick "Private"
+    And I read the pages of the selection
+    Then I am told "Done."
+
   Scenario: An admin creates a user with plain forms
     When I open Manage users
     And I create the user "mei" with a temporary password

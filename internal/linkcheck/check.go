@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/net/idna"
+
+	"github.com/henry40408/bkd/internal/sitemeta"
 )
 
 const maxRequestsInFlight = 16
@@ -62,6 +64,8 @@ type Inspection struct {
 	Backoff *Backoff
 	// Answered: a site replied, as opposed to a timeout or a failed connection.
 	Answered bool
+	// Meta is what a read page says about itself; only a read sets it.
+	Meta     *sitemeta.Meta
 	timedOut bool
 }
 
