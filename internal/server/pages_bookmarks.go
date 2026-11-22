@@ -52,6 +52,13 @@ func filterFor(view views.ListView) search.Filter {
 	return search.NewFilter(view.Q, view.Tag).WithStatus(view.Status)
 }
 
+func siteOf(site *bookmarks.Site) *views.SiteInfo {
+	if site == nil {
+		return nil
+	}
+	return &views.SiteInfo{Title: site.Title, Description: site.Description}
+}
+
 func linkOf(link *bookmarks.LinkCheck) *views.LinkCheck {
 	if link == nil {
 		return nil
@@ -70,7 +77,7 @@ func rowOf(bookmark bookmarks.Bookmark, filter search.Filter) views.BookmarkRow 
 	}
 	return views.BookmarkRow{
 		ID: bookmark.ID, URL: bookmark.URL, Title: bookmark.Title, Note: bookmark.Note,
-		Tags: chips, Link: linkOf(bookmark.Link), CreatedAt: bookmark.CreatedAt,
+		Tags: chips, Link: linkOf(bookmark.Link), Site: siteOf(bookmark.Site), CreatedAt: bookmark.CreatedAt,
 		TitleTerms:  filter.Highlights(search.Highlight{Part: search.Title}),
 		DomainTerms: filter.Highlights(search.Highlight{Part: search.URL}),
 		NoteTerms:   filter.Highlights(search.Highlight{Part: search.Note}),
@@ -224,6 +231,13 @@ func movedTo(bookmark bookmarks.Bookmark) string {
 	return bookmark.Link.Detail
 }
 
+func siteTitleOf(bookmark bookmarks.Bookmark) string {
+	if bookmark.Site == nil {
+		return ""
+	}
+	return bookmark.Site.Title
+}
+
 func (a *App) pageEditForm(w http.ResponseWriter, r *http.Request, user auth.SessionUser) *pageError {
 	bookmark, id, failure := a.ownBookmark(r, user)
 	if failure != nil {
@@ -236,7 +250,7 @@ func (a *App) pageEditForm(w http.ResponseWriter, r *http.Request, user auth.Ses
 	writeHTML(w, http.StatusOK, views.EditPage(views.EditView{
 		Shell: shell, ID: id, URL: bookmark.URL, Title: bookmark.Title, Note: bookmark.Note,
 		Tags: strings.Join(bookmark.Tags, ", "), Back: pathOrHome(r.URL.Query().Get("back")),
-		MovedTo: movedTo(bookmark),
+		MovedTo: movedTo(bookmark), SiteTitle: siteTitleOf(bookmark),
 	}))
 	return nil
 }
@@ -307,5 +321,23 @@ func (a *App) pageDeleteSubmit(w http.ResponseWriter, r *http.Request, user auth
 		return fromAPI(fault)
 	}
 	redirectWithNotice(w, pathOrHome(fields.text("back")), "bookmark-deleted")
+	return nil
+}
+
+// pageRefreshBookmark reads the page again, then returns to where the person
+// came from. A page that cannot be read is an error page that says why.
+func (a *App) pageRefreshBookmark(w http.ResponseWriter, r *http.Request, user auth.SessionUser) *pageError {
+	id, failure := pagePathID(r)
+	if failure != nil {
+		return failure
+	}
+	fields, failure := formOf(r)
+	if failure != nil {
+		return failure
+	}
+	if _, fault := a.refreshBookmark(r.Context(), user, id); fault != nil {
+		return fromAPI(fault)
+	}
+	redirectWithNotice(w, pathOrHome(fields.text("back")), "site-refreshed")
 	return nil
 }

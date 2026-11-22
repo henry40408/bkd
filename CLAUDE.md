@@ -64,6 +64,7 @@ Thin binary (`cmd/bkd`) over internal packages, so tests build the handler direc
 | `internal/bookmarks` | `Store` (create, update, list, tags, counts), validation, bulk actions |
 | `internal/search` | The search syntax: `Parse`, `Filter`, SQL and highlights |
 | `internal/netscape`, `internal/importer` | Netscape bookmark HTML parser and renderer; import into the store |
+| `internal/sitemeta` | `Parse`: a page's Open Graph or HTML title and description from its head (no network; the fetch is `linkcheck.Checker.ReadPage`) |
 | `internal/truncate` | `Runes`: cut a text to a number of characters, shared by bookmarks, search, importer and server |
 | `internal/linkcheck` | The link checker and its SSRF guard (public addresses only) |
 | `internal/backgroundcheck` | The periodic background link check |

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/henry40408/bkd/internal/db"
+	"github.com/henry40408/bkd/internal/truncate"
 )
 
 const (
@@ -70,6 +71,7 @@ func NewStore(pool *sql.DB) *Store { return &Store{db: pool} }
 const selectBookmark = `SELECT bookmarks.id, bookmarks.url, bookmarks.title, bookmarks.note,
     bookmarks.created_at, bookmarks.updated_at,
     bookmarks.link_status, bookmarks.link_checked_at, bookmarks.link_detail,
+    bookmarks.site_title, bookmarks.site_description, bookmarks.site_fetched_at,
     (SELECT group_concat(tag, char(31))
      FROM (SELECT tag FROM bookmark_tags WHERE bookmark_id = bookmarks.id ORDER BY tag)) AS tags
     FROM bookmarks`
@@ -138,12 +140,15 @@ func (s *Store) Update(ctx context.Context, req UpdateRequest) (updated Bookmark
 }
 
 func updateRow(ctx context.Context, tx *sql.Tx, req UpdateRequest) (bool, error) {
-	// A check describes one address, so it is dropped when the URL changes. In
-	// SET, `url` is still the old value.
+	// A check and a page's metadata describe one address, so they are dropped
+	// when the URL changes. In SET, `url` is still the old value.
 	result, err := tx.ExecContext(ctx, `UPDATE bookmarks SET
-             link_status     = CASE WHEN url = ?1 THEN link_status     END,
-             link_checked_at = CASE WHEN url = ?1 THEN link_checked_at END,
-             link_detail     = CASE WHEN url = ?1 THEN link_detail     END,
+             link_status      = CASE WHEN url = ?1 THEN link_status      END,
+             link_checked_at  = CASE WHEN url = ?1 THEN link_checked_at  END,
+             link_detail      = CASE WHEN url = ?1 THEN link_detail      END,
+             site_title       = CASE WHEN url = ?1 THEN site_title       END,
+             site_description = CASE WHEN url = ?1 THEN site_description END,
+             site_fetched_at  = CASE WHEN url = ?1 THEN site_fetched_at  END,
              url = ?1, title = ?2, note = ?3, updated_at = ?4
          WHERE id = ?5 AND user_id = ?6`,
 		req.Bookmark.URL, req.Bookmark.Title, req.Bookmark.Note, req.Now, req.ID, req.UserID)
@@ -165,6 +170,39 @@ func insertTags(ctx context.Context, conn execer, bookmarkID int64, tags []strin
 		}
 	}
 	return nil
+}
+
+// SiteRequest names a bookmark and the page whose metadata is stored on it.
+type SiteRequest struct {
+	UserID int64
+	ID     int64
+	// URL is the address the page was read from. Nothing is stored once the
+	// bookmark has another address, because the page is then not its page.
+	URL  string
+	Site Site
+}
+
+// SetSite stores what the page says, cutting a title or description that is
+// too long. It leaves updated_at alone: the user changed nothing. found is
+// false when the bookmark is gone, belongs to someone else or no longer has req.URL.
+func (s *Store) SetSite(ctx context.Context, req SiteRequest) (updated Bookmark, found bool, err error) {
+	result, err := s.db.ExecContext(ctx, `UPDATE bookmarks
+         SET site_title = ?1, site_description = ?2, site_fetched_at = ?3
+         WHERE id = ?4 AND user_id = ?5 AND url = ?6`,
+		truncate.Runes(req.Site.Title, maxSiteTitleChars),
+		truncate.Runes(req.Site.Description, maxSiteDescriptionChars),
+		req.Site.FetchedAt, req.ID, req.UserID, req.URL)
+	if err != nil {
+		return Bookmark{}, false, fmt.Errorf("store site metadata: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return Bookmark{}, false, fmt.Errorf("count updated bookmarks: %w", err)
+	}
+	if changed == 0 {
+		return Bookmark{}, false, nil
+	}
+	return s.Get(ctx, req.UserID, req.ID)
 }
 
 // Delete reports false when the bookmark does not exist or belongs to someone else.
@@ -260,10 +298,12 @@ func scanBookmark(rows *sql.Rows) (Bookmark, error) {
 		status    sql.NullString
 		checkedAt sql.NullInt64
 		detail    sql.NullString
+		site      siteColumns
 		tags      sql.NullString
 	)
 	err := rows.Scan(&bookmark.ID, &bookmark.URL, &bookmark.Title, &bookmark.Note,
-		&bookmark.CreatedAt, &bookmark.UpdatedAt, &status, &checkedAt, &detail, &tags)
+		&bookmark.CreatedAt, &bookmark.UpdatedAt, &status, &checkedAt, &detail,
+		&site.title, &site.description, &site.fetchedAt, &tags)
 	if err != nil {
 		return Bookmark{}, fmt.Errorf("scan bookmark: %w", err)
 	}
@@ -274,7 +314,22 @@ func scanBookmark(rows *sql.Rows) (Bookmark, error) {
 	if status.Valid {
 		bookmark.Link = &LinkCheck{Status: status.String, CheckedAt: checkedAt.Int64, Detail: detail.String}
 	}
+	bookmark.Site = site.value()
 	return bookmark, nil
+}
+
+// siteColumns is the site_* columns, which are all NULL until a refresh.
+type siteColumns struct {
+	title       sql.NullString
+	description sql.NullString
+	fetchedAt   sql.NullInt64
+}
+
+func (c siteColumns) value() *Site {
+	if !c.fetchedAt.Valid {
+		return nil
+	}
+	return &Site{Title: c.title.String, Description: c.description.String, FetchedAt: c.fetchedAt.Int64}
 }
 
 // TagCounts lists every tag the user has used, with how many bookmarks carry it.

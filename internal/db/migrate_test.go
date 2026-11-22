@@ -53,32 +53,90 @@ func goMigrations(t *testing.T, pool *sql.DB) []rustMigration {
 	return got
 }
 
+// lastRustVersion is the newest migration the Rust server knew. Later ones
+// exist only here: a database that has them no longer opens under Rust.
+func lastRustVersion(t *testing.T) int64 {
+	t.Helper()
+	rows := readRustMigrations(t)
+	return rows[len(rows)-1].Version
+}
+
+func shippedMigrations(t *testing.T) []migration {
+	t.Helper()
+	shipped, err := loadMigrations(mustSub(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return shipped
+}
+
 func TestNewDatabaseRecordsTheSameMigrationsAsRust(t *testing.T) {
-	got := goMigrations(t, openTemp(t))
+	var got []rustMigration
+	for _, row := range goMigrations(t, openTemp(t)) {
+		if row.Version <= lastRustVersion(t) {
+			got = append(got, row)
+		}
+	}
 	want := readRustMigrations(t)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("_sqlx_migrations differs from the Rust fixture\n got: %+v\nwant: %+v", got, want)
 	}
 }
 
-func TestNewDatabaseHasTheSameSchemaAsRust(t *testing.T) {
-	pool := openTemp(t)
-	want := readRustSchema(t)
+func schemaOf(t *testing.T, pool *sql.DB) map[string]string {
+	t.Helper()
 	rows, err := pool.Query("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = rows.Close() }()
-	got := map[string]string{}
+	schema := map[string]string{}
 	for rows.Next() {
 		var name, statement string
 		if err := rows.Scan(&name, &statement); err != nil {
 			t.Fatal(err)
 		}
-		got[name] = statement
+		schema[name] = statement
 	}
+	return schema
+}
+
+// rustEraDatabase has only the migrations the Rust server knew.
+func rustEraDatabase(t *testing.T) *sql.DB {
+	t.Helper()
+	pool, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "rust-era.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	var known []migration
+	for _, m := range shippedMigrations(t) {
+		if m.version <= lastRustVersion(t) {
+			known = append(known, m)
+		}
+	}
+	if err := applyMigrations(context.Background(), pool, known); err != nil {
+		t.Fatal(err)
+	}
+	return pool
+}
+
+func TestRustEraMigrationsGiveTheSameSchemaAsRust(t *testing.T) {
+	got, want := schemaOf(t, rustEraDatabase(t)), readRustSchema(t)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("schema differs from the Rust fixture\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestUpgradedRustDatabaseHasTheSameSchemaAsANewOne(t *testing.T) {
+	upgraded, err := Open(context.Background(), copyRustDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = upgraded.Close() }()
+	got, want := schemaOf(t, upgraded), schemaOf(t, openTemp(t))
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("an upgraded database differs from a new one\n got: %q\nwant: %q", got, want)
 	}
 }
 
@@ -113,7 +171,7 @@ func entryStart(line string, names []string) (name, rest string, ok bool) {
 	return "", "", false
 }
 
-func TestOpenDoesNotTouchADatabaseCreatedByRust(t *testing.T) {
+func TestOpenKeepsTheMigrationRowsOfADatabaseCreatedByRust(t *testing.T) {
 	path := copyRustDatabase(t)
 	before := rawMigrationRows(t, path)
 
@@ -123,11 +181,15 @@ func TestOpenDoesNotTouchADatabaseCreatedByRust(t *testing.T) {
 	}
 	defer func() { _ = pool.Close() }()
 
-	if after := rawMigrationRows(t, path); !reflect.DeepEqual(before, after) {
-		t.Fatalf("migration rows changed\nbefore: %v\n after: %v", before, after)
-	}
 	if got := len(before); got != len(readRustMigrations(t)) {
 		t.Fatalf("fixture has %d migration rows", got)
+	}
+	after := rawMigrationRows(t, path)
+	if len(after) != len(shippedMigrations(t)) {
+		t.Fatalf("%d migration rows after opening, want one per shipped migration", len(after))
+	}
+	if !reflect.DeepEqual(before, after[:len(before)]) {
+		t.Fatalf("migration rows changed\nbefore: %v\n after: %v", before, after[:len(before)])
 	}
 }
 
@@ -227,7 +289,7 @@ func TestNewDatabaseRecordsInstalledOnAndExecutionTime(t *testing.T) {
 		}
 		count++
 	}
-	if count != len(readRustMigrations(t)) {
+	if count != len(shippedMigrations(t)) {
 		t.Fatalf("%d migration rows", count)
 	}
 }

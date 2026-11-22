@@ -22,6 +22,12 @@ type LinkCheck struct {
 	Detail    string
 }
 
+// SiteInfo is what a bookmark's page says about itself.
+type SiteInfo struct {
+	Title       string
+	Description string
+}
+
 // BookmarkRow is one bookmark on a list page. The *Terms fields are the
 // search terms to mark in that part of the bookmark.
 type BookmarkRow struct {
@@ -31,6 +37,7 @@ type BookmarkRow struct {
 	Note        string
 	Tags        []TagChip
 	Link        *LinkCheck
+	Site        *SiteInfo
 	CreatedAt   int64
 	TitleTerms  []string
 	DomainTerms []string
@@ -166,6 +173,14 @@ func (row BookmarkRow) titleLink() node {
 		highlight(row.Title, row.TitleTerms))
 }
 
+// siteDescription is the page's own description. It is not searched or
+// marked, because the search covers only what the user wrote.
+func (row BookmarkRow) siteDescription() node {
+	return maybe(row.Site != nil && row.Site.Description != "", func() node {
+		return el("p", []attr{classes("site-desc")}, text(row.Site.Description))
+	})
+}
+
 func (row BookmarkRow) linkLine(now int64) node {
 	note := noteOf(row.Link, now)
 	return maybe(note != nil, func() node { return linkNoteLine(note) })
@@ -181,8 +196,21 @@ func pickBox(row BookmarkRow, ticked bool) node {
 			when(ticked, flag("checked")), a("aria-label", "Select "+row.Title)))
 }
 
-func rowActions(row BookmarkRow, back string) node {
+// refreshForm reads the page again. A select-mode row sits inside the bulk
+// form, where a form cannot nest, so it has none.
+func (row BookmarkRow) refreshForm(back string) node {
+	return el("form", []attr{classes("row-refresh"), a("method", "post"),
+		a("action", fmt.Sprintf("/bookmarks/%d/refresh", row.ID)), flag("data-keep-scroll")},
+		hidden("back", back),
+		el("button", []attr{classes("btn", "quiet", "ico"), a("type", "submit"),
+			a("aria-label", "Refresh page details of "+row.Title), a("title", "Refresh page details")},
+			iconLabel(iconRefresh, "Refresh")),
+	)
+}
+
+func rowActions(row BookmarkRow, back string, selecting bool) node {
 	return el("div", []attr{classes("actions")},
+		maybe(!selecting, func() node { return row.refreshForm(back) }),
 		el("a", []attr{classes("btn", "quiet", "ico"), a("href", row.editHref(back)),
 			a("aria-label", "Edit "+row.Title), a("title", "Edit")}, iconLabel(iconEdit, "Edit")),
 		el("a", []attr{classes("btn", "quiet", "ico", "danger-text"), a("href", row.deleteHref(back)),
@@ -195,7 +223,7 @@ func rowBody(row BookmarkRow, now int64) node {
 	return el("div", []attr{classes("body")},
 		el("h3", nil, row.titleLink()),
 		el("p", []attr{classes("url"), a("title", row.URL)}, highlight(row.URL, row.DomainTerms)),
-		row.note(), tags, row.linkLine(now),
+		row.note(), row.siteDescription(), tags, row.linkLine(now),
 	)
 }
 
@@ -207,7 +235,7 @@ func bookmarkItem(row BookmarkRow, now int64, back string, ticked *bool) node {
 		box,
 		el("div", []attr{classes("site")}, el("span", nil, row.domain()), timeTag(NewSavedTime(now, row.CreatedAt))),
 		rowBody(row, now),
-		rowActions(row, back),
+		rowActions(row, back, ticked != nil),
 	)
 }
 
@@ -295,6 +323,7 @@ func pickSection(view BookmarksView, back string) node {
 		el("p", []attr{classes("hint")}, pick.domain()),
 		el("h2", nil, pick.titleLink()),
 		pick.note(),
+		pick.siteDescription(),
 		pick.linkLine(view.Now),
 		el("div", []attr{classes("btns")},
 			toolLink(randomHref, iconShuffle, "Another", "primary"),
@@ -450,6 +479,8 @@ type EditView struct {
 	// MovedTo is the address a moved link now answers from; empty when the
 	// link did not move. It is shown as text only, never followed.
 	MovedTo string
+	// SiteTitle is the title the page gives itself, when it was read.
+	SiteTitle string
 }
 
 // movedNote tells where a moved link went and, with a script, offers to use
@@ -465,6 +496,20 @@ func movedNote(target string) node {
 	)
 }
 
+// siteTitleNote shows the page's own title and, with a script, offers to use it
+// as the bookmark's title. Nothing is shown when the page's title is what the
+// bookmark already has.
+func siteTitleNote(siteTitle, current string) node {
+	if siteTitle == "" || siteTitle == current {
+		return ""
+	}
+	return group(
+		el("p", []attr{classes("hint", "site-title")}, text("Page title: "+siteTitle)),
+		el("button", []attr{classes("btn"), a("type", "button"), a("data-site-title", siteTitle), flag("data-script-only"), flag("hidden")},
+			text("Use page title")),
+	)
+}
+
 // EditPage renders the edit form.
 func EditPage(view EditView) string {
 	content := group(
@@ -474,7 +519,10 @@ func EditPage(view EditView) string {
 			field("URL ", void("input", a("type", "url"), a("name", "url"), a("value", view.URL), a("placeholder", "https://"), flag("required"), flag("autofocus"))),
 			movedNote(view.MovedTo),
 			el("div", []attr{classes("grid2")},
-				field("Title ", void("input", a("type", "text"), a("name", "title"), a("value", view.Title), a("placeholder", "Leave blank to use the domain"))),
+				el("div", []attr{classes("stack")},
+					field("Title ", void("input", a("type", "text"), a("name", "title"), a("value", view.Title), a("placeholder", "Leave blank to use the domain"))),
+					siteTitleNote(view.SiteTitle, view.Title),
+				),
 				field("Tags, separated by commas ", void("input", a("type", "text"), a("name", "tags"), a("value", view.Tags))),
 			),
 			field("Note ", el("textarea", []attr{a("name", "note"), a("rows", "3")}, text(view.Note))),

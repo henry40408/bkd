@@ -31,6 +31,11 @@ func forbidden(message string) *apiError {
 	return &apiError{status: http.StatusForbidden, message: message}
 }
 
+// badGateway is for a site that did not give what was asked of it.
+func badGateway(message string) *apiError {
+	return &apiError{status: http.StatusBadGateway, message: message}
+}
+
 func conflict(message string) *apiError {
 	return &apiError{status: http.StatusConflict, message: message}
 }

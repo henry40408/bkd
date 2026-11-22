@@ -444,12 +444,11 @@
     };
   }
 
-  function submitInline({ form, url, data }) {
-    const panel = form.closest(".inline-form");
+  function submitKeepingScroll({ form, url, data, keepRefusal }) {
     const scrolled = window.scrollY;
     // The row the user worked on is likely far down the list, so the page stays where it is.
     const loadKeepingScroll = async () => {
-      const swapped = await load(url, { method: "POST", body: new URLSearchParams(data) }, "push", keepRefusalInPanel(panel));
+      const swapped = await load(url, { method: "POST", body: new URLSearchParams(data) }, "push", keepRefusal);
       if (swapped) window.scrollTo(0, scrolled);
       return swapped;
     };
@@ -457,6 +456,10 @@
       loadKeepingScroll,
       (error) => (error instanceof TypeError ? HTMLFormElement.prototype.submit.call(form) : location.reload()),
     );
+  }
+
+  function submitInline({ form, url, data }) {
+    return submitKeepingScroll({ form, url, data, keepRefusal: keepRefusalInPanel(form.closest(".inline-form")) });
   }
 
   const isBulkDelete = (form, data) => form.classList.contains("bulk-form") && data.get("action") === "delete";
@@ -615,6 +618,22 @@
     if (button) useMovedAddress(button);
   });
 
+  // The title comes from a remote page; it only fills a text field, which shows it as text.
+  function usePageTitle(button) {
+    const form = button.closest("form");
+    const field = form && form.querySelector('input[name="title"]');
+    if (!field) return;
+    field.value = button.dataset.siteTitle;
+    syncSubmitState(form);
+    button.hidden = true;
+    field.focus();
+  }
+
+  document.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest("button[data-site-title]") : null;
+    if (button) usePageTitle(button);
+  });
+
   document.addEventListener("click", (event) => {
     if (wantsBrowserDefault(event)) return;
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
@@ -649,6 +668,7 @@
   function finished(form, submitter, ids, url, data) {
     if (ids.length > 0) return runLinkCheck(form, ids);
     if (form.closest(".inline-form")) return submitInline({ form, url, data });
+    if (form.hasAttribute("data-keep-scroll")) return submitKeepingScroll({ form, url, data });
     if (isBulkDelete(form, data)) return askBulkDelete({ form, submitter, url, data });
     return postForm({ form, submitter, url, data });
   }

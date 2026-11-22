@@ -183,7 +183,7 @@ func TestIconsAllHaveAPathAndRender(t *testing.T) {
 	}
 	for _, name := range []iconName{iconOK, iconBroken, iconRedirected, iconUnknown, iconEdit, iconTrash, iconPlus,
 		iconShuffle, iconSelect, iconAll, iconTagAdd, iconTagRemove, iconLink, iconSearch, iconMenu,
-		iconUpload, iconDownload, iconSignOut, iconSignIn, iconKey, iconUserAdd, iconBan} {
+		iconUpload, iconDownload, iconSignOut, iconSignIn, iconKey, iconUserAdd, iconBan, iconRefresh} {
 		if _, ok := iconPaths[name]; !ok {
 			t.Errorf("icon %q is not drawn", name)
 		}

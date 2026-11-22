@@ -17,6 +17,10 @@ const (
 	maxTitleChars = 300
 	maxNoteChars  = 5000
 	maxTagChars   = 50
+	// A page's own title and description are cut to these, not refused: the
+	// user did not write them.
+	maxSiteTitleChars       = 300
+	maxSiteDescriptionChars = 500
 	// MaxTagsPerBookmark is the most tags one bookmark may carry.
 	MaxTagsPerBookmark = 20
 )
@@ -32,6 +36,18 @@ type Bookmark struct {
 	UpdatedAt int64    `json:"updated_at"`
 	// Link is nil until the link is checked, and again after the URL changes.
 	Link *LinkCheck `json:"link"`
+	// Site is nil until the page's metadata is read, and again after the URL changes.
+	Site *Site `json:"site"`
+}
+
+// Site is what the page itself says, read from its Open Graph tags, or from
+// its <title> and description when it has none. It never replaces the title
+// or the note, which the user owns.
+type Site struct {
+	// Title and Description may be empty, but not both.
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	FetchedAt   int64  `json:"fetched_at"`
 }
 
 // LinkCheck is the result of the last link check.

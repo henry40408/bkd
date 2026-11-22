@@ -33,6 +33,8 @@ func NoticeText(key string) string {
 		return "Bookmark saved."
 	case "bookmark-deleted":
 		return "Bookmark deleted."
+	case "site-refreshed":
+		return "Page details updated."
 	case "settings-saved":
 		return "Settings saved."
 	case "bulk-done":

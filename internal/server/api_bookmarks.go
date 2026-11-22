@@ -110,6 +110,20 @@ func (a *App) handleDeleteBookmark(w http.ResponseWriter, r *http.Request, user 
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (a *App) handleRefreshBookmark(w http.ResponseWriter, r *http.Request, user auth.SessionUser) {
+	id, failure := pathID(r)
+	if failure != nil {
+		failure.write(w)
+		return
+	}
+	refreshed, fault := a.refreshBookmark(r.Context(), user, id)
+	if fault != nil {
+		a.writeAPIError(w, fault)
+		return
+	}
+	writeJSON(w, http.StatusOK, refreshed)
+}
+
 func (a *App) handleTags(w http.ResponseWriter, r *http.Request, user auth.SessionUser) {
 	tags, err := a.bookmarks.TagCounts(r.Context(), user.UserID)
 	if err != nil {

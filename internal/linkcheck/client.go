@@ -153,9 +153,13 @@ func ask(ctx context.Context, client *http.Client, method string, target *url.UR
 	return answer{
 		status:     response.StatusCode,
 		finalURL:   response.Request.URL,
-		challenged: strings.EqualFold(response.Header.Get("Cf-Mitigated"), "challenge"),
+		challenged: isChallenge(response.Header),
 		retryAfter: retryAfter(response.Header.Get("Retry-After")),
 	}, nil
+}
+
+func isChallenge(header http.Header) bool {
+	return strings.EqualFold(header.Get("Cf-Mitigated"), "challenge")
 }
 
 func retryAfter(header string) *time.Duration {
