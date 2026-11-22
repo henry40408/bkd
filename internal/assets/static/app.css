@@ -221,6 +221,7 @@ form.stack { display: grid; gap: var(--sp-3); }
 .import-result { background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius); padding: var(--sp-3) var(--sp-4); overflow-wrap: anywhere; }
 .import-result p { margin-bottom: var(--sp-2); }
 .import-result ul { margin-bottom: var(--sp-2); padding-left: var(--sp-5); list-style: disc; }
+.import-result > :last-child { margin-bottom: 0; }
 main.auth { max-width: none; min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: var(--sp-5); }
 .auth > * { width: min(100%, var(--auth-w)); display: grid; gap: var(--sp-4); }
 .auth h1 { margin: 0; }
