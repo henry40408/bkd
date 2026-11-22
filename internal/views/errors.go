@@ -40,6 +40,9 @@ func NoticeText(key string) string {
 	case "check-incomplete":
 		return "Some links were not checked: a site asked to be left alone, did not answer, " +
 			"or the time ran out. Check them again later."
+	case "read-incomplete":
+		return "Some pages were not read: a site asked to be left alone, did not answer, " +
+			"or the time ran out. Read them again later."
 	case "nothing-selected":
 		return "Tick at least one bookmark first."
 	}

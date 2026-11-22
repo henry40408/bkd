@@ -5,6 +5,8 @@ import (
 	"runtime/debug"
 	"sync"
 	"time"
+
+	"github.com/henry40408/bkd/internal/sitemeta"
 )
 
 const (
@@ -33,6 +35,9 @@ type Checked struct {
 	Backoff *Backoff
 	// Answered: a site replied. A timeout or a failed connection is not an answer.
 	Answered bool
+	// Meta is set by a read that found a page: what the page says about itself.
+	// A read that failed has none, and says why in Verdict.Detail.
+	Meta *sitemeta.Meta
 }
 
 // SkipReason says why a target was not asked.
@@ -79,11 +84,27 @@ func (c *Checker) Start(ctx context.Context, targets []Target) *RunningCheck {
 
 // StartPaced is like Start, and waits pause between two requests to one host.
 func (c *Checker) StartPaced(ctx context.Context, targets []Target, pause time.Duration) *RunningCheck {
+	return c.startRun(ctx, targets, pause, func(ctx context.Context, target Target) Inspection {
+		return c.Inspect(ctx, target.URL, target.UserAgent)
+	})
+}
+
+// StartReads reads the page of every target instead of checking its link, with
+// the pacing, the backoff and the give-up rule of StartPaced. A target whose
+// page was read has Checked.Meta set and an OK verdict; one that could not be
+// read has no Meta and a verdict that is not OK, whose detail says why.
+func (c *Checker) StartReads(ctx context.Context, targets []Target, pause time.Duration) *RunningCheck {
+	return c.startRun(ctx, targets, pause, c.inspectRead)
+}
+
+func (c *Checker) startRun(
+	ctx context.Context, targets []Target, pause time.Duration, inspect func(context.Context, Target) Inspection,
+) *RunningCheck {
 	ctx, cancel := context.WithCancel(ctx)
 	// Every target gets exactly one event, so a sender never blocks and no
 	// goroutine waits for a reader that left.
 	events := make(chan Event, len(targets))
-	shared := hostRun{checker: c, events: events, pause: pause}
+	shared := hostRun{checker: c, events: events, pause: pause, inspect: inspect}
 	slots := make(chan struct{}, maxHostsPerCheck)
 	var workers sync.WaitGroup
 	for host, group := range groupByHost(targets) {
@@ -120,6 +141,8 @@ type hostRun struct {
 	checker *Checker
 	events  chan<- Event
 	pause   time.Duration
+	// inspect asks one target: its link or its page.
+	inspect func(context.Context, Target) Inspection
 	// sent counts the events of this worker's group, so that after a panic
 	// the targets without an event are known. Each worker has its own copy.
 	sent int
@@ -155,7 +178,7 @@ func (r *hostRun) checkHost(ctx context.Context, host string, group []Target) {
 		if i > 0 && !sleep(ctx, r.pause) {
 			return
 		}
-		inspection := r.checker.Inspect(ctx, target.URL, target.UserAgent)
+		inspection := r.inspect(ctx, target)
 		if ctx.Err() != nil {
 			return
 		}
@@ -173,6 +196,7 @@ func (r *hostRun) checkHost(ctx context.Context, host string, group []Target) {
 		}
 		r.send(Event{Checked: &Checked{
 			Target: target, Verdict: inspection.Verdict, Backoff: backoff, Answered: inspection.Answered,
+			Meta: inspection.Meta,
 		}})
 		if reason, stop := skipReason(askedToWait, givesUp); stop {
 			r.skipRest(host, group[i+1:], reason)

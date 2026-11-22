@@ -140,6 +140,7 @@ func (a *App) mountAPI(mux *http.ServeMux) {
 	route("/bookmarks/random", onGet(signedIn(a.handleRandomBookmark)))
 	route("/bookmarks/bulk", onPost(signedIn(a.handleBulkBookmarks)))
 	route("/bookmarks/check", onPost(signedIn(a.handleCheck)))
+	route("/bookmarks/read", onPost(signedIn(a.handleReadPages)))
 	route("/bookmarks/{id}", onPut(signedIn(a.handleUpdateBookmark)), onDelete(signedIn(a.handleDeleteBookmark)))
 	route("/site-preview", onPost(signedIn(a.handleSitePreview)))
 	route("/tags", onGet(signedIn(a.handleTags)))

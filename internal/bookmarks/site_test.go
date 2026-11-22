@@ -80,12 +80,12 @@ func TestValidateCutsOnlyWhatIsOverTheLimitsAndTrimsIt(t *testing.T) {
 	}
 }
 
-func TestUpdateKeepsTheSiteWhileTheURLStaysAndReplacesItWhenTheURLChanges(t *testing.T) {
+func TestUpdateKeepsTheSiteWhenNoneIsSentAndReplacesItWhenTheURLChanges(t *testing.T) {
 	store, pool := newStore(t)
 	user := dbtest.InsertUser(t, pool, "henry")
 	saved := create(t, store, user, withSite(valid(t, "Page"), Site{Title: "Og", Description: "d"}), 100)
 
-	renamed := withSite(valid(t, "Page"), Site{Title: "ignored"})
+	renamed := valid(t, "Page")
 	renamed.Title = "Renamed"
 	kept, _, err := store.Update(bg, UpdateRequest{UserID: user, ID: saved.ID, Bookmark: renamed, Now: 200})
 	if err != nil {
@@ -100,6 +100,49 @@ func TestUpdateKeepsTheSiteWhileTheURLStaysAndReplacesItWhenTheURLChanges(t *tes
 		t.Fatal(err)
 	}
 	assertEqual(t, replaced.Site, &Site{Title: "Moved", Description: "elsewhere"})
+}
+
+// A form that read the page again sends the new details with the unchanged URL.
+// Both columns are replaced together, so a page that lost its description does
+// not keep the one it had.
+func TestUpdateWithTheSameURLReplacesBothSiteColumnsWhenDetailsAreSent(t *testing.T) {
+	cases := []struct {
+		name string
+		sent Site
+	}{
+		{"both", Site{Title: "New", Description: "fresh"}},
+		{"only a title", Site{Title: "New"}},
+		{"only a description", Site{Description: "fresh"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			store, pool := newStore(t)
+			user := dbtest.InsertUser(t, pool, "henry")
+			saved := create(t, store, user, withSite(valid(t, "Page"), Site{Title: "Og", Description: "d"}), 100)
+
+			updated, _, err := store.Update(bg, UpdateRequest{
+				UserID: user, ID: saved.ID, Bookmark: withSite(valid(t, "Page"), c.sent), Now: 200,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertEqual(t, updated.Site, &c.sent)
+		})
+	}
+}
+
+func TestUpdateWithTheSameURLAndNoDetailsLeavesAnUnreadBookmarkUnread(t *testing.T) {
+	store, pool := newStore(t)
+	user := dbtest.InsertUser(t, pool, "henry")
+	saved := create(t, store, user, valid(t, "Page"), 100)
+
+	updated, _, err := store.Update(bg, UpdateRequest{UserID: user, ID: saved.ID, Bookmark: valid(t, "Page"), Now: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Site != nil {
+		t.Fatalf("site = %+v, want none", updated.Site)
+	}
 }
 
 func TestChangingTheURLToAPageThatSaysNothingForgetsTheOldDetails(t *testing.T) {

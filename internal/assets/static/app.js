@@ -6,7 +6,7 @@
   "use strict";
 
   let inFlight = null;
-  // The link check that is running, if any: { controller, done, broken }.
+  // The link check or page read that is running, if any: { stream, controller, done, ... }.
   let checkRun = null;
   // The inline form that is open, if any: { node, opener }.
   let inlinePanel = null;
@@ -133,9 +133,8 @@
     }
   }
 
-  // ---- Link check: live progress over the JSON API ----
+  // ---- Link check and page read: live progress over the JSON API ----
 
-  const CHECK_URL = "/api/bookmarks/check";
   const CHECK_ATTEMPTS = 3;
   const CHECK_RETRY_MS = 1000;
   const SVG_NS = "http://www.w3.org/2000/svg";
@@ -151,10 +150,6 @@
     broken: "Broken link",
     unknown: "Link not confirmed",
   };
-  const CHECK_REFUSALS = {
-    404: "Some of those bookmarks no longer exist.",
-    429: "The last link check is still finishing. Try again in a moment.",
-  };
 
   // A failure whose message is fit to show to the reader.
   class CheckFailed extends Error {}
@@ -163,7 +158,7 @@
 
   // A check that Stop just ended may still hold the user's one slot for a moment, so a
   // 429 is tried again a few times before it is shown.
-  async function openCheck(ids, signal) {
+  async function openCheck(stream, ids, signal) {
     const request = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -172,7 +167,7 @@
       signal,
     };
     for (let attempt = 1; ; attempt++) {
-      const response = await fetch(CHECK_URL, request);
+      const response = await fetch(stream.url, request);
       if (response.status !== 429 || attempt === CHECK_ATTEMPTS) return response;
       await wait(CHECK_RETRY_MS);
     }
@@ -241,7 +236,7 @@
     row.querySelector(".body").append(note);
   }
 
-  function showCheckProgress(form, total, onStop) {
+  function showCheckProgress(form, { label, total }, onStop) {
     const box = document.createElement("p");
     box.className = "check-progress";
     box.setAttribute("role", "status");
@@ -253,7 +248,7 @@
     stop.addEventListener("click", onStop);
     box.append(text, " ", stop);
     form.querySelector(".bulk").append(box);
-    const update = (done) => (text.textContent = `Checking links: ${done} of ${total}`);
+    const update = (done) => (text.textContent = `${label}: ${done} of ${total}`);
     update(0);
     return { update, remove: () => box.remove() };
   }
@@ -263,45 +258,110 @@
     not_answering: "is not answering",
   };
 
+  // How many targets the server has dealt with, however it went.
+  const handled = (run) => run.done + run.failed + run.skipped;
+
   function takeSkipped(run, event, progress) {
     const { reason, host } = JSON.parse(event.data);
     run.skipped += 1;
     run.skips.set(host, SKIP_REASONS[reason] || "was left alone");
-    progress.update(run.done + run.skipped);
+    progress.update(handled(run));
   }
 
-  function takeResult(run, event, progress) {
+  function takeLinkResult(run, event, progress) {
     const { id, link } = JSON.parse(event.data);
     run.done += 1;
     if (link.status === "broken") run.broken += 1;
     showLinkResult(id, link);
-    progress.update(run.done);
+    progress.update(handled(run));
   }
 
-  async function streamCheck(run, ids, progress) {
-    const response = await openCheck(ids, run.controller.signal);
-    if (response.status === 401) {
-      checkRun = null;
-      location.reload();
-      return;
-    }
-    if (!response.ok) throw new CheckFailed(CHECK_REFUSALS[response.status] || "The link check could not run.");
-    for await (const event of serverEvents(response)) {
-      if (event.name === "done") return;
-      if (event.name === "error") throw new CheckFailed("The link check stopped early.");
-      if (event.name === "result") takeResult(run, event, progress);
-      if (event.name === "skipped") takeSkipped(run, event, progress);
-    }
-    throw new CheckFailed("The link check was interrupted.");
+  function takePageRead(run, event, progress) {
+    const { note_filled: noteFilled } = JSON.parse(event.data);
+    run.done += 1;
+    if (noteFilled) run.filled += 1;
+    progress.update(handled(run));
+  }
+
+  function takePageFailed(run, _event, progress) {
+    run.failed += 1;
+    progress.update(handled(run));
+  }
+
+  const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
+
+  // Names the sites that were left alone, after `summary`.
+  function withSkips(run, summary, leftOut) {
+    if (run.skipped === 0) return summary;
+    const sites = Array.from(run.skips, ([host, why]) => `${host} ${why}`).join("; ");
+    return `${summary}. ${sites}, so some ${leftOut}: try again later.`;
   }
 
   function checkSummary(run, total) {
     const count = run.done === total ? `${total}` : `${run.done} of ${total}`;
     const broken = run.broken > 0 ? `: ${run.broken} broken` : "";
-    const summary = `Checked ${count} bookmark${total === 1 ? "" : "s"}${broken}`;
-    if (run.skipped === 0) return summary;
-    const sites = Array.from(run.skips, ([host, why]) => `${host} ${why}`).join("; ");
-    return `${summary}. ${sites}, so some links were left unchecked: try again later.`;
+    return withSkips(run, `Checked ${count} bookmark${total === 1 ? "" : "s"}${broken}`, "links were left unchecked");
+  }
+
+  function readSummary(run, total) {
+    const parts = [`Read ${run.done} of ${plural(total, "page")}`];
+    if (run.filled > 0) parts.push(`${plural(run.filled, "note")} filled`);
+    if (run.failed > 0) parts.push(`${run.failed} could not be read`);
+    return withSkips(run, parts.join(", "), "pages were left unread");
+  }
+
+  // What differs between the two long-running actions of the bulk bar.
+  const STREAMS = new Map([
+    [
+      "check",
+      {
+        url: "/api/bookmarks/check",
+        label: "Checking links",
+        takers: { result: takeLinkResult },
+        summary: checkSummary,
+        refusals: {
+          404: "Some of those bookmarks no longer exist.",
+          429: "The last link check is still finishing. Try again in a moment.",
+        },
+        couldNotRun: "The link check could not run.",
+        stoppedEarly: "The link check stopped early.",
+        interrupted: "The link check was interrupted.",
+      },
+    ],
+    [
+      "read",
+      {
+        url: "/api/bookmarks/read",
+        label: "Reading pages",
+        takers: { result: takePageRead, failed: takePageFailed },
+        summary: readSummary,
+        refusals: {
+          404: "Some of those bookmarks no longer exist.",
+          429: "A link check or another read is still finishing. Try again in a moment.",
+        },
+        couldNotRun: "The pages could not be read.",
+        stoppedEarly: "Reading the pages stopped early.",
+        interrupted: "Reading the pages was interrupted.",
+      },
+    ],
+  ]);
+
+  async function streamCheck(run, ids, progress) {
+    const { stream } = run;
+    const response = await openCheck(stream, ids, run.controller.signal);
+    if (response.status === 401) {
+      checkRun = null;
+      location.reload();
+      return;
+    }
+    if (!response.ok) throw new CheckFailed(stream.refusals[response.status] || stream.couldNotRun);
+    for await (const event of serverEvents(response)) {
+      if (event.name === "done") return;
+      if (event.name === "error") throw new CheckFailed(stream.stoppedEarly);
+      if (event.name === "skipped") takeSkipped(run, event, progress);
+      else if (stream.takers[event.name]) stream.takers[event.name](run, event, progress);
+    }
+    throw new CheckFailed(stream.interrupted);
   }
 
   function showNotice(text) {
@@ -335,29 +395,32 @@
     showNotice(message);
   }
 
-  async function runLinkCheck(form, ids) {
+  async function runStream(form, ids, stream) {
     const run = {
+      stream,
       controller: new AbortController(),
       done: 0,
       broken: 0,
+      filled: 0,
+      failed: 0,
       skipped: 0,
       skips: new Map(),
     };
     checkRun = run;
-    const progress = showCheckProgress(form, ids.length, () => run.controller.abort());
+    const progress = showCheckProgress(form, { label: stream.label, total: ids.length }, () => run.controller.abort());
     let failure = null;
     try {
       await streamCheck(run, ids, progress);
     } catch (error) {
       if (!error || error.name !== "AbortError") {
-        failure = error instanceof CheckFailed ? error.message : "The link check was interrupted.";
+        failure = error instanceof CheckFailed ? error.message : stream.interrupted;
       }
     }
-    // Another page took over while the check ran: it is not this page's to finish.
+    // Another page took over while the run went on: it is not this page's to finish.
     if (checkRun !== run) return;
     checkRun = null;
     progress.remove();
-    await showCheckEnd(ids, failure || checkSummary(run, ids.length));
+    await showCheckEnd(ids, failure || stream.summary(run, ids.length));
   }
 
   // ---- Inline forms: edit and delete open in their row, a bulk delete at the foot of the bulk bar ----
@@ -604,6 +667,7 @@
   const SITE_READING = "Reading the page…";
   const SITE_NOTHING = "The page says nothing about itself.";
   const SITE_UNREACHABLE = "Could not read the page: bkd did not answer.";
+  const SITE_NO_ADDRESS = "There is no web address to read.";
   const SITE_BUSY = "Could not read the page: a link check or another read is running. Try again in a moment.";
 
   // Per form:
@@ -742,6 +806,28 @@
     }, pauseMs);
   }
 
+  // Reads the address in the field again, also when its details are already there or
+  // the last read failed: the page may have changed since, or the failure may be over.
+  // Nothing is saved until the form is sent.
+  function rereadSiteDetails(form) {
+    const state = siteStateOf(form);
+    if (state.run) return;
+    clearTimeout(state.timer);
+    state.timer = null;
+    const address = readableAddress(form);
+    if (!address) {
+      setSiteStatus(form, SITE_NO_ADDRESS);
+      return;
+    }
+    state.failed = null;
+    state.run = runSiteRead(form, address);
+  }
+
+  document.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest("button[data-site-reread]") : null;
+    if (button && button.form) rereadSiteDetails(button.form);
+  });
+
   const urlFieldOf = (event) =>
     event.target instanceof HTMLInputElement && event.target.name === "url" && event.target.form ? event.target : null;
 
@@ -836,7 +922,7 @@
   });
 
   function finished(form, submitter, ids, url, data) {
-    if (ids.length > 0) return runLinkCheck(form, ids);
+    if (ids.length > 0) return runStream(form, ids, STREAMS.get(data.get("action")));
     if (form.closest(".inline-form")) return submitInline({ form, url, data });
     if (isBulkDelete(form, data)) return askBulkDelete({ form, submitter, url, data });
     return postForm({ form, submitter, url, data });
@@ -869,7 +955,7 @@
     }
     // A second Enter or click while the first request runs would repeat the action.
     if (form.getAttribute("aria-busy") === "true") return;
-    const ids = data.get("action") === "check" ? tickedIds(data) : [];
+    const ids = STREAMS.has(data.get("action")) ? tickedIds(data) : [];
     setBusy(form, submitter, true);
     finished(form, submitter, ids, url, data).finally(() => setBusy(form, submitter, false));
   });

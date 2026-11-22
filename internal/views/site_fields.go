@@ -29,13 +29,16 @@ func noteField(value string, site SiteDetails, rows string) node {
 	return field("Note ", el("textarea", []attr{a("name", "note"), a("rows", rows), when(site.Description != "", a("placeholder", site.Description))}, text(value)))
 }
 
-// siteFields carries the page's details with the form, and holds the line where
-// the script says how reading the page went.
+// siteFields carries the page's details with the form, offers to read the page
+// again (a script reads it, so the button stays hidden without one), and holds
+// the line where the script says how reading the page went.
 func siteFields(site SiteDetails) node {
 	return group(
 		hidden("site_url", site.URL),
 		hidden("site_title", site.Title),
 		hidden("site_description", site.Description),
+		el("button", []attr{classes("btn", "quiet"), a("type", "button"), a("data-site-reread", ""), flag("data-script-only"), flag("hidden")},
+			text("Read the page again")),
 		el("p", []attr{classes("hint"), a("role", "status"), a("data-site-status", ""), flag("hidden")}),
 	)
 }

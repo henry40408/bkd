@@ -315,6 +315,42 @@ func TestEditFormKeepsTheStoredDetailsWhileTheAddressStays(t *testing.T) {
 	}
 }
 
+// "Read the page again" sends the new details with the address the bookmark has.
+func TestEditFormReplacesTheStoredDetailsWhenThePageWasReadAgain(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("henry", false)
+	address := "https://example.com/a"
+	app.saveThroughForm(token, fieldsOf(append([]string{"url", address, "title", "Mine", "note", "", "tags", ""}, siteFields(address)...)...))
+
+	r := app.send(formPost("/bookmarks/1/edit", fieldsOf("url", address, "title", "Mine", "note", "", "tags", "", "back", "/",
+		"site_url", address, "site_title", "Newer title", "site_description", "Newer description")).as(token))
+	assertStatus(t, r, http.StatusSeeOther)
+	saved := storedBookmark(t, app, token, 1)
+	got := saved["site"].(map[string]any)
+	if got["title"] != "Newer title" || got["description"] != "Newer description" {
+		t.Fatalf("site = %v", got)
+	}
+	// The blank note is filled from the new description, as on any save.
+	if saved["note"] != "Newer description" {
+		t.Fatalf("note = %v", saved["note"])
+	}
+}
+
+func TestEditFormIgnoresDetailsReadFromAnotherAddressWhileTheAddressStays(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("henry", false)
+	address := "https://example.com/a"
+	app.saveThroughForm(token, fieldsOf(append([]string{"url", address, "title", "Mine", "note", "", "tags", ""}, siteFields(address)...)...))
+
+	r := app.send(formPost("/bookmarks/1/edit", fieldsOf("url", address, "title", "Mine", "note", "", "tags", "", "back", "/",
+		"site_url", "https://example.com/elsewhere", "site_title", "Not mine", "site_description", "Not mine")).as(token))
+	assertStatus(t, r, http.StatusSeeOther)
+	got := storedBookmark(t, app, token, 1)["site"].(map[string]any)
+	if got["title"] != "Og title" || got["description"] != "Og description" {
+		t.Fatalf("site = %v", got)
+	}
+}
+
 func TestEditFormReplacesTheDetailsWhenTheAddressChanges(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)

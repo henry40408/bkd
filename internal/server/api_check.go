@@ -34,48 +34,76 @@ type skippedLink struct {
 // answering), then done. Each result is saved as it arrives, so a client that
 // stops early keeps what was already found.
 func (a *App) handleCheck(w http.ResponseWriter, r *http.Request, user auth.SessionUser) {
+	targets, release, ok := a.claimTargets(w, r, user)
+	if !ok {
+		return
+	}
+	defer release()
+	a.streamEvents(r.Context(), w, eventStream{
+		start: func(ctx context.Context) *linkcheck.RunningCheck { return a.linkChecker.Start(ctx, targets) },
+		send: func(ctx context.Context, stream *sseWriter, event linkcheck.Event) bool {
+			return a.sendCheckEvent(ctx, stream, user, event)
+		},
+	})
+}
+
+// claimTargets reads the ids the client sent, takes the user's one slot for
+// outgoing requests and looks the bookmarks up. When ok is false the answer was
+// written; otherwise the caller must call release when the work is over.
+func (a *App) claimTargets(
+	w http.ResponseWriter, r *http.Request, user auth.SessionUser,
+) (targets []linkcheck.Target, release func(), ok bool) {
 	var request checkRequest
 	if failure := decodeJSON(r, &request); failure != nil {
 		failure.write(w)
-		return
+		return nil, nil, false
 	}
 	if request.IDs == nil {
 		missingField("ids").write(w)
-		return
+		return nil, nil, false
 	}
 	valid, err := linkcheck.CheckInput{IDs: *request.IDs}.Validate()
 	if err != nil {
 		a.writeAPIError(w, validationFault(err))
-		return
+		return nil, nil, false
 	}
-	release, ok := a.activeChecks.Start(user.UserID)
-	if !ok {
+	release, taken := a.activeChecks.Start(user.UserID)
+	if !taken {
 		a.writeAPIError(w, tooManyRequests(checkRetryAfter))
-		return
+		return nil, nil, false
 	}
-	defer release()
 	targets, found, err := a.linkStore.Targets(r.Context(), user.UserID, valid)
 	if err != nil {
+		release()
 		a.writeAPIError(w, internal(err))
-		return
+		return nil, nil, false
 	}
 	if !found {
+		release()
 		a.writeAPIError(w, notFound())
-		return
+		return nil, nil, false
 	}
-	a.streamCheck(r.Context(), w, user, targets)
+	return targets, release, true
 }
 
-// streamCheck returns when the check is over or the client left. Either way the
-// check is cancelled, so no request outlives the stream.
-func (a *App) streamCheck(ctx context.Context, w http.ResponseWriter, user auth.SessionUser, targets []linkcheck.Target) {
+// eventStream is what differs between the stream of a link check and that of a
+// page read: how the run starts and what becomes of each event.
+type eventStream struct {
+	start func(context.Context) *linkcheck.RunningCheck
+	// send reports false when the stream must end.
+	send func(context.Context, *sseWriter, linkcheck.Event) bool
+}
+
+// streamEvents returns when the run is over or the client left. Either way the
+// run is cancelled, so no request outlives the stream.
+func (a *App) streamEvents(ctx context.Context, w http.ResponseWriter, source eventStream) {
 	stream, err := startSSE(w)
 	if err != nil {
 		return
 	}
-	ctx, endCheck := a.endsWhenStopping(ctx)
-	defer endCheck()
-	running := a.linkChecker.Start(ctx, targets)
+	ctx, endRun := a.endsWhenStopping(ctx)
+	defer endRun()
+	running := source.start(ctx)
 	defer running.Cancel()
 	ticker := time.NewTicker(a.keepAlive)
 	defer ticker.Stop()
@@ -94,7 +122,7 @@ func (a *App) streamCheck(ctx context.Context, w http.ResponseWriter, user auth.
 				}
 				return
 			}
-			if !a.sendCheckEvent(ctx, stream, user, event) {
+			if !source.send(ctx, stream, event) {
 				return
 			}
 		}

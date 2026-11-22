@@ -18,6 +18,7 @@ const (
 	iconTagAdd     iconName = "tagAdd"
 	iconTagRemove  iconName = "tagRemove"
 	iconLink       iconName = "link"
+	iconPage       iconName = "page"
 	iconSearch     iconName = "search"
 	iconMenu       iconName = "menu"
 	iconUpload     iconName = "upload"
@@ -43,6 +44,7 @@ var iconPaths = map[iconName]string{
 	iconAll:        "M1.5 8.5l2.8 2.8L10 4.8M7.8 11.3l6.2-6.5",
 	iconTagAdd:     "M2 3h4.5l5.5 5.5-4.5 4.5L2 7.5zM4.6 5.6v.1M12.5 1.5v4M10.5 3.5h4",
 	iconTagRemove:  "M2 3h4.5l5.5 5.5-4.5 4.5L2 7.5zM4.6 5.6v.1M10.5 3.5h4",
+	iconPage:       "M4 2h5l3 3v9H4zM9 2v3h3M6 8h4M6 10.5h4",
 	iconLink:       "M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2-2a2.6 2.6 0 0 0-3.7-3.7l-.8.8M9.2 6.8a2.6 2.6 0 0 0-3.7 0l-2 2a2.6 2.6 0 0 0 3.7 3.7l.8-.8",
 	iconSearch:     "M7 2.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9zM10.4 10.4l3.1 3.1",
 	iconMenu:       "M2.5 4h11M2.5 8h11M2.5 12h11",
