@@ -63,14 +63,16 @@ func (s *Store) Targets(ctx context.Context, userID int64, request ValidCheck) (
 		args = append(args, id)
 	}
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, url FROM bookmarks WHERE user_id = ? AND id IN ("+placeholders+")", args...)
+		`SELECT b.id, b.url, u.link_check_user_agent
+		 FROM bookmarks b JOIN users u ON u.id = b.user_id
+		 WHERE b.user_id = ? AND b.id IN (`+placeholders+")", args...)
 	if err != nil {
 		return nil, false, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var target Target
-		if err := rows.Scan(&target.ID, &target.URL); err != nil {
+		if err := rows.Scan(&target.ID, &target.URL, &target.UserAgent); err != nil {
 			return nil, false, err
 		}
 		targets = append(targets, target)

@@ -123,9 +123,10 @@ func cooldownFor(strikes int, retryAfter *time.Duration) time.Duration {
 
 // due is a bookmark that is time to check.
 type due struct {
-	id     int64
-	userID int64
-	url    string
+	id        int64
+	userID    int64
+	url       string
+	userAgent string
 }
 
 // runRound checks the next batch and returns how many bookmarks got a result.
@@ -138,7 +139,7 @@ func (w *worker) runRound(ctx context.Context) (int, error) {
 	targets := make([]linkcheck.Target, len(batch))
 	for i, item := range batch {
 		owners[item.id] = item.userID
-		targets[i] = linkcheck.Target{ID: item.id, URL: item.url}
+		targets[i] = linkcheck.Target{ID: item.id, URL: item.url, UserAgent: item.userAgent}
 	}
 	running := w.config.Checker.StartPaced(ctx, targets, sameHostPause)
 	defer running.Cancel()
@@ -232,8 +233,8 @@ func (w *worker) dueNow(ctx context.Context) ([]due, error) {
 // not use up every round.
 func dueBookmarks(ctx context.Context, pool *sql.DB, now time.Time, limit int) ([]due, error) {
 	rows, err := pool.QueryContext(ctx,
-		`SELECT id, user_id, url FROM (
-		     SELECT b.id, b.user_id, b.url, b.link_checked_at,
+		`SELECT id, user_id, url, user_agent FROM (
+		     SELECT b.id, b.user_id, b.url, u.link_check_user_agent AS user_agent, b.link_checked_at,
 		            ROW_NUMBER() OVER (
 		                PARTITION BY b.user_id
 		                ORDER BY COALESCE(b.link_checked_at, 0), b.id
@@ -254,7 +255,7 @@ func dueBookmarks(ctx context.Context, pool *sql.DB, now time.Time, limit int) (
 	var found []due
 	for rows.Next() {
 		var item due
-		if err := rows.Scan(&item.id, &item.userID, &item.url); err != nil {
+		if err := rows.Scan(&item.id, &item.userID, &item.url, &item.userAgent); err != nil {
 			return nil, err
 		}
 		found = append(found, item)

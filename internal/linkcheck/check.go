@@ -104,9 +104,10 @@ func New(config Config) *Checker {
 	}
 }
 
-// Inspect asks one address. The request slot is across all users: a few slow
-// sites must not tie up the server.
-func (c *Checker) Inspect(ctx context.Context, address string) Inspection {
+// Inspect asks one address, saying userAgent is asking; empty means
+// DefaultUserAgent. The request slot is across all users: a few slow sites must
+// not tie up the server.
+func (c *Checker) Inspect(ctx context.Context, address, userAgent string) Inspection {
 	target, err := url.Parse(address)
 	if err != nil || target.Scheme == "" {
 		return withoutBackoff(Verdict{StatusUnknown, detailNotValid})
@@ -123,11 +124,14 @@ func (c *Checker) Inspect(ctx context.Context, address string) Inspection {
 	// HEAD and the GET after it share one budget, so a slow site costs 10 seconds, not 20.
 	ctx, cancel := context.WithTimeout(ctx, c.budget)
 	defer cancel()
-	return c.request(ctx, target)
+	if userAgent == "" {
+		userAgent = DefaultUserAgent()
+	}
+	return c.request(ctx, target, userAgent)
 }
 
-func (c *Checker) request(ctx context.Context, target *url.URL) Inspection {
-	reply, err := ask(ctx, c.client, http.MethodHead, target)
+func (c *Checker) request(ctx context.Context, target *url.URL, userAgent string) Inspection {
+	reply, err := ask(ctx, c.client, question{method: http.MethodHead, target: target, userAgent: userAgent})
 	if err == nil && reply.isFinal() {
 		return fromAnswer(target, reply)
 	}
@@ -136,7 +140,7 @@ func (c *Checker) request(ctx context.Context, target *url.URL) Inspection {
 		return fromError(err)
 	}
 	// Many servers refuse or mishandle HEAD, so anything else is confirmed with GET.
-	reply, err = ask(ctx, c.client, http.MethodGet, target)
+	reply, err = ask(ctx, c.client, question{method: http.MethodGet, target: target, userAgent: userAgent})
 	if err != nil {
 		return fromError(err)
 	}

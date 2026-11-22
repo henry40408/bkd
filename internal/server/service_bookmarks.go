@@ -8,6 +8,7 @@ import (
 	"github.com/henry40408/bkd/internal/auth"
 	"github.com/henry40408/bkd/internal/bookmarks"
 	"github.com/henry40408/bkd/internal/importer"
+	"github.com/henry40408/bkd/internal/linkcheck"
 	"github.com/henry40408/bkd/internal/users"
 )
 
@@ -79,21 +80,44 @@ func (a *App) bulkBookmarks(ctx context.Context, user auth.SessionUser, input bo
 	return changed, nil
 }
 
-func (a *App) setLinkCheckEnabled(ctx context.Context, user auth.SessionUser, enabled bool) *apiError {
-	if err := users.SetLinkCheckEnabled(ctx, a.db, user.UserID, enabled); err != nil {
-		return internal(err)
-	}
-	a.logger.Info("background link check setting changed",
-		slog.Int64("user_id", user.UserID), slog.Bool("enabled", enabled))
-	return nil
+// linkCheckChange is a request to change a user's link check settings. A nil
+// UserAgent leaves it as it is, so a client that only knows the first setting
+// keeps working.
+type linkCheckChange struct {
+	Enabled   bool
+	UserAgent *string
 }
 
-func (a *App) linkCheckEnabled(ctx context.Context, user auth.SessionUser) (bool, *apiError) {
+// saveLinkCheckSettings answers the settings as stored. The User-Agent is
+// checked before anything is written and both settings go in one statement,
+// so a refusal or a database failure changes nothing.
+func (a *App) saveLinkCheckSettings(ctx context.Context, user auth.SessionUser, change linkCheckChange) (settingsView, *apiError) {
+	stored := users.LinkCheckChange{Enabled: change.Enabled}
+	if change.UserAgent != nil {
+		agent, err := linkcheck.ValidateUserAgent(*change.UserAgent)
+		if err != nil {
+			return settingsView{}, validationFault(err)
+		}
+		stored.UserAgent = &agent
+	}
+	if err := users.SetLinkCheck(ctx, a.db, user.UserID, stored); err != nil {
+		return settingsView{}, internal(err)
+	}
+	a.logger.Info("link check settings changed", slog.Int64("user_id", user.UserID),
+		slog.Bool("enabled", change.Enabled), slog.Bool("user_agent_changed", stored.UserAgent != nil))
+	return a.linkCheckSettings(ctx, user)
+}
+
+func (a *App) linkCheckSettings(ctx context.Context, user auth.SessionUser) (settingsView, *apiError) {
 	enabled, err := users.LinkCheckEnabled(ctx, a.db, user.UserID)
 	if err != nil {
-		return false, internal(err)
+		return settingsView{}, internal(err)
 	}
-	return enabled, nil
+	agent, err := users.LinkCheckUserAgent(ctx, a.db, user.UserID)
+	if err != nil {
+		return settingsView{}, internal(err)
+	}
+	return settingsView{LinkCheckEnabled: enabled, LinkCheckUserAgent: agent}, nil
 }
 
 func (a *App) importBookmarks(ctx context.Context, user auth.SessionUser, html string) (importer.Report, *apiError) {

@@ -20,7 +20,7 @@ func loopbackChecker(timeout time.Duration) *Checker {
 
 func inspect(t *testing.T, checker *Checker, address string) Inspection {
 	t.Helper()
-	return checker.Inspect(context.Background(), address)
+	return checker.Inspect(context.Background(), address, "")
 }
 
 func assertVerdict(t *testing.T, got Inspection, status Status, detail string) {
@@ -301,7 +301,7 @@ func TestACanceledCallerEndsTheRequest(t *testing.T) {
 	time.AfterFunc(50*time.Millisecond, cancel)
 
 	started := time.Now()
-	loopbackChecker(0).Inspect(ctx, server.URL)
+	loopbackChecker(0).Inspect(ctx, server.URL, "")
 	if time.Since(started) > 2*time.Second {
 		t.Fatal("cancel did not end the request")
 	}
