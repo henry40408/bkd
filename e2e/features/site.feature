@@ -51,7 +51,8 @@ Feature: Page details
     Given I have the bookmark "https://example.test/read" titled "Mine" whose page says "Their title" and "What the page says about itself"
     When I open the site
     And I start editing "Mine"
-    And I read the page again in the edit form
+    Then the read again button of the edit form is no wider than its text
+    When I read the page again in the edit form
     Then the edit form says "Could not read the page"
     And the "title" field of the edit form shows "Their title" as its placeholder
     And the "note" field of the edit form shows "What the page says about itself" as its placeholder
@@ -60,6 +61,7 @@ Feature: Page details
     When I fill the add form with the URL "http://127.0.0.1:1/page" and the title ""
     Then the add form says "Could not read the page: Address is not public"
     And the page has asked the server to read an address 1 time
+    And the read again button of the add form is no wider than its text
     When I read the page again in the add form
     Then the page has asked the server to read an address 2 times
     And the add form says "Could not read the page: Address is not public"

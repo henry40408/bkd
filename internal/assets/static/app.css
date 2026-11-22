@@ -124,7 +124,7 @@ details.add[open] { flex: 1 0 100%; }
 .active { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
 .chip { display: inline-flex; gap: var(--sp-2); align-items: center; min-height: var(--sp-6); padding: 0 var(--sp-3); border: 2px solid var(--ribbon); border-radius: var(--radius-pill); background: var(--sheet); font-weight: var(--strong); text-decoration: none; }
 .hint.moved, .hint[data-site-status] { overflow-wrap: anywhere; }
-form .btn[data-moved-to] { justify-self: start; }
+form .btn[data-moved-to], form .btn[data-site-reread] { justify-self: start; }
 
 /* ---- Panels (add form, random pick, inline edit, confirm) ---- */
 .panel, .inline-form { background: var(--sheet); border: 1px solid var(--rule); border-left: 4px solid var(--ribbon); border-radius: 0 var(--radius) var(--radius) 0; padding: var(--sp-4); margin: var(--sp-3) 0; display: grid; gap: var(--sp-3); }
