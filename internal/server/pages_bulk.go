@@ -105,12 +105,39 @@ func (a *App) pageBulk(w http.ResponseWriter, r *http.Request, user auth.Session
 	if request.action == "delete" && !request.confirmed {
 		return a.confirmBulkDelete(w, r, user, request)
 	}
-	notice, fault := a.runBulk(r.Context(), user, request)
-	if fault == nil {
-		redirectWithNotice(w, request.view.WithoutSelect().Href(), notice)
-		return nil
+	outcome, fault := a.runBulk(r.Context(), user, request)
+	if fault != nil {
+		return a.bulkRefused(w, r, user, request, fault)
 	}
-	return a.bulkRefused(w, r, user, request, fault)
+	if len(outcome.unread) > 0 {
+		return a.bulkUnread(w, r, user, request, outcome.unread)
+	}
+	redirectWithNotice(w, request.view.WithoutSelect().Href(), outcome.notice)
+	return nil
+}
+
+// bulkOutcome is what a bulk action leaves to show: the notice for the list after
+// a redirect, or, when a read did not get to some pages, those rows.
+type bulkOutcome struct {
+	notice string
+	unread []int64
+}
+
+// bulkUnread shows the list again in select mode with only the pages a read did
+// not get to ticked. A redirect cannot carry the rows, and the ticks tell which
+// pages they are without a script, where there is no progress to watch.
+func (a *App) bulkUnread(w http.ResponseWriter, r *http.Request, user auth.SessionUser, request bulkRequest, unread []int64) *pageError {
+	bulk := views.BulkState{Selected: unread, Tags: request.tags, Error: unreadPagesMessage(len(unread))}
+	return a.writeListPage(w, r, http.StatusOK, user, listContext{view: request.view, bulk: bulk})
+}
+
+func unreadPagesMessage(count int) string {
+	subject := strconv.Itoa(count) + " pages were"
+	if count == 1 {
+		subject = "1 page was"
+	}
+	return subject + " not read: a page could not be read, a site asked to be left alone or did not answer, " +
+		"or the time ran out. Only the pages that were not read stay ticked, so that you can read them again."
 }
 
 // bulkRefused shows the list again in select mode, with the same rows ticked and
@@ -141,8 +168,8 @@ func (a *App) confirmBulkDelete(w http.ResponseWriter, r *http.Request, user aut
 	return nil
 }
 
-// runBulk does the action and returns the notice to show afterwards.
-func (a *App) runBulk(ctx context.Context, user auth.SessionUser, request bulkRequest) (string, *apiError) {
+// runBulk does the action and returns what to show afterwards.
+func (a *App) runBulk(ctx context.Context, user auth.SessionUser, request bulkRequest) (bulkOutcome, *apiError) {
 	switch request.action {
 	case "check":
 		return a.runPosted(ctx, user, request.ids, a.linkCheckRun())
@@ -151,19 +178,19 @@ func (a *App) runBulk(ctx context.Context, user auth.SessionUser, request bulkRe
 	}
 	input, ok := bulkInput(request)
 	if !ok {
-		return "", badRequest("Choose an action.")
+		return bulkOutcome{}, badRequest("Choose an action.")
 	}
 	changed, fault := a.bulkBookmarks(ctx, user, input)
 	if fault != nil && fault.status == http.StatusNotFound {
-		return "", staleSelection()
+		return bulkOutcome{}, staleSelection()
 	}
 	if fault != nil {
-		return "", fault
+		return bulkOutcome{}, fault
 	}
 	if input.Action == bookmarks.BulkRemoveTags && changed == 0 {
-		return "", badRequest("None of the selected bookmarks has that tag.")
+		return bulkOutcome{}, badRequest("None of the selected bookmarks has that tag.")
 	}
-	return "bulk-done", nil
+	return bulkOutcome{notice: "bulk-done"}, nil
 }
 
 func bulkInput(request bulkRequest) (bookmarks.BulkInput, bool) {
@@ -194,6 +221,9 @@ type postedRun struct {
 	store func(context.Context, auth.SessionUser, linkcheck.Checked) error
 	// incomplete is the notice when a target was skipped or the time ran out.
 	incomplete string
+	// showsUnread is set for a read, which shows the pages it did not read as
+	// still ticked instead of giving the incomplete notice.
+	showsUnread bool
 }
 
 func (a *App) linkCheckRun() postedRun {
@@ -218,65 +248,90 @@ func (a *App) pageReadRun() postedRun {
 			_, err := a.storeRead(ctx, user, checked)
 			return err
 		},
-		incomplete: "read-incomplete",
+		showsUnread: true,
 	}
 }
 
 // runPosted waits for every check or read to finish and then shows the list again
-// with the results, as there is no live progress without a script. The notice says
-// whether some targets were left out: their site asked to be left alone, or the
-// time ran out.
-func (a *App) runPosted(ctx context.Context, user auth.SessionUser, ids []int64, run postedRun) (string, *apiError) {
+// with the results, as there is no live progress without a script. A check says
+// whether some links were left out: their site asked to be left alone, or the
+// time ran out. A read gives back the pages it did not read, whatever the reason.
+func (a *App) runPosted(ctx context.Context, user auth.SessionUser, ids []int64, run postedRun) (bulkOutcome, *apiError) {
 	valid, err := linkcheck.CheckInput{IDs: ids}.Validate()
 	if err != nil {
-		return "", validationFault(err)
+		return bulkOutcome{}, validationFault(err)
 	}
 	release, ok := a.activeChecks.Start(user.UserID)
 	if !ok {
-		return "", tooManyRequests(checkRetryAfter)
+		return bulkOutcome{}, tooManyRequests(checkRetryAfter)
 	}
 	defer release()
 	targets, found, err := a.linkStore.Targets(ctx, user.UserID, valid)
 	if err != nil {
-		return "", internal(err)
+		return bulkOutcome{}, internal(err)
 	}
 	if !found {
-		return "", staleSelection()
+		return bulkOutcome{}, staleSelection()
 	}
-	complete, err := a.collectRun(ctx, user, targets, run)
+	result, err := a.collectRun(ctx, user, targets, run)
 	if err != nil {
-		return "", internal(err)
+		return bulkOutcome{}, internal(err)
 	}
-	if !complete {
-		return run.incomplete, nil
+	if run.showsUnread {
+		return bulkOutcome{notice: "bulk-done", unread: result.unreadOf(targets)}, nil
 	}
-	return "bulk-done", nil
+	if !result.complete {
+		return bulkOutcome{notice: run.incomplete}, nil
+	}
+	return bulkOutcome{notice: "bulk-done"}, nil
 }
 
-// collectRun stores each result as it arrives. It returns false when a target
-// was skipped or the time limit ended the wait.
-func (a *App) collectRun(ctx context.Context, user auth.SessionUser, targets []linkcheck.Target, run postedRun) (bool, error) {
+// runResult is what a run came to.
+type runResult struct {
+	// complete is false when a target was skipped or the time limit ended the wait.
+	complete bool
+	// read holds the targets whose page was read. A link check reads none.
+	read map[int64]struct{}
+}
+
+// unreadOf lists the targets whose page was not read, in the order they were asked.
+func (r runResult) unreadOf(targets []linkcheck.Target) []int64 {
+	var unread []int64
+	for _, target := range targets {
+		if _, read := r.read[target.ID]; !read {
+			unread = append(unread, target.ID)
+		}
+	}
+	return unread
+}
+
+// collectRun stores each result as it arrives.
+func (a *App) collectRun(ctx context.Context, user auth.SessionUser, targets []linkcheck.Target, run postedRun) (runResult, error) {
 	ctx, endRun := a.endsWhenStopping(ctx)
 	defer endRun()
 	waitCtx, cancel := context.WithTimeout(ctx, a.checkLimit)
 	defer cancel()
 	running := run.start(waitCtx, targets)
 	defer running.Cancel()
-	complete := true
+	result := runResult{complete: true, read: map[int64]struct{}{}}
 	for {
 		select {
 		case <-waitCtx.Done():
-			return false, nil
+			result.complete = false
+			return result, nil
 		case event, open := <-running.Events:
 			if !open {
-				return complete, nil
+				return result, nil
 			}
 			if event.Skipped != nil {
-				complete = false
+				result.complete = false
 				continue
 			}
 			if err := run.store(ctx, user, *event.Checked); err != nil {
-				return false, err
+				return runResult{}, err
+			}
+			if event.Checked.Meta != nil {
+				result.read[event.Checked.Target.ID] = struct{}{}
 			}
 		}
 	}

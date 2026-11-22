@@ -131,7 +131,7 @@ func TestNoticeTextKnownKeysHaveDistinctText(t *testing.T) {
 	keys := []string{
 		"password-changed", "session-ended", "others-ended", "user-changed", "confirmed",
 		"bookmark-saved", "bookmark-deleted", "settings-saved", "bulk-done", "check-incomplete",
-		"read-incomplete", "nothing-selected",
+		"nothing-selected",
 	}
 	seen := map[string]string{}
 	for _, key := range keys {
