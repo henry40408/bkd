@@ -103,8 +103,8 @@ func (a *App) saveLinkCheckSettings(ctx context.Context, user auth.SessionUser, 
 	if err := users.SetLinkCheck(ctx, a.db, user.UserID, stored); err != nil {
 		return settingsView{}, internal(err)
 	}
-	a.logger.Info("link check settings changed", slog.Int64("user_id", user.UserID),
-		slog.Bool("enabled", change.Enabled), slog.Bool("user_agent_changed", stored.UserAgent != nil))
+	a.logger.Info("link check settings changed",
+		slog.Int64("user_id", user.UserID), slog.Bool("enabled", change.Enabled))
 	return a.linkCheckSettings(ctx, user)
 }
 
