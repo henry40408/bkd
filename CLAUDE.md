@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## Overview
 
-bkd is a single-binary, multi-user bookmark manager (Go, standard library `net/http`, pure-Go SQLite): a web front end rendered on the server, a JSON API under `/api`, a link checker, browser bookmark import and export, and sign-in through a reverse proxy (forward auth). It was rewritten from Rust; the Rust server's behaviour was the specification; the fixtures captured from it that remain are listed under Tests. `ARCHITECTURE.md` describes the design in depth and the README is the user documentation; read the section of `ARCHITECTURE.md` for the area you touch before changing security-related code.
+bkd is a single-binary, multi-user bookmark manager (Go, standard library `net/http`, pure-Go SQLite): a web front end rendered on the server, a JSON API under `/api`, a link checker, browser bookmark import and export, and sign-in through a reverse proxy (forward auth). It was rewritten from Rust; the Rust server's behaviour was the specification; the values captured from it that remain are listed under Tests. `ARCHITECTURE.md` describes the design in depth and the README is the user documentation; read the section of `ARCHITECTURE.md` for the area you touch before changing security-related code.
 
 ## Commands
 
@@ -48,11 +48,10 @@ A change to what the site renders (`internal/views/`, `internal/assets/static/`)
 ### Tests
 
 - Unit and integration tests sit beside the code. `internal/dbtest.Open` gives a throwaway migrated database; `internal/server/harness_test.go` builds the app with `httptest`.
-- Fixtures captured from the last Rust server are never regenerated from Go output; change one only on purpose and say why in the commit message:
-  - `internal/db/testdata/`: a database created by the Rust server, its schema and its migration records; the store must open it unchanged.
-  - `internal/auth/testdata/rust-phc.txt`: password hashes from the Rust server that must verify.
-  - `internal/search/testdata/search_syntax.json`: search syntax cases from the Rust parser.
-  - `cmd/bkd/testdata/help.txt`: the Rust `--help` text, for reference.
+- There are no `testdata/` directories: every expected value is written in the test that uses it. Values captured from the last Rust server are never regenerated from Go output; change one only on purpose and say why in the commit message:
+  - `internal/db/migrate_test.go`: `rustMigrations` (sqlx's five `_sqlx_migrations` rows with their SHA-384 checksums), `rustSchema` (what the Rust migrations left in `sqlite_master`, byte for byte) and `rustRows` (the migration records with sqlx's `installed_on` and `execution_time`, plus some data). `createRustDatabase` builds a Rust-era database from them; the store must open it unchanged.
+  - `internal/auth/password_test.go`: `rustPasswordVectors`, password hashes from the Rust server that must verify.
+  - `internal/search/search_test.go`: `TestParseAgreesWithTheRustParser`, the search syntax cases from the Rust parser.
 - `cmd/bkd/main_test.go` builds the binary once in `TestMain` and `exec`s it. Read the listening address from the log line `listening on http://<addr>`.
 
 ## Architecture
@@ -118,7 +117,7 @@ The image is `gcr.io/distroless/static-debian12:nonroot` (uid 65532; existing vo
 ## Conventions
 
 - `go.mod` is the only source of the Go version (`go` and `toolchain` lines); `e2e/go.mod` mirrors those two lines (CI checks it).
-- Keep API error texts and statuses compatible with the fixtures when touching handlers.
+- Keep API error texts and statuses compatible with the Rust server (the expected values in the tests) when touching handlers.
 - GitHub Actions are pinned by commit SHA with the tag as a trailing comment (`uses: owner/repo@<sha> # v1.2.3`).
 
 ## Accepted differences from the Rust server

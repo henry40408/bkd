@@ -1,10 +1,8 @@
 package auth
 
 import (
-	"bufio"
 	"context"
 	"errors"
-	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -94,33 +92,22 @@ func TestPasswordMessagesAreVerbatim(t *testing.T) {
 	}
 }
 
-func TestGoVerifiesEveryHashTheRustVersionWrote(t *testing.T) {
-	file, err := os.Open("testdata/rust-phc.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = file.Close() }()
+// rustPasswordVectors are hashes the Rust server wrote. They are never
+// regenerated from Go output.
+var rustPasswordVectors = []struct{ password, stored string }{
+	{"correct horse battery", "$argon2id$v=19$m=19456,t=2,p=1$plJ2HcKvQ8IC5FndOHYrdQ$59Z60GrXjGgWM5zZu9Hd6Un2YpIW1XrJIytYfB5r3vM"},
+	{"sturdy umbrella pass", "$argon2id$v=19$m=19456,t=2,p=1$Zg/+0OcDGvaRLCXwODjOVw$icdzQnw1S4M7dZhJGhcQNTc6Bo9uCPv9k0+F6G4RUPM"},
+	{"violet river lantern", "$argon2id$v=19$m=19456,t=2,p=1$dt899HVrkYZEmViQWmaJuw$oy++/tNoseStDzIKKUEeExpCcprspQextR6lIZhtkPo"},
+}
 
-	checked := 0
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		password, stored, found := strings.Cut(scanner.Text(), "\t")
-		if !found {
-			t.Fatalf("line %q has no tab", scanner.Text())
+func TestGoVerifiesEveryHashTheRustVersionWrote(t *testing.T) {
+	for _, vector := range rustPasswordVectors {
+		if !verifyPassword(vector.password, vector.stored) {
+			t.Errorf("Rust hash of %q does not verify", vector.password)
 		}
-		if !verifyPassword(password, stored) {
-			t.Errorf("Rust hash of %q does not verify", password)
+		if verifyPassword(vector.password+"x", vector.stored) {
+			t.Errorf("Rust hash of %q accepts a wrong password", vector.password)
 		}
-		if verifyPassword(password+"x", stored) {
-			t.Errorf("Rust hash of %q accepts a wrong password", password)
-		}
-		checked++
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if checked == 0 {
-		t.Fatal("rust-phc.txt has no lines")
 	}
 }
 

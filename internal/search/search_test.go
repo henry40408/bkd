@@ -3,9 +3,7 @@ package search
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -80,33 +78,59 @@ func TestSpecialCharactersAreMadeLiteral(t *testing.T) {
 	}
 }
 
-// testdata/search_syntax.json is shared with the front end's parser test.
-func TestParsingAgreesWithTheSharedCases(t *testing.T) {
-	data, err := os.ReadFile("testdata/search_syntax.json")
-	if err != nil {
-		t.Fatal(err)
+type wantTerm struct {
+	field   string
+	text    string
+	negated bool
+}
+
+// The cases are what the Rust parser answered. They are never regenerated from
+// Go output.
+func TestParseAgreesWithTheRustParser(t *testing.T) {
+	tests := []struct {
+		query string
+		terms []wantTerm
+	}{
+		{"", []wantTerm{}},
+		{"   \t ", []wantTerm{}},
+		{"  a   b\tc ", []wantTerm{{"any", "a", false}, {"any", "b", false}, {"any", "c", false}}},
+		{"\"two words\" x", []wantTerm{{"any", "two words", false}, {"any", "x", false}}},
+		{"\"say \\\"hi\\\"\"", []wantTerm{{"any", "say \"hi\"", false}}},
+		{"\"never closed here", []wantTerm{{"any", "never closed here", false}}},
+		{"\"\"", []wantTerm{}},
+		{"-spam", []wantTerm{{"any", "spam", true}}},
+		{"-\"big spam\"", []wantTerm{{"any", "big spam", true}}},
+		{"-", []wantTerm{{"any", "-", false}}},
+		{"a - b", []wantTerm{{"any", "a", false}, {"any", "-", false}, {"any", "b", false}}},
+		{"well-known", []wantTerm{{"any", "well-known", false}}},
+		{"tag:rust", []wantTerm{{"tag", "rust", false}}},
+		{"TAG:Rust", []wantTerm{{"tag", "Rust", false}}},
+		{"tag:\"to read\"", []wantTerm{{"tag", "to read", false}}},
+		{"-tag:old", []wantTerm{{"tag", "old", true}}},
+		{"title:zebra url:a.test note:\"two words\"", []wantTerm{{"title", "zebra", false}, {"url", "a.test", false}, {"note", "two words", false}}},
+		{"tag:", []wantTerm{{"any", "tag:", false}}},
+		{"-tag:", []wantTerm{{"any", "-tag:", false}}},
+		{"tag:\"\"", []wantTerm{{"any", "tag:\"\"", false}}},
+		{"tag:\" \"", []wantTerm{{"any", "tag:\" \"", false}}},
+		{"-tag:\" \"", []wantTerm{{"any", "-tag:\" \"", false}}},
+		{"\" \"", []wantTerm{}},
+		{"https://x.test", []wantTerm{{"any", "https://x.test", false}}},
+		{"foo:bar", []wantTerm{{"any", "foo:bar", false}}},
+		{"title:a:b", []wantTerm{{"title", "a:b", false}}},
+		{"it's", []wantTerm{{"any", "it's", false}}},
+		{"學習 tag:\"教學 筆記\"", []wantTerm{{"any", "學習", false}, {"tag", "教學 筆記", false}}},
+		{"\"a\"b", []wantTerm{{"any", "a", false}, {"any", "b", false}}},
+		{"status:broken", []wantTerm{{"status", "broken", false}}},
+		{"-STATUS:Unchecked x", []wantTerm{{"status", "Unchecked", true}, {"any", "x", false}}},
+		{"status:", []wantTerm{{"any", "status:", false}}},
 	}
-	var cases []struct {
-		Query string          `json:"query"`
-		Terms [][]interface{} `json:"terms"`
-	}
-	if err := json.Unmarshal(data, &cases); err != nil {
-		t.Fatal(err)
-	}
-	if len(cases) == 0 {
-		t.Fatal("no cases")
-	}
-	for _, c := range cases {
-		parsed := [][]interface{}{}
-		for _, term := range Parse(c.Query) {
-			parsed = append(parsed, []interface{}{term.Field.String(), term.Text, term.Negated})
+	for _, tt := range tests {
+		got := []wantTerm{}
+		for _, term := range Parse(tt.query) {
+			got = append(got, wantTerm{term.Field.String(), term.Text, term.Negated})
 		}
-		want := c.Terms
-		if want == nil {
-			want = [][]interface{}{}
-		}
-		if !reflect.DeepEqual(parsed, want) {
-			t.Errorf("query %q: got %v, want %v", c.Query, parsed, want)
+		if !reflect.DeepEqual(got, tt.terms) {
+			t.Errorf("query %q: got %v, want %v", tt.query, got, tt.terms)
 		}
 	}
 }

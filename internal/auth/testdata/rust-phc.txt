@@ -1,3 +1,0 @@
-correct horse battery	$argon2id$v=19$m=19456,t=2,p=1$plJ2HcKvQ8IC5FndOHYrdQ$59Z60GrXjGgWM5zZu9Hd6Un2YpIW1XrJIytYfB5r3vM
-sturdy umbrella pass	$argon2id$v=19$m=19456,t=2,p=1$Zg/+0OcDGvaRLCXwODjOVw$icdzQnw1S4M7dZhJGhcQNTc6Bo9uCPv9k0+F6G4RUPM
-violet river lantern	$argon2id$v=19$m=19456,t=2,p=1$dt899HVrkYZEmViQWmaJuw$oy++/tNoseStDzIKKUEeExpCcprspQextR6lIZhtkPo

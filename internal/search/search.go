@@ -6,7 +6,7 @@
 // any tag. LIKE ignores case for ASCII only, so "É" does not match "é".
 // Matching highlights are drawn by the front end.
 //
-// The query syntax (the front end reads it the same way; testdata/search_syntax.json
+// The query syntax (the front end reads it the same way; TestParseAgreesWithTheRustParser
 // holds the cases both sides must agree on):
 //
 //   - "two words" is one term. \" is a quote inside it. A quote that is never
@@ -46,7 +46,7 @@ const (
 	Status
 )
 
-// String is the field's name in testdata/search_syntax.json.
+// String is the field's name in TestParseAgreesWithTheRustParser.
 func (f Field) String() string {
 	return [...]string{"any", "title", "url", "note", "tag", "status"}[f]
 }
