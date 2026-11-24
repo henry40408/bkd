@@ -67,6 +67,26 @@ func TestLookAlikeCharactersAreForgiven(t *testing.T) {
 	}
 }
 
+// The test above only reaches a rule when the random token holds the matching
+// character, so this one pins every rule.
+func TestNormalizeTokenAppliesEachLookAlikeRule(t *testing.T) {
+	cases := []struct{ guess, want string }{
+		{"o", "0"},
+		{"O", "0"},
+		{"i", "1"},
+		{"I", "1"},
+		{"l", "1"},
+		{"L", "1"},
+		{" ab-c\t", "ABC"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := normalizeToken(tc.guess); got != tc.want {
+			t.Errorf("normalizeToken(%q) = %q, want %q", tc.guess, got, tc.want)
+		}
+	}
+}
+
 func TestAWrongGuessIsRejected(t *testing.T) {
 	token, display := NewSetupToken()
 	wrong := []byte(display)
