@@ -225,6 +225,29 @@ func (s *Server) SetSite(url, title, description string) error {
 	return nil
 }
 
+// Backdate makes the bookmark with this URL as old as age says, so a page that
+// prints "3 days ago" does so on every run. A scenario cannot wait that long.
+func (s *Server) Backdate(url string, age time.Duration) error {
+	db, err := sql.Open("sqlite", s.DBPath+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	then := time.Now().Add(-age).Unix()
+	result, err := db.Exec("UPDATE bookmarks SET created_at = ?, updated_at = ? WHERE url = ?", then, then, url)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return fmt.Errorf("no bookmark has the URL %s", url)
+	}
+	return nil
+}
+
 // freeAddress is an unused loopback address. Racy (released before the server
 // claims it); a clash makes the new server exit, which waitUntilAnswering
 // reports.

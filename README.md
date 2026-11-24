@@ -11,6 +11,15 @@
 
 A single-binary, multi-user bookmark manager with a web front end and a JSON API. Bookmarks have tags and notes, search has its own syntax, and bkd can check links, import and export browser bookmarks, and sign people in through a reverse proxy such as Authelia.
 
+## Screenshots
+
+A search on a monitor, and the bookmark list on a phone:
+
+| Light | Dark |
+|-------|------|
+| ![Search results with the matches marked - Light](screenshots/web-search.png) | ![Search results with the matches marked - Dark](screenshots/web-search-dark.png) |
+| <img src="screenshots/web-phone.png" alt="The bookmark list on a phone - Light" width="240"> | <img src="screenshots/web-phone-dark.png" alt="The bookmark list on a phone - Dark" width="240"> |
+
 ## Run
 
 ### Docker

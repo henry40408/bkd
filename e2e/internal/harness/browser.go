@@ -123,6 +123,24 @@ func (b *Browser) SetViewport(viewport Viewport) error {
 	})
 }
 
+// PreferScheme emulates the prefers-color-scheme media feature, "light" or
+// "dark".
+func (b *Browser) PreferScheme(scheme string) error {
+	return send(b, emulation.SetEmulatedMedia, emulation.SetEmulatedMediaParams{
+		Media:    "screen",
+		Features: []*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: scheme}},
+	})
+}
+
+// Screenshot writes the viewport as a PNG.
+func (b *Browser) Screenshot(path string) error {
+	encoded, err := chromedp.Run(b.ctx, chromedp.CaptureScreenshot())
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, encoded, 0o644)
+}
+
 // SetScripts switches page scripts on or off for the pages the browser opens
 // from now on, to see what the server-rendered pages do on their own.
 func (b *Browser) SetScripts(enabled bool) error {

@@ -38,7 +38,12 @@ Gherkin scenarios (`e2e/features/*.feature`) run through godog and drive the Go 
 - Needs a local Chromium or Chrome (chromedp starts it headless). `E2E_CHROME` pins the binary; CI sets it to `/usr/bin/google-chrome`. On macOS `/Applications/Chromium.app` is found.
 - The binary is `bin/bkd` (or `E2E_BINARY`), built by the harness only when it is missing. An existing binary is not rebuilt, so rebuild it after changing server code before E2E.
 - Every click goes through `clickUntil` (`e2e/internal/harness/click.go`). On CI, Chrome sometimes accepts a click but delivers no event; `clickUntil` then dispatches a scripted `click()` and logs a `WARNING`. A covered control or a broken handler still fails.
+- README screenshots: rebuild `bin/bkd`, then `cd e2e && go run ./cmd/screenshots` (needs Chrome; writes `../screenshots/`). The demo bookmarks are made up and written through the API, so it needs no network.
 - Run `golangci-lint fmt --diff ./...` and `golangci-lint run ./...` inside `e2e/` before committing (the CI `lint` job does; the `deps` job runs the tidy, vendor, govulncheck and licence checks there too).
+
+### UI changes require screenshot updates
+
+A change to what the site renders (`internal/views/`, `internal/assets/static/`) is committed with the regenerated four images under `screenshots/`, which `README.md` embeds: rebuild `bin/bkd`, then run the screenshot command above.
 
 ### Tests
 
