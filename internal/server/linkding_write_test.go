@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/henry40408/bkd/internal/bookmarks"
@@ -415,6 +416,50 @@ func TestLinkdingWritesAnswer500WithoutTheCauseWhenTheDatabaseFails(t *testing.T
 	app.breakTable("bookmarks")
 	for _, request := range requests {
 		assertDetail(t, app.send(withToken(request, token)), http.StatusInternalServerError, "internal error")
+	}
+}
+
+func TestLinkdingTwoPostsOfOneAddressAtOnceSaveOneBookmark(t *testing.T) {
+	app := runningApp(t)
+	token, user := app.linkdingUser("henry")
+	const clients = 8
+	statuses := make(chan int, clients)
+	var wg sync.WaitGroup
+	for range clients {
+		wg.Go(func() {
+			statuses <- app.send(withToken(post("/api/bookmarks/", map[string]any{"url": "https://example.com/a"}), token)).status
+		})
+	}
+	wg.Wait()
+	close(statuses)
+	for status := range statuses {
+		if status != http.StatusCreated {
+			t.Errorf("status = %d, want 201", status)
+		}
+	}
+	if app.bookmarkCount(user) != 1 {
+		t.Errorf("%d bookmarks, want 1", app.bookmarkCount(user))
+	}
+}
+
+func TestLinkdingChangeOnlyChecksTheAddressWhenItChanges(t *testing.T) {
+	app := runningApp(t)
+	token, user := app.linkdingUser("henry")
+	saved := app.saveBookmark(user, bookmarks.Input{URL: "https://example.com/a", Title: "t", Site: bookmarks.Site{Title: "Page"}}, 5)
+	// bkd's own API lets two bookmarks share an address; the later one stays editable.
+	later := app.saveBookmark(user, bookmarks.Input{URL: "https://example.com/z", Title: "later"}, 6)
+	app.exec("UPDATE bookmarks SET url = ?1 WHERE id = ?2", saved.URL, later.ID)
+	assertStatus(t, app.send(withToken(patch(bookmarkPath(later.ID), map[string]any{"url": saved.URL, "title": "edited"}), token)), http.StatusOK)
+	if app.storedBookmark(user, later.ID).Title != "edited" {
+		t.Error("an unchanged address was refused as a duplicate")
+	}
+
+	// The same page under another spelling is the bookmark itself, not a duplicate, and
+	// a new address forgets the page details, as in bkd's own API.
+	assertStatus(t, app.send(withToken(patch(bookmarkPath(saved.ID), map[string]any{"url": saved.URL + "/"}), token)), http.StatusOK)
+	stored := app.storedBookmark(user, saved.ID)
+	if stored.URL != saved.URL+"/" || stored.Site != nil {
+		t.Errorf("stored = %+v, site %+v", stored, stored.Site)
 	}
 }
 

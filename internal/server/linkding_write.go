@@ -110,6 +110,8 @@ func (a *App) linkdingCreateBookmark(w http.ResponseWriter, r *http.Request, use
 		a.writeDetailError(w, fault)
 		return
 	}
+	a.linkdingWrites.Lock()
+	defer a.linkdingWrites.Unlock()
 	existing, found, err := a.bookmarks.FindByURL(r.Context(), user.UserID, address)
 	if err != nil {
 		a.writeDetailError(w, internal(err))
@@ -148,15 +150,6 @@ func (a *App) linkdingChangeBookmark(requireURL bool) userHandler {
 			a.writeDetailError(w, fault)
 			return
 		}
-		existing, found, err := a.bookmarks.Get(r.Context(), user.UserID, id)
-		if err != nil {
-			a.writeDetailError(w, internal(err))
-			return
-		}
-		if !found {
-			a.writeDetailError(w, detailNotFound())
-			return
-		}
 		change, fault := decodeLinkdingChange(r)
 		if fault != nil {
 			a.writeDetailError(w, fault)
@@ -169,6 +162,17 @@ func (a *App) linkdingChangeBookmark(requireURL bool) userHandler {
 				return
 			}
 			change.URL = &address
+		}
+		a.linkdingWrites.Lock()
+		defer a.linkdingWrites.Unlock()
+		existing, found, err := a.bookmarks.Get(r.Context(), user.UserID, id)
+		if err != nil {
+			a.writeDetailError(w, internal(err))
+			return
+		}
+		if !found {
+			a.writeDetailError(w, detailNotFound())
+			return
 		}
 		saved, fault := a.changeLinkdingBookmark(r.Context(), user, existing, change)
 		if fault != nil {
