@@ -12,6 +12,7 @@ import (
 const (
 	tokenForm     = "form[action='/settings/tokens']"
 	newTokenField = "input[aria-label='New API token']"
+	copyButton    = "button[data-copy-from]"
 )
 
 var tokenSecret = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -23,6 +24,11 @@ func registerTokenSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^the token list shows `+quoted+`$`, withString(func(name string) error { return w.textContains("#main", name) }))
 	sc.Step(`^the token list does not show `+quoted+`$`, withString(func(name string) error { return w.textLacks("#main", name) }))
 	sc.Step(`^I revoke the API token `+quoted+`$`, withString(w.revokeAPIToken))
+	sc.Step(`^I copy the new token$`, w.copyNewToken)
+	sc.Step(`^the Copy button says `+quoted+`$`, withString(func(label string) error { return w.textContains(copyButton, label) }))
+	sc.Step(`^the browser refuses writes through the clipboard API$`, func() error { return w.browser.RefuseClipboardWrites() })
+	sc.Step(`^the clipboard holds the new token$`, w.clipboardHoldsNewToken)
+	sc.Step(`^the Copy button is not shown$`, w.copyButtonIsHidden)
 	sc.Step(`^the page no longer shows the new token$`, func() error {
 		fields, err := w.browser.All(harness.CSS(newTokenField))
 		if err != nil {
@@ -73,4 +79,44 @@ func (w *world) seeNewToken() error {
 
 func (w *world) revokeAPIToken(name string) error {
 	return w.click(fmt.Sprintf("button[aria-label='Revoke %s']", name))
+}
+
+// copyNewToken allows the clipboard first: the browser asks for a permission
+// that a headless run cannot answer.
+func (w *world) copyNewToken() error {
+	if err := w.browser.AllowClipboard(w.server.BaseURL); err != nil {
+		return err
+	}
+	return w.click(copyButton)
+}
+
+func (w *world) clipboardHoldsNewToken() error {
+	field, err := w.element(newTokenField)
+	if err != nil {
+		return err
+	}
+	secret, err := field.Value()
+	if err != nil {
+		return err
+	}
+	return harness.Eventually("the clipboard holds the new token", func() (bool, error) {
+		copied, err := w.browser.ClipboardText()
+		return copied == secret, err
+	})
+}
+
+// copyButtonIsHidden: the server sends the button hidden, and only the script shows it.
+func (w *world) copyButtonIsHidden() error {
+	button, err := w.browser.First(harness.CSS(copyButton))
+	if err != nil {
+		return err
+	}
+	shown, err := button.Displayed()
+	if err != nil {
+		return err
+	}
+	if shown {
+		return fmt.Errorf("the Copy button is shown without the script")
+	}
+	return nil
 }

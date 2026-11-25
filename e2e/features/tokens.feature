@@ -12,6 +12,28 @@ Feature: API tokens for programs that cannot sign in through the browser
     Then the token list shows "Browser extension"
     And the page no longer shows the new token
 
+  Scenario: The new token is copied with one click
+    When I open Settings
+    And I create the API token "Browser extension"
+    And I copy the new token
+    Then the Copy button says "Copied"
+    And the clipboard holds the new token
+
+  Scenario: The new token is still copied when the clipboard API refuses
+    Given the browser refuses writes through the clipboard API
+    When I open Settings
+    And I create the API token "Browser extension"
+    And I copy the new token
+    Then the Copy button says "Copied"
+    And the clipboard holds the new token
+
+  Scenario: Without the script the token stays selectable and there is no Copy button
+    Given scripts are switched off
+    When I open Settings
+    And I create the API token "Browser extension"
+    Then I am shown the new token once
+    And the Copy button is not shown
+
   Scenario: Revoking a token removes it from the list
     When I open Settings
     And I create the API token "Old script"
