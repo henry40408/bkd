@@ -40,6 +40,7 @@ func initializeScenario(scenario *godog.ScenarioContext, binary string) {
 	registerLinkSteps(scenario, w)
 	registerSiteSteps(scenario, w)
 	registerTransferSteps(scenario, w)
+	registerTokenSteps(scenario, w)
 	registerUserSteps(scenario, w)
 }
 

@@ -398,3 +398,126 @@ func TestLookupsAndFlags(t *testing.T) {
 		t.Fatal("a missing user wants the check")
 	}
 }
+
+func startToken(t *testing.T, pool *sql.DB, userID int64) {
+	t.Helper()
+	tokens := auth.NewAPITokens(pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if _, ok, err := tokens.Create(bg, auth.NewAPIToken{UserID: userID, Name: "extension"}); err != nil || !ok {
+		t.Fatalf("Create = %v, %v", ok, err)
+	}
+}
+
+func tokensOf(t *testing.T, pool *sql.DB, id int64) int64 {
+	t.Helper()
+	return count(t, pool, "SELECT count(*) FROM api_tokens WHERE user_id = ?1", id)
+}
+
+// A token is a password that never expires, so every way to cut off an account
+// must end it too.
+func TestDisablingAndPasswordResetEndEveryAPIToken(t *testing.T) {
+	pool := dbtest.Open(t)
+	admin := add(t, pool, "henry", true)
+	user := add(t, pool, "mei", false)
+	other := add(t, pool, "bob", false)
+	for _, id := range []int64{user, user, other} {
+		startToken(t, pool, id)
+	}
+
+	change, err := ResetPassword(bg, pool, admin, user, "new")
+	mustChange(t, change, err, ChangeDone)
+	if got := tokensOf(t, pool, user); got != 0 {
+		t.Fatalf("%d tokens after reset", got)
+	}
+	if got := tokensOf(t, pool, other); got != 1 {
+		t.Fatalf("%d tokens of the other user", got)
+	}
+
+	startToken(t, pool, user)
+	one := int64(1)
+	change, err = SetDisabled(bg, pool, admin, user, &one)
+	mustChange(t, change, err, ChangeDone)
+	if got := tokensOf(t, pool, user); got != 0 {
+		t.Fatalf("%d tokens after disable", got)
+	}
+}
+
+func TestEnablingAnAccountDoesNotTouchItsTokens(t *testing.T) {
+	pool := dbtest.Open(t)
+	admin := add(t, pool, "henry", true)
+	user := add(t, pool, "mei", false)
+	startToken(t, pool, user)
+	change, err := SetDisabled(bg, pool, admin, user, nil)
+	mustChange(t, change, err, ChangeDone)
+	if got := tokensOf(t, pool, user); got != 1 {
+		t.Fatalf("%d tokens after enable, want 1", got)
+	}
+}
+
+// A stolen cookie can make a token that outlives every session, so the answer to
+// a stolen cookie, a new password, must end tokens as well.
+func TestChangingOwnPasswordEndsAPITokensAndSessions(t *testing.T) {
+	pool := dbtest.Open(t)
+	user := add(t, pool, "mei", false)
+	startToken(t, pool, user)
+	startSession(t, pool, user)
+	changed, err := ChangeOwnPassword(bg, pool, OwnPasswordChange{ID: user, VerifiedHash: "hash", NewHash: "new"})
+	if err != nil || !changed {
+		t.Fatalf("ChangeOwnPassword = %v, %v", changed, err)
+	}
+	if got := tokensOf(t, pool, user); got != 0 {
+		t.Fatalf("%d tokens, want 0", got)
+	}
+	if got := sessionsOf(t, pool, user); got != 0 {
+		t.Fatalf("%d sessions, want 0", got)
+	}
+}
+
+func TestChangingOwnPasswordLeavesOtherUsersTokensAlone(t *testing.T) {
+	pool := dbtest.Open(t)
+	user := add(t, pool, "mei", false)
+	other := add(t, pool, "bob", false)
+	startToken(t, pool, other)
+	changed, err := ChangeOwnPassword(bg, pool, OwnPasswordChange{ID: user, VerifiedHash: "hash", NewHash: "new"})
+	if err != nil || !changed {
+		t.Fatalf("ChangeOwnPassword = %v, %v", changed, err)
+	}
+	if got := tokensOf(t, pool, other); got != 1 {
+		t.Fatalf("%d tokens of the other user, want 1", got)
+	}
+}
+
+// A change that does not happen (the hash moved on) must not cost a token.
+func TestRefusedOwnPasswordChangeKeepsAPITokens(t *testing.T) {
+	pool := dbtest.Open(t)
+	user := add(t, pool, "mei", false)
+	startToken(t, pool, user)
+	changed, err := ChangeOwnPassword(bg, pool, OwnPasswordChange{ID: user, VerifiedHash: "stale", NewHash: "new"})
+	if err != nil || changed {
+		t.Fatalf("ChangeOwnPassword = %v, %v", changed, err)
+	}
+	if got := tokensOf(t, pool, user); got != 1 {
+		t.Fatalf("%d tokens, want 1", got)
+	}
+}
+
+// A token that cannot be ended must stop the whole change: a reset that left the
+// old credential alive would look like it worked.
+func TestResetThatCannotEndTokensChangesNothing(t *testing.T) {
+	pool := dbtest.Open(t)
+	admin := add(t, pool, "henry", true)
+	user := add(t, pool, "mei", false)
+	startToken(t, pool, user)
+	if _, err := pool.Exec("CREATE TRIGGER refuse_delete BEFORE DELETE ON api_tokens BEGIN SELECT RAISE(ABORT, 'refused'); END"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResetPassword(bg, pool, admin, user, "new"); err == nil {
+		t.Fatal("no error when the tokens could not be ended")
+	}
+	var hash string
+	if err := pool.QueryRow("SELECT password_hash FROM users WHERE id = ?1", user).Scan(&hash); err != nil {
+		t.Fatal(err)
+	}
+	if hash != "hash" {
+		t.Fatalf("hash = %q, want it unchanged", hash)
+	}
+}

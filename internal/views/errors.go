@@ -35,6 +35,8 @@ func NoticeText(key string) string {
 		return "Bookmark deleted."
 	case "settings-saved":
 		return "Settings saved."
+	case "token-revoked":
+		return "That token was ended."
 	case "bulk-done":
 		return "Done."
 	case "check-incomplete":

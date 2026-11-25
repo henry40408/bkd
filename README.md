@@ -154,6 +154,17 @@ To read the pages of bookmarks that have none (after an import, for example), go
 
 Over the API: `POST /api/bookmarks/read` with `{"ids": [1, 2]}` does the same as the button and answers with server-sent events like `POST /api/bookmarks/check`: `result` (`id`, `site`, `note_filled`), `failed` (`id`, `detail`), `skipped` (`id`, `reason`, `host`), `done`. `POST /api/site-preview` with `{"url": "https://..."}` answers `{"title", "description"}` (empty strings for what the page does not say). Errors: 422 (no `url`), 429 (a check or another read is running), 502 (the page could not be read; the message says why). A bookmark's `site` field is `{"title", "description"}`, or `null` when no page was read; `PUT /api/bookmarks/{id}` keeps it while the URL stays and clears it when the URL changes.
 
+## API tokens
+
+A program that cannot sign in through the browser, such as a browser extension or a script, uses an API token instead of a password. Under "Settings", "API tokens", type a name (for example the program's) and press "Create token". The token is shown once, right there: copy it then, because bkd keeps only a hash and cannot show it again. The program sends it as `Authorization: Token <token>`.
+
+- A token acts as you, with no expiry, until you end it with "Revoke". Name one token per program, so you can end one without breaking the others. The list shows when each was made and last used (the last-use time moves at most once an hour).
+- You can hold at most 20 tokens.
+- Disabling an account, resetting its password and changing your own password all end every token of that user (and every session). If a cookie of yours was stolen, a new password therefore also ends a token the thief made.
+- A user a reverse proxy signs in can have tokens too. The proxy must let the program's requests to `/api/` through without its own sign-in, since a program cannot answer the proxy's sign-in page; the token is then the only credential on those requests. That location must still clear or replace `Remote-User` and `Remote-Groups` (for example `proxy_set_header Remote-User "";` in nginx): bkd trusts these headers from the proxy's address, so a client could otherwise send `Remote-User: admin` through the bypass.
+- A proxy user's token does not end when the identity provider removes the person or the proxy signs them out. Disable their account in bkd. If an admin group is set, their `is_admin` flag follows `Remote-Groups` only on requests that come through the proxy's sign-in, not on token requests.
+- Over the API (as a signed-in user): `GET /api/account/tokens` lists them (never the secret), `POST /api/account/tokens` with `{"name": "..."}` makes one and answers 201 with the secret in `token`, and `DELETE /api/account/tokens/{id}` ends one.
+
 ## Import and export
 
 Under "Import and export" in the sidebar, choose the bookmarks file your browser exported (Chrome, Firefox, Safari, Pocket and Raindrop all write the same `.html` format). Folders become tags, the date saved is kept when the file has one (Safari's does not), and a link you already have is skipped, so importing the same file twice is safe. Links that are not web links (`javascript:`, `place:`) are skipped and listed in the result. The same screen downloads your bookmarks as HTML (for a browser or another service) or JSON (a backup).
