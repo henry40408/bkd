@@ -55,6 +55,7 @@ type App struct {
 	logger        *slog.Logger
 	hasher        *auth.Hasher
 	sessions      *auth.Sessions
+	apiTokens     *auth.APITokens
 	bookmarks     *bookmarks.Store
 	linkStore     *linkcheck.Store
 	linkChecker   *linkcheck.Checker
@@ -96,6 +97,7 @@ func New(config Config) *App {
 		logger:        logger,
 		hasher:        hasher,
 		sessions:      auth.NewSessions(config.DB, logger),
+		apiTokens:     auth.NewAPITokens(config.DB, logger),
 		bookmarks:     bookmarks.NewStore(config.DB),
 		linkStore:     linkcheck.NewStore(config.DB),
 		linkChecker:   config.LinkChecker,

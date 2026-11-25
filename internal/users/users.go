@@ -407,7 +407,8 @@ func SetAdmin(ctx context.Context, pool *sql.DB, caller, id int64, isAdmin bool)
 }
 
 // SetDisabled records disabledAt, or enables the account when it is nil.
-// Disabling also ends every session of the account; enabling does not restore them.
+// Disabling also ends every session and API token of the account; enabling does
+// not restore them.
 func SetDisabled(ctx context.Context, pool *sql.DB, caller, id int64, disabledAt *int64) (Change, error) {
 	return runChange(ctx, pool, accountChange{
 		caller:       caller,
@@ -420,13 +421,21 @@ func SetDisabled(ctx context.Context, pool *sql.DB, caller, id int64, disabledAt
 			if disabledAt == nil {
 				return nil
 			}
-			return auth.RevokeAllForUser(ctx, conn, id)
+			return revokeEveryCredential(ctx, conn, id)
 		},
 	})
 }
 
-// ResetPassword replaces the password and ends every session, so a stolen
-// session dies with the old password.
+// revokeEveryCredential ends the sessions and the API tokens of an account.
+func revokeEveryCredential(ctx context.Context, conn auth.Execer, id int64) error {
+	if err := auth.RevokeAllForUser(ctx, conn, id); err != nil {
+		return err
+	}
+	return auth.RevokeAllTokensForUser(ctx, conn, id)
+}
+
+// ResetPassword replaces the password and ends every session and API token, so
+// a stolen credential dies with the old password.
 func ResetPassword(ctx context.Context, pool *sql.DB, caller, id int64, passwordHash string) (Change, error) {
 	return runChange(ctx, pool, accountChange{
 		caller: caller,
@@ -435,7 +444,7 @@ func ResetPassword(ctx context.Context, pool *sql.DB, caller, id int64, password
 			if _, err := conn.ExecContext(ctx, "UPDATE users SET password_hash = ?1 WHERE id = ?2", passwordHash, id); err != nil {
 				return err
 			}
-			return auth.RevokeAllForUser(ctx, conn, id)
+			return revokeEveryCredential(ctx, conn, id)
 		},
 	})
 }
@@ -448,8 +457,10 @@ type OwnPasswordChange struct {
 	NewHash      string
 }
 
-// ChangeOwnPassword replaces a user's own password and ends every session, but
-// only if the stored hash is still VerifiedHash. The caller spent tens of
+// ChangeOwnPassword replaces a user's own password and ends every session and
+// API token (a person who changes the password because a cookie was stolen must
+// not leave behind a token that the thief made from it), but only if the stored
+// hash is still VerifiedHash. The caller spent tens of
 // milliseconds in Argon2 checking the current password; a reset or another
 // change in that gap must win. changed is false when the hash changed or the
 // account is gone.
@@ -467,7 +478,7 @@ func ChangeOwnPassword(ctx context.Context, pool *sql.DB, change OwnPasswordChan
 			return err
 		}
 		changed = true
-		return auth.RevokeAllForUser(ctx, conn, change.ID)
+		return revokeEveryCredential(ctx, conn, change.ID)
 	})
 	if err != nil {
 		return false, fmt.Errorf("change own password: %w", err)
@@ -475,7 +486,8 @@ func ChangeOwnPassword(ctx context.Context, pool *sql.DB, change OwnPasswordChan
 	return changed, nil
 }
 
-// Delete removes the account with its sessions, bookmarks and tags (foreign keys cascade).
+// Delete removes the account with its sessions, API tokens, bookmarks and tags
+// (foreign keys cascade).
 func Delete(ctx context.Context, pool *sql.DB, caller, id int64) (Change, error) {
 	return runChange(ctx, pool, accountChange{
 		caller:       caller,

@@ -500,6 +500,70 @@ func TestTheSettingsPageShowsAnErrorOnlyWhenThereIsOne(t *testing.T) {
 	requireContains(t, page, `<p class="err" role="alert">user agent is too long</p>`)
 }
 
+func TestTheTokenFormHasANameFieldThatKeepsAndEscapesWhatWasTyped(t *testing.T) {
+	page := SettingsPage(SettingsView{
+		Shell: alice(SectionSettings), TokenName: `a"b<c>`, TokenError: "name is too long", MaxTokenNameLength: 100,
+	})
+	requireContains(t, page,
+		`action="/settings/tokens"`,
+		`name="name"`,
+		`value="a&quot;b&lt;c&gt;"`,
+		`maxlength="100"`,
+		`<p class="err" role="alert">name is too long</p>`,
+	)
+	if !strings.Contains(page, `autocomplete="off" required>`) {
+		t.Error("the name field must be required")
+	}
+}
+
+func TestTheTokenFormShowsNoErrorAndNoSecretByDefault(t *testing.T) {
+	page := SettingsPage(SettingsView{Shell: alice(SectionSettings), MaxTokenNameLength: 100})
+	requireAbsent(t, page, `role="alert"`, "Copy this token now", "New API token")
+}
+
+// The secret is on the page for this one answer only, so it must be readable
+// to copy and must not be offered to a password manager or a spell checker.
+func TestANewTokenIsShownInAReadOnlyFieldOnce(t *testing.T) {
+	page := SettingsPage(SettingsView{Shell: alice(SectionSettings), NewToken: "ab12", MaxTokenNameLength: 100})
+	requireContains(t, page,
+		"Copy this token now. It is shown only once.",
+		`aria-label="New API token" value="ab12" autocomplete="off" spellcheck="false" readonly>`,
+	)
+}
+
+func TestTheTokenListShowsEachTokenWithItsOwnRevokeButton(t *testing.T) {
+	used := int64(goldenNow - 60)
+	view := SettingsView{
+		Shell: alice(SectionSettings), Now: goldenNow, MaxTokenNameLength: 100,
+		Tokens: []TokenRow{
+			{ID: "0123456789abcdef", Name: `<b>extension</b>`, CreatedAt: goldenNow - 3600, LastUsedAt: &used},
+			{ID: "fedcba9876543210", Name: "script", CreatedAt: goldenNow - 7200},
+		},
+	}
+	page := SettingsPage(view)
+	requireContains(t, page,
+		`&lt;b&gt;extension&lt;/b&gt;`,
+		`action="/settings/tokens/0123456789abcdef/revoke"`,
+		`aria-label="Revoke &lt;b&gt;extension&lt;/b&gt;"`,
+		`action="/settings/tokens/fedcba9876543210/revoke"`,
+		`aria-label="Revoke script"`,
+		" · last used ",
+		" · never used",
+	)
+	requireAbsent(t, page, `<b>extension</b>`)
+	if got := strings.Count(page, " · never used"); got != 1 {
+		t.Errorf("never used shown %d times, want once (only the token without a use)", got)
+	}
+	if got := strings.Count(page, " · last used "); got != 1 {
+		t.Errorf("last used shown %d times, want once", got)
+	}
+}
+
+func TestNoTokensMeansNoList(t *testing.T) {
+	page := SettingsPage(SettingsView{Shell: alice(SectionSettings), MaxTokenNameLength: 100})
+	requireAbsent(t, page, "/revoke", "never used", `class="sessions"`)
+}
+
 func TestInactiveUserRowsHideTheirActionsForYourself(t *testing.T) {
 	view := UsersView{Shell: alice(SectionUsers), Now: goldenNow, NewIsAdmin: true,
 		Users: []UserRow{{ID: 7, Username: "me", IsAdmin: true, IsDisabled: true}}}

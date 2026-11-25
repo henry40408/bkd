@@ -15,6 +15,25 @@ type SettingsView struct {
 	// ServerChecksLinks is true when the administrator has turned the
 	// background check on for this server.
 	ServerChecksLinks bool
+
+	// Now is the time the token list is shown relative to.
+	Now    int64
+	Tokens []TokenRow
+	// NewToken is the secret of a token made by this request. It is shown once.
+	NewToken string
+	// TokenName is what was typed in the name box, kept when the token was refused.
+	TokenName          string
+	TokenError         string
+	MaxTokenNameLength int
+}
+
+// TokenRow is one API token on the settings page. LastUsedAt is nil until the
+// token is first used.
+type TokenRow struct {
+	ID         string
+	Name       string
+	CreatedAt  int64
+	LastUsedAt *int64
 }
 
 // SettingsPage renders the settings page.
@@ -29,8 +48,59 @@ func SettingsPage(view SettingsView) string {
 			errorLine(view.Error),
 			formButtons(submitButton("Save")),
 		),
+		sheet(tokensSection(view)),
 	)
 	return framed("Settings · bkd", view.Shell, content)
+}
+
+func tokensSection(view SettingsView) node {
+	rows := make([]node, len(view.Tokens))
+	for i, token := range view.Tokens {
+		rows[i] = tokenRow(token, view.Now)
+	}
+	return sheetSection("API tokens",
+		el("p", nil,
+			text("A program that cannot sign in through the browser, such as a browser extension or a script, "+
+				"sends one of these as \"Authorization: Token <token>\" to call bkd's linkding-compatible API. "+
+				"A token acts as you until you end it. Disabling your account or resetting its password ends them all.")),
+		newTokenNotice(view.NewToken),
+		maybe(len(rows) > 0, func() node { return el("ul", []attr{classes("sessions")}, rows...) }),
+		el("form", []attr{classes("stack"), a("method", "post"), a("action", "/settings/tokens")},
+			labelled("Name ", void("input", a("type", "text"), a("name", "name"), a("value", view.TokenName),
+				a("placeholder", "Browser extension"), a("maxlength", strconv.Itoa(view.MaxTokenNameLength)),
+				a("autocomplete", "off"), flag("required"))),
+			errorLine(view.TokenError),
+			formButtons(iconSubmitButton(iconKey, "Create token")),
+		),
+	)
+}
+
+// newTokenNotice shows a secret that was just made. It is the only time the page can.
+func newTokenNotice(secret string) node {
+	return maybe(secret != "", func() node {
+		return el("div", []attr{a("role", "status")},
+			el("p", nil, text("Copy this token now. It is shown only once.")),
+			void("input", a("type", "text"), a("aria-label", "New API token"), a("value", secret),
+				a("autocomplete", "off"), a("spellcheck", "false"), flag("readonly")),
+		)
+	})
+}
+
+func tokenRow(token TokenRow, now int64) node {
+	lastUsed := text(" · never used")
+	if token.LastUsedAt != nil {
+		lastUsed = group(text(" · last used "), timeTag(NewSavedTime(now, *token.LastUsedAt)))
+	}
+	return el("li", nil,
+		el("span", []attr{classes("who")},
+			el("b", nil, text(token.Name)),
+			el("span", []attr{classes("hint")},
+				text("created "), timeTag(NewSavedTime(now, token.CreatedAt)), lastUsed),
+		),
+		el("form", []attr{a("method", "post"), a("action", "/settings/tokens/"+token.ID+"/revoke")},
+			el("button", []attr{classes("btn", "ico"), a("type", "submit"), a("title", "Revoke"),
+				a("aria-label", "Revoke "+token.Name)}, iconLabel(iconTrash, "Revoke"))),
+	)
 }
 
 func linkCheckSection(view SettingsView) node {

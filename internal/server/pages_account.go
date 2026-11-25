@@ -127,6 +127,10 @@ func (a *App) settingsView(r *http.Request, user auth.SessionUser, notice string
 	if fault != nil {
 		return views.SettingsView{}, fromAPI(fault)
 	}
+	tokens, err := a.apiTokens.ListForUser(r.Context(), user.UserID)
+	if err != nil {
+		return views.SettingsView{}, fromAPI(internal(err))
+	}
 	return views.SettingsView{
 		Shell:              shell,
 		LinkCheckEnabled:   saved.LinkCheckEnabled,
@@ -134,6 +138,9 @@ func (a *App) settingsView(r *http.Request, user auth.SessionUser, notice string
 		DefaultUserAgent:   linkcheck.DefaultUserAgent(),
 		MaxUserAgentLength: linkcheck.MaxUserAgentLength,
 		ServerChecksLinks:  a.backgroundOn,
+		Now:                auth.UnixNow(),
+		Tokens:             tokenRows(tokens),
+		MaxTokenNameLength: maxTokenNameChars,
 	}, nil
 }
 

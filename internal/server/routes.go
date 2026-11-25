@@ -98,6 +98,8 @@ func (a *App) mountPages(mux *http.ServeMux) {
 	route("/users/{id}/password", onGet(admin(a.pagePasswordForm)), onPost(confirmed(a.pageResetPassword)))
 	route("/users/{id}/delete", onGet(admin(a.pageDeleteUserForm)), onPost(confirmed(a.pageDeleteUser)))
 	route("/settings", onGet(signedIn(a.pageSettings)), onPost(signedIn(a.pageSaveSettings)))
+	route("/settings/tokens", onPost(signedIn(a.pageCreateToken)))
+	route("/settings/tokens/{id}/revoke", onPost(signedIn(a.pageRevokeToken)))
 	route("/account", onGet(signedIn(a.pageAccount)))
 	route("/account/password", onPost(signedIn(a.pageChangePassword)))
 	route("/account/sessions/{id}/revoke", onPost(signedIn(a.pageRevokeSession)))
@@ -136,6 +138,8 @@ func (a *App) mountAPI(mux *http.ServeMux) {
 	route("/account/sessions",
 		onGet(signedIn(a.handleListSessions)), onDelete(signedIn(a.handleRevokeOtherSessions)))
 	route("/account/sessions/{id}", onDelete(signedIn(a.handleRevokeSession)))
+	route("/account/tokens", onGet(signedIn(a.handleListTokens)), onPost(signedIn(a.handleCreateToken)))
+	route("/account/tokens/{id}", onDelete(signedIn(a.handleRevokeToken)))
 	route("/bookmarks", onGet(signedIn(a.handleListBookmarks)), onPost(signedIn(a.handleCreateBookmark)))
 	route("/bookmarks/random", onGet(signedIn(a.handleRandomBookmark)))
 	route("/bookmarks/bulk", onPost(signedIn(a.handleBulkBookmarks)))

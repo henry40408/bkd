@@ -45,7 +45,7 @@ func TestMigrationsCreateEveryTable(t *testing.T) {
 		}
 		tables = append(tables, name)
 	}
-	want := []string{"bookmark_tags", "bookmarks", "sessions", "users"}
+	want := []string{"api_tokens", "bookmark_tags", "bookmarks", "sessions", "users"}
 	if !slices.Equal(tables, want) {
 		t.Fatalf("tables = %v, want %v", tables, want)
 	}

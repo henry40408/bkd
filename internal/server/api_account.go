@@ -184,3 +184,42 @@ type settingsView struct {
 	// means the built-in one.
 	LinkCheckUserAgent string `json:"link_check_user_agent"`
 }
+
+// handleListTokens shows the caller's API tokens, without their secrets.
+func (a *App) handleListTokens(w http.ResponseWriter, r *http.Request, user auth.SessionUser) {
+	tokens, err := a.apiTokens.ListForUser(r.Context(), user.UserID)
+	if err != nil {
+		a.writeAPIError(w, internal(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, tokens)
+}
+
+// handleCreateToken answers the new token with its secret, the only time it is shown.
+func (a *App) handleCreateToken(w http.ResponseWriter, r *http.Request, user auth.SessionUser) {
+	var request struct {
+		Name *string `json:"name"`
+	}
+	if failure := decodeJSON(r, &request); failure != nil {
+		failure.write(w)
+		return
+	}
+	if failure := requireFields(field{"name", request.Name != nil}); failure != nil {
+		failure.write(w)
+		return
+	}
+	issued, fault := a.createAPIToken(r, user, *request.Name)
+	if fault != nil {
+		a.writeAPIError(w, fault)
+		return
+	}
+	writeJSON(w, http.StatusCreated, issued)
+}
+
+func (a *App) handleRevokeToken(w http.ResponseWriter, r *http.Request, user auth.SessionUser) {
+	if fault := a.revokeAPIToken(r.Context(), user, r.PathValue("id")); fault != nil {
+		a.writeAPIError(w, fault)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
