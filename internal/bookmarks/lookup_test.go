@@ -102,6 +102,9 @@ func TestFindByURLIgnoresATrailingSlashButPrefersTheSpellingAsked(t *testing.T) 
 	slashed := save("https://example.org/")
 	both := save("https://example.net/a")
 	bothSlashed := save("https://example.net/a/")
+	twice := save("https://example.io/b//")
+	bothTwice := save("https://example.dev/c")
+	bothTwiceDoubled := save("https://example.dev/c//")
 
 	cases := []struct {
 		asked string
@@ -114,6 +117,11 @@ func TestFindByURLIgnoresATrailingSlashButPrefersTheSpellingAsked(t *testing.T) 
 		{"https://example.net/a", both.ID},
 		{"https://example.net/a/", bothSlashed.ID},
 		{"https://example.net/a//", both.ID},
+		// An address saved with more than one trailing slash is found as it was
+		// saved, and wins over the bare one when both exist.
+		{"https://example.io/b//", twice.ID},
+		{"https://example.dev/c//", bothTwiceDoubled.ID},
+		{"https://example.dev/c", bothTwice.ID},
 	}
 	for _, c := range cases {
 		found, ok, err := store.FindByURL(bg, user, c.asked)

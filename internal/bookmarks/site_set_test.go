@@ -94,6 +94,20 @@ func TestSetSiteMovesUpdatedAtOnlyWhenTheReadChangedSomething(t *testing.T) {
 	}
 }
 
+// A page that has no description leaves that column NULL, and a read that again
+// finds none is not a change: NULL against an empty text must not count as one.
+func TestSetSiteLeavesUpdatedAtAloneWhenADetailStaysEmpty(t *testing.T) {
+	store, pool := newStore(t)
+	user := dbtest.InsertUser(t, pool, "henry")
+	bookmark := withSite(valid(t, "Page"), Site{Title: "Only a title"})
+	bookmark.Note = "mine"
+	saved := create(t, store, user, bookmark, 100)
+
+	setSite(t, store, user, saved, Site{Title: "Only a title"})
+
+	assertEqual(t, reload(t, store, user, saved.ID).UpdatedAt, int64(100))
+}
+
 func TestSetSiteKeepsANoteThatHasText(t *testing.T) {
 	store, pool := newStore(t)
 	user := dbtest.InsertUser(t, pool, "henry")

@@ -44,7 +44,7 @@ func (s *Store) FindByURL(ctx context.Context, userID int64, url string) (bookma
 		return Bookmark{}, false, nil
 	}
 	rows, err := s.query(ctx,
-		selectBookmark+` WHERE bookmarks.user_id = ?1 AND bookmarks.url IN (?3, ?4)
+		selectBookmark+` WHERE bookmarks.user_id = ?1 AND bookmarks.url IN (?2, ?3, ?4)
 		 ORDER BY bookmarks.url = ?2 DESC, bookmarks.id LIMIT 1`,
 		userID, asked, bare, bare+"/")
 	if err != nil || len(rows) == 0 {

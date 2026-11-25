@@ -362,6 +362,13 @@ func TestLinkdingTagsAllowTheLimitTheBrowserExtensionAsksFor(t *testing.T) {
 	if len(r.results()) != 12 || r.json()["next"] != nil {
 		t.Fatalf("tags = %s", r.text)
 	}
+	// Twelve tags do not reach the cap, so the link back shows which limit was
+	// kept: 5000 for tags, where bookmarks would have cut it to 1000.
+	r = app.send(withToken(get("/api/tags/?limit=5000&offset=1"), token))
+	previous, _ := r.json()["previous"].(string)
+	if !strings.Contains(previous, "limit=5000") {
+		t.Fatalf("previous = %q", previous)
+	}
 }
 
 func TestLinkdingLinksUseHTTPSWhenAProxySaysTheRequestWasSecure(t *testing.T) {
@@ -464,7 +471,9 @@ func TestLinkdingTimeBoundsTakeTheSpellingsClientsSend(t *testing.T) {
 	for _, bound := range []string{
 		"2020-09-13T12:26:40Z", "2020-09-13T14:26:40%2B02:00", "2020-09-14", "2020-09-13T14:26:40+02:00",
 	} {
-		assertIDs(t, app.send(withToken(get("/api/bookmarks/?added_since="+bound), token)))
+		r := app.send(withToken(get("/api/bookmarks/?added_since="+bound), token))
+		assertStatus(t, r, http.StatusOK)
+		assertIDs(t, r)
 	}
 }
 
