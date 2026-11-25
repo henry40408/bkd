@@ -51,7 +51,11 @@ func (w *world) createAPIToken(name string) error {
 	if err := w.textContains("#main", name); err != nil {
 		return err
 	}
-	_, err := w.element(newTokenField)
+	field, err := w.element(newTokenField)
+	if err != nil {
+		return err
+	}
+	w.apiToken, err = field.Value()
 	return err
 }
 

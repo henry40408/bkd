@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/henry40408/bkd/internal/apidocs"
 	"github.com/henry40408/bkd/internal/assets"
 	"github.com/henry40408/bkd/internal/auth"
 )
@@ -54,23 +55,37 @@ func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
 	a.mountAPI(mux)
 	a.mountLinkding(mux)
+	for _, route := range apidocs.Routes {
+		mux.Handle(route.Path, byMethod(onGet(apidocs.Handler(route))))
+	}
 	for _, route := range assets.Routes {
 		mux.Handle(route.Path, byMethod(onGet(assets.Handler(route))))
 	}
 	mux.Handle("/healthz", byMethod(onGet(http.HandlerFunc(a.handleHealthz))))
 	a.mountPages(mux)
-	fallback := a.page(maxBodyBytes, http.HandlerFunc(a.handleNotFound))
-	mux.Handle("/", fallback)
+	mux.Handle("/", a.notFound())
 	return a.securityHeaders(mux)
 }
 
-// handleNotFound: the JSON API keeps the empty 404 it always had; any other
-// address gets the page.
-func (a *App) handleNotFound(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
+// notFound answers every address nothing else claims. The JSON API keeps the
+// empty 404 it always had, for every method: behind the page guard, a script's
+// POST (it has no Origin) would get a 403 page instead. Any other address gets
+// the page.
+func (a *App) notFound() http.Handler {
+	page := a.page(maxBodyBytes, http.HandlerFunc(a.handleNotFound))
+	api := apiHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		return
-	}
+	}))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
+			api.ServeHTTP(w, r)
+			return
+		}
+		page.ServeHTTP(w, r)
+	})
+}
+
+func (a *App) handleNotFound(w http.ResponseWriter, _ *http.Request) {
 	a.writePageError(w, pageNotFound())
 }
 

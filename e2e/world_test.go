@@ -23,6 +23,9 @@ type world struct {
 	me string
 	// bulkCount is how many bulk bookmarks exist, so each batch gets fresh titles.
 	bulkCount int
+	// apiToken is the last API token a step made through Settings. The page shows
+	// it once, so a later step on another page reads it from here.
+	apiToken string
 }
 
 // initializeScenario runs once per scenario, so every scenario gets its own
@@ -41,6 +44,7 @@ func initializeScenario(scenario *godog.ScenarioContext, binary string) {
 	registerSiteSteps(scenario, w)
 	registerTransferSteps(scenario, w)
 	registerTokenSteps(scenario, w)
+	registerAPIDocsSteps(scenario, w)
 	registerUserSteps(scenario, w)
 }
 
