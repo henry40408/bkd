@@ -328,7 +328,7 @@ func TestGuessingPasswordsOnFormEndsInTooManyAttempts(t *testing.T) {
 func TestLoginPageSendsSignedInVisitorToNextPage(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
-	mustRedirect(t, app.send(get("/login?next=%2Faccount").as(token)), "/account")
+	mustRedirect(t, app.send(get("/login?next=%2Fsettings").as(token)), "/settings")
 }
 
 func TestUnknownPagesAndAPIPathsAreNotFoundInTheirOwnWay(t *testing.T) {
@@ -356,22 +356,22 @@ func TestDatabaseFaultShowsPlainErrorPage(t *testing.T) {
 func revokeAction(t *testing.T, page reply) string {
 	t.Helper()
 	end := strings.Index(page.text, `/revoke"`)
-	start := strings.LastIndex(page.text[:end], "/account/sessions/")
+	start := strings.LastIndex(page.text[:end], "/settings/sessions/")
 	if end < 0 || start < 0 {
 		t.Fatal("no revoke button")
 	}
 	return page.text[start:end] + "/revoke"
 }
 
-func TestAccountPageListsOtherBrowsersWithButtonToEndEach(t *testing.T) {
+func TestSettingsPageListsOtherBrowsersWithButtonToEndEach(t *testing.T) {
 	app := runningApp(t)
 	here := app.signIn("henry", false)
-	mustLack(t, app.send(get("/account").as(here)), "Sign out all other browsers")
+	mustLack(t, app.send(get("/settings").as(here)), "Sign out all other browsers")
 	app.login("henry", testPassword)
-	page := app.send(get("/account").as(here))
+	page := app.send(get("/settings").as(here))
 	mustContain(t, page, "Unknown browser", "Sign out all other browsers")
 	ended := app.send(formPost(revokeAction(t, page), "").as(here))
-	mustRedirect(t, ended, "/account?notice=session-ended")
+	mustRedirect(t, ended, "/settings?notice=session-ended")
 	after := app.send(get(locationOf(ended)).as(here))
 	mustContain(t, after, "That browser was signed out.")
 	mustLack(t, after, "Sign out all other browsers")
@@ -380,17 +380,17 @@ func TestAccountPageListsOtherBrowsersWithButtonToEndEach(t *testing.T) {
 func TestEndingSessionThatDoesNotExistIsNotFound(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
-	assertStatus(t, app.send(formPost("/account/sessions/0123456789abcdef/revoke", "").as(token)), http.StatusNotFound)
+	assertStatus(t, app.send(formPost("/settings/sessions/0123456789abcdef/revoke", "").as(token)), http.StatusNotFound)
 }
 
 func TestSigningOutOtherBrowsersKeepsThisOne(t *testing.T) {
 	app := runningApp(t)
 	here := app.signIn("henry", false)
 	other := sessionToken(t, app.login("henry", testPassword))
-	r := app.send(formPost("/account/sessions/revoke-others", "").as(here))
-	mustRedirect(t, r, "/account?notice=others-ended")
+	r := app.send(formPost("/settings/sessions/revoke-others", "").as(here))
+	mustRedirect(t, r, "/settings?notice=others-ended")
 	mustContain(t, app.send(get(locationOf(r)).as(here)), "All other browsers were signed out.")
-	assertStatus(t, app.send(get("/account").as(other)), http.StatusSeeOther)
+	assertStatus(t, app.send(get("/settings").as(other)), http.StatusSeeOther)
 }
 
 func passwordChangeFields(current, next, again string) string {
@@ -402,15 +402,25 @@ func TestChangingPasswordThroughFormKeepsThisBrowserOnly(t *testing.T) {
 	app := runningApp(t)
 	here := app.signIn("henry", false)
 	other := sessionToken(t, app.login("henry", testPassword))
-	r := app.send(formPost("/account/password", passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")).as(here))
-	mustRedirect(t, r, "/account?notice=password-changed")
+	r := app.send(formPost("/settings/password", passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")).as(here))
+	mustRedirect(t, r, "/settings?notice=password-changed")
 	fresh := sessionToken(t, r)
 	mustContain(t, app.send(get(locationOf(r)).as(fresh)), "Password changed.")
-	assertStatus(t, app.send(get("/account").as(other)), http.StatusSeeOther)
+	assertStatus(t, app.send(get("/settings").as(other)), http.StatusSeeOther)
 	assertStatus(t, app.login("henry", "a brand new secret"), http.StatusSeeOther)
 }
 
-func TestRefusedPasswordChangeShowsAccountPageWithReason(t *testing.T) {
+// formAround is the markup of the form that posts to action, up to its end.
+func formAround(t *testing.T, page reply, action string) string {
+	t.Helper()
+	start := strings.Index(page.text, `action="`+action+`"`)
+	if start < 0 {
+		t.Fatalf("no form posts to %s", action)
+	}
+	return page.text[start : start+strings.Index(page.text[start:], "</form>")]
+}
+
+func TestRefusedPasswordChangeShowsSettingsPageWithReasonInThePasswordSection(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
 	cases := []struct {
@@ -424,11 +434,60 @@ func TestRefusedPasswordChangeShowsAccountPageWithReason(t *testing.T) {
 		{passwordChangeFields(testPassword, testPassword, testPassword), http.StatusBadRequest, "must differ"},
 	}
 	for _, c := range cases {
-		r := app.send(formPost("/account/password", c.fields).as(token))
+		r := app.send(formPost("/settings/password", c.fields).as(token))
 		assertStatus(t, r, c.status)
-		mustContain(t, r, `role="alert"`, c.reason, "This browser")
+		mustContain(t, r, `role="alert"`, c.reason, "This browser", "Link check", "API tokens")
+		if got := strings.Count(r.text, `role="alert"`); got != 1 {
+			t.Errorf("%s: errors shown = %d, want 1", c.reason, got)
+		}
+		if password := formAround(t, r, "/settings/password"); !strings.Contains(password, c.reason) {
+			t.Errorf("%s: the password form lacks the reason", c.reason)
+		}
 	}
 	assertStatus(t, app.login("henry", testPassword), http.StatusSeeOther)
+}
+
+func TestRefusedSettingsSaveShowsNoPasswordError(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("henry", false)
+	r := app.send(formPost("/settings", "link_check_enabled=on&link_check_user_agent=caf%C3%A9").as(token))
+	assertStatus(t, r, http.StatusBadRequest)
+	mustContain(t, r, "Change password", "This browser")
+	if got := strings.Count(r.text, `role="alert"`); got != 1 {
+		t.Errorf("errors shown = %d, want 1", got)
+	}
+	if settings := formAround(t, r, "/settings"); !strings.Contains(settings, "printable ASCII") {
+		t.Error("the settings form lacks the reason")
+	}
+	mustLack(t, reply{text: formAround(t, r, "/settings/password")}, `role="alert"`)
+}
+
+func TestRefusedPasswordChangeKeepsTheSettingsFormsStoredValues(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("henry", false)
+	assertStatus(t, saveSettings(app, token, true, agentOf("Kept/1")), http.StatusSeeOther)
+	r := app.send(formPost("/settings/password", passwordChangeFields("wrong one", "another long secret", "another long secret")).as(token))
+	assertStatus(t, r, http.StatusForbidden)
+	mustContain(t, r, `value="Kept/1"`, `name="link_check_enabled" value="on" checked>`)
+}
+
+func TestAccountAddressSendsASignedInUserToSettings(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("henry", false)
+	mustRedirect(t, app.send(get("/account").as(token)), "/settings")
+}
+
+func TestAccountAddressStillAsksASignedOutVisitorToSignIn(t *testing.T) {
+	app := runningApp(t)
+	mustRedirect(t, app.send(get("/account")), "/login?next=%2Faccount")
+}
+
+func TestOldAccountFormAddressesAreGone(t *testing.T) {
+	app := runningApp(t)
+	token := app.signIn("henry", false)
+	for _, uri := range []string{"/account/password", "/account/sessions/revoke-others", "/account/sessions/0123456789abcdef/revoke"} {
+		assertStatus(t, app.send(formPost(uri, "").as(token)), http.StatusNotFound)
+	}
 }
 
 func TestTransferPageLinksToBothExports(t *testing.T) {
@@ -644,7 +703,7 @@ func TestFormPostNeedsMatchingOrigin(t *testing.T) {
 }
 
 func TestOnlyPathOnThisSiteIsSameSitePath(t *testing.T) {
-	for _, good := range []string{"/", "/account", "/?q=a&page=2", "/a/b?x=%2F%2F"} {
+	for _, good := range []string{"/", "/settings", "/?q=a&page=2", "/a/b?x=%2F%2F"} {
 		if !sameSitePath(good) {
 			t.Errorf("%q refused", good)
 		}

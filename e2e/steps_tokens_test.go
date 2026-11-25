@@ -17,7 +17,6 @@ const (
 var tokenSecret = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func registerTokenSteps(sc *godog.ScenarioContext, w *world) {
-	sc.Step(`^I open Settings$`, w.openSettings)
 	sc.Step(`^I create the API token `+quoted+`$`, withString(w.createAPIToken))
 	sc.Step(`^I try to create the API token `+quoted+`$`, withString(w.tryCreateAPIToken))
 	sc.Step(`^I am shown the new token once$`, w.seeNewToken)
@@ -34,14 +33,6 @@ func registerTokenSteps(sc *godog.ScenarioContext, w *world) {
 		}
 		return nil
 	})
-}
-
-func (w *world) openSettings() error {
-	if err := w.click("#sidebar a[href='/settings']"); err != nil {
-		return err
-	}
-	_, err := w.element(tokenForm)
-	return err
 }
 
 // createAPIToken waits for the new token to be listed: the script swaps the page

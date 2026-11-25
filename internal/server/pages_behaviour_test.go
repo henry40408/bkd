@@ -303,7 +303,7 @@ func TestShellPagesAnswer500WhenTheBookmarkCountsFail(t *testing.T) {
 	app.breakTable("bookmarks")
 	user := fmt.Sprintf("/users/%d", member)
 	requests := []sent{
-		get("/confirm"), get("/settings"), get("/account"), get("/users"),
+		get("/confirm"), get("/settings"), get("/users"),
 		get(user + "/password"), get(user + "/delete"),
 		formPost("/bookmarks/bulk", "id-1=1&action=delete&"+bulkContext),
 	}

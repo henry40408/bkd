@@ -70,13 +70,13 @@ func TestAccountRoutesAnswer500WhenTheSessionTableRefusesChanges(t *testing.T) {
 		formPost("/login", "username=alice&password=correct+horse+battery"),
 		formPost("/logout", ""),
 		formPost("/confirm", "password=correct+horse+battery"),
-		formPost("/account/sessions/revoke-others", ""),
-		formPost("/account/sessions/"+otherSession+"/revoke", ""),
-		formPost("/account/password", passwords),
+		formPost("/settings/sessions/revoke-others", ""),
+		formPost("/settings/sessions/"+otherSession+"/revoke", ""),
+		formPost("/settings/password", passwords),
 	})
 }
 
-func TestAccountRoutesAnswer500WhenTheUserTableRefusesChanges(t *testing.T) {
+func TestSettingsRoutesAnswer500WhenTheUserTableRefusesChanges(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("alice", false)
 	app.refuseChanges("users", "UPDATE", "DELETE", "INSERT")
@@ -84,7 +84,7 @@ func TestAccountRoutesAnswer500WhenTheUserTableRefusesChanges(t *testing.T) {
 	expectEvery500(t, app, token, []sent{
 		formPost("/settings", "link_check_enabled=on"),
 		formPost("/settings", "link_check_enabled=on&link_check_user_agent=Agent%2F1"),
-		formPost("/account/password", passwords),
+		formPost("/settings/password", passwords),
 	})
 }
 
@@ -138,7 +138,6 @@ func TestPagesAnswer500WhenTheSessionTableFails(t *testing.T) {
 	app.breakTable("sessions")
 	expectEvery500(t, app, admin, []sent{
 		get("/"),
-		get("/account"),
 		get("/settings"),
 		get("/transfer"),
 		get("/users"),

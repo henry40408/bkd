@@ -86,5 +86,5 @@ Feature: Narrow windows
       | /?select=1        | All bookmarks     |
       | /bookmarks/1/edit | Edit bookmark     |
       | /transfer         | Import and export |
-      | /account          | Account           |
+      | /settings         | Settings          |
       | /users            | Users             |

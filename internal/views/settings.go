@@ -16,7 +16,7 @@ type SettingsView struct {
 	// background check on for this server.
 	ServerChecksLinks bool
 
-	// Now is the time the token list is shown relative to.
+	// Now is the time the token and session lists are shown relative to.
 	Now    int64
 	Tokens []TokenRow
 	// NewToken is the secret of a token made by this request. It is shown once.
@@ -25,6 +25,12 @@ type SettingsView struct {
 	TokenName          string
 	TokenError         string
 	MaxTokenNameLength int
+
+	// Sessions and PasswordError belong to the password sections, which a user
+	// signed in by the reverse proxy does not get (Shell.Forwarded): there is no
+	// password here to change and there are no sessions to end.
+	Sessions      []SessionRow
+	PasswordError string
 }
 
 // TokenRow is one API token on the settings page. LastUsedAt is nil until the
@@ -36,19 +42,26 @@ type TokenRow struct {
 	LastUsedAt *int64
 }
 
-// SettingsPage renders the settings page.
+// SettingsPage renders the settings page. Its sections are one sheet, so the
+// page has one heavy rule at the top; each form sits inside the section it
+// belongs to, except the first, which spans two.
 func SettingsPage(view SettingsView) string {
 	content := group(
 		el("h1", nil, text("Settings")),
-		// One form for both sections: a post without the box would turn the
-		// background check off, so the two settings are always saved together.
-		el("form", []attr{classes("sheet"), a("method", "post"), a("action", "/settings")},
-			linkCheckSection(view),
-			userAgentSection(view),
-			errorLine(view.Error),
-			formButtons(submitButton("Save")),
+		sheet(
+			// One form for both sections: a post without the box would turn the
+			// background check off, so the two settings are always saved together.
+			el("form", []attr{a("method", "post"), a("action", "/settings")},
+				linkCheckSection(view),
+				userAgentSection(view),
+				errorLine(view.Error),
+				formButtons(submitButton("Save")),
+			),
+			tokensSection(view),
+			maybe(!view.Shell.Forwarded, func() node {
+				return group(sessionsSection(view), passwordSection(view))
+			}),
 		),
-		sheet(tokensSection(view)),
 	)
 	return framed("Settings · bkd", view.Shell, content)
 }

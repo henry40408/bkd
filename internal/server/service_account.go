@@ -169,7 +169,8 @@ func (a *App) authenticate(r *http.Request, input loginInput) (*users.LoginRecor
 	return &record, nil
 }
 
-// refuseProxyUser: a user the proxy signed in has no password here to change or confirm.
+// refuseProxyUser: a user the proxy signed in has no password here to change or
+// confirm, and no sessions to end.
 func refuseProxyUser(user auth.SessionUser) *apiError {
 	if user.ViaProxy {
 		return forbidden("your sign-in is managed by the single sign-on provider")
@@ -297,6 +298,9 @@ func (a *App) confirmPassword(r *http.Request, c caller, user auth.SessionUser, 
 // revokeSession ends one of the caller's own sessions. Another user's id answers
 // 404, like a missing one.
 func (a *App) revokeSession(r *http.Request, user auth.SessionUser, id string) *apiError {
+	if fault := refuseProxyUser(user); fault != nil {
+		return fault
+	}
 	found, err := a.sessions.RevokeByID(r.Context(), user.UserID, id)
 	if err != nil {
 		return internal(err)
@@ -309,6 +313,9 @@ func (a *App) revokeSession(r *http.Request, user auth.SessionUser, id string) *
 }
 
 func (a *App) revokeOtherSessions(r *http.Request, c caller, user auth.SessionUser) *apiError {
+	if fault := refuseProxyUser(user); fault != nil {
+		return fault
+	}
 	count, err := a.sessions.RevokeOthers(r.Context(), user.UserID, c.token)
 	if err != nil {
 		return internal(err)

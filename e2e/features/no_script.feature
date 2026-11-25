@@ -104,8 +104,8 @@ Feature: The pages work without a script
     Then I am told "Saved."
     And the user list shows "mei"
 
-  Scenario: The password page works with plain forms
-    When I open Account
+  Scenario: The password form works with plain forms
+    When I open Settings
     And I change my password from "correct-horse-battery" to "a-brand-new-password" but repeat "a-brand-new-passwore"
     Then I see the error "are different"
 

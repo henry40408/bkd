@@ -9,7 +9,6 @@ const (
 	SectionBookmarks Section = iota
 	SectionTransfer
 	SectionSettings
-	SectionAccount
 	SectionUsers
 )
 
@@ -111,7 +110,6 @@ func sectionList(shell Shell) node {
 		countedLink(FilterLink{Label: "All bookmarks", Count: shell.Total, Href: "/", Current: shell.AllCurrent}),
 		sectionLink("/transfer", "Import and export", on(SectionTransfer)),
 		sectionLink("/settings", "Settings", on(SectionSettings)),
-		maybe(!shell.Forwarded, func() node { return sectionLink("/account", "Account", on(SectionAccount)) }),
 		maybe(shell.IsAdmin, func() node { return sectionLink("/users", "Manage users", on(SectionUsers)) }),
 	)
 }

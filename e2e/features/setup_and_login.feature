@@ -53,8 +53,15 @@ Feature: Setup and sign-in
 
   Scenario: A page opened while signed out returns there after sign-in
     Given the admin "root" exists
-    When I open the site at "/account"
+    When I open the site at "/settings"
     Then I see the sign-in page
-    And the address is "/login?next=%2Faccount"
+    And the address is "/login?next=%2Fsettings"
     When I sign in as "root" with the right password
-    Then the address is "/account"
+    Then the address is "/settings"
+
+  Scenario: The old Account address opened while signed out ends on Settings after sign-in
+    Given the admin "root" exists
+    When I open the site at "/account"
+    Then the address is "/login?next=%2Faccount"
+    When I sign in as "root" with the right password
+    Then the address is "/settings"

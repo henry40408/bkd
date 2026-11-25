@@ -170,7 +170,7 @@ func (a *Api) ImportHTML(who Session, bookmarksFile string) (ImportReport, error
 // SignedInUser is the username the server still sees behind the session, or
 // "" once the session no longer works.
 func (a *Api) SignedInUser(who Session) (string, error) {
-	response, err := a.send(request{method: http.MethodGet, path: "/account"}.as(who))
+	response, err := a.send(request{method: http.MethodGet, path: "/settings"}.as(who))
 	if err != nil {
 		return "", err
 	}
@@ -178,13 +178,13 @@ func (a *Api) SignedInUser(who Session) (string, error) {
 		return "", nil
 	}
 	if response.status != http.StatusOK {
-		return "", fmt.Errorf("reading the account page failed with %d", response.status)
+		return "", fmt.Errorf("reading the settings page failed with %d", response.status)
 	}
 	const marker = "Signed in as <strong>"
 	_, rest, found := strings.Cut(response.body, marker)
 	name, _, closed := strings.Cut(rest, "</strong>")
 	if !found || !closed {
-		return "", fmt.Errorf("the account page does not say who is signed in")
+		return "", fmt.Errorf("the settings page does not say who is signed in")
 	}
 	return html.UnescapeString(name), nil
 }
