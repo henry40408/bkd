@@ -2,16 +2,20 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/henry40408/bkd/internal/auth"
+	"github.com/henry40408/bkd/internal/bookmarks"
 	"github.com/henry40408/bkd/internal/dbtest"
 	"github.com/henry40408/bkd/internal/linkcheck"
 )
@@ -70,12 +74,6 @@ type reply struct {
 
 func (r reply) json() map[string]any {
 	var out map[string]any
-	_ = json.Unmarshal([]byte(r.text), &out)
-	return out
-}
-
-func (r reply) jsonList() []any {
-	var out []any
 	_ = json.Unmarshal([]byte(r.text), &out)
 	return out
 }
@@ -150,7 +148,8 @@ func (a *testApp) addUser(username string, admin bool) int64 {
 }
 
 func (a *testApp) login(username, password string) reply {
-	return a.send(post("/api/login", map[string]any{"username": username, "password": password}))
+	fields := url.Values{"username": {username}, "password": {password}}
+	return a.send(formPost("/login", fields.Encode()))
 }
 
 // signIn adds a user and returns the session token.
@@ -158,10 +157,20 @@ func (a *testApp) signIn(username string, admin bool) string {
 	a.t.Helper()
 	a.addUser(username, admin)
 	r := a.login(username, testPassword)
-	if r.status != http.StatusOK {
+	if r.status != http.StatusSeeOther {
 		a.t.Fatalf("login: %d %s", r.status, r.text)
 	}
 	return sessionToken(a.t, r)
+}
+
+// confirmed signs in an admin and has them type their password again, as the
+// pages that change accounts ask.
+func (a *testApp) confirmed(username string) string {
+	a.t.Helper()
+	token := a.signIn(username, true)
+	r := a.send(formPost("/confirm", "password="+url.QueryEscape(testPassword)).as(token))
+	assertStatus(a.t, r, http.StatusSeeOther)
+	return token
 }
 
 func sessionToken(t *testing.T, r reply) string {
@@ -175,30 +184,37 @@ func sessionToken(t *testing.T, r reply) string {
 	return token
 }
 
-func (a *testApp) createBookmark(token, title string, tags ...string) map[string]any {
+// createBookmark saves a bookmark through the form of the signed-in user and
+// returns it as stored. Its address is made from the title.
+func (a *testApp) createBookmark(token, title string, tags ...string) bookmarks.Bookmark {
 	a.t.Helper()
-	url := "https://example.com/" + strings.ReplaceAll(title, " ", "-")
-	r := a.send(post("/api/bookmarks", bookmarkBody(url, title, tags...)).as(token))
-	if r.status != http.StatusCreated {
-		a.t.Fatalf("create: %d %s", r.status, r.text)
-	}
-	return r.json()
+	address := "https://example.com/" + strings.ReplaceAll(title, " ", "-")
+	return a.createBookmarkAt(token, address, title, tags...)
 }
 
-func bookmarkBody(url, title string, tags ...string) map[string]any {
-	if tags == nil {
-		tags = []string{}
+func (a *testApp) createBookmarkAt(token, address, title string, tags ...string) bookmarks.Bookmark {
+	a.t.Helper()
+	fields := url.Values{"url": {address}, "title": {title}, "tags": {strings.Join(tags, ",")}}
+	a.saveThroughForm(token, fields.Encode())
+	userID := a.ownerOf(token)
+	var id int64
+	query := "SELECT id FROM bookmarks WHERE url = ?1 AND user_id = ?2 ORDER BY id DESC LIMIT 1"
+	if err := a.db.QueryRow(query, address, userID).Scan(&id); err != nil {
+		a.t.Fatalf("the form saved nothing for user %d: %v", userID, err)
 	}
-	return map[string]any{"url": url, "title": title, "note": "", "tags": tags}
+	return a.storedBookmark(userID, id)
 }
 
-func titlesOf(t *testing.T, r reply) []string {
-	t.Helper()
-	titles := []string{}
-	for _, item := range r.json()["bookmarks"].([]any) {
-		titles = append(titles, item.(map[string]any)["title"].(string))
+// ownerOf is the user a session cookie belongs to. Tests look rows up by it,
+// so a bookmark saved under the wrong user is not found.
+func (a *testApp) ownerOf(token string) int64 {
+	a.t.Helper()
+	sum := sha256.Sum256([]byte(token))
+	var userID int64
+	if err := a.db.QueryRow("SELECT user_id FROM sessions WHERE token_hash = ?1", hex.EncodeToString(sum[:])).Scan(&userID); err != nil {
+		a.t.Fatalf("no session for the cookie: %v", err)
 	}
-	return titles
+	return userID
 }
 
 func assertStatus(t *testing.T, r reply, want int) {

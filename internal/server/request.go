@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-
-	"github.com/henry40408/bkd/internal/search"
 )
 
 // field names a JSON field and whether the request carried it.
@@ -33,12 +31,6 @@ func pathID(r *http.Request) (int64, *textError) {
 		return 0, &textError{http.StatusBadRequest, "Invalid URL: Cannot parse `" + raw + "` to a `i64`"}
 	}
 	return id, nil
-}
-
-// filterOf reads the q, tag and status parameters every bookmark query takes.
-func filterOf(r *http.Request) search.Filter {
-	query := r.URL.Query()
-	return search.NewFilter(query.Get("q"), query.Get("tag")).WithStatus(query.Get("status"))
 }
 
 // optionalUint32 reads a query parameter that may be absent. A bad value is a

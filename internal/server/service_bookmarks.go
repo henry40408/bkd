@@ -88,6 +88,15 @@ type linkCheckChange struct {
 	UserAgent *string
 }
 
+// settingsView is a user's link check preferences as stored.
+type settingsView struct {
+	// LinkCheckEnabled: whether the server may check this user's bookmarks in the background.
+	LinkCheckEnabled bool
+	// LinkCheckUserAgent is the User-Agent of this user's link checks; empty
+	// means the built-in one.
+	LinkCheckUserAgent string
+}
+
 // saveLinkCheckSettings answers the settings as stored. The User-Agent is
 // checked before anything is written and both settings go in one statement,
 // so a refusal or a database failure changes nothing.

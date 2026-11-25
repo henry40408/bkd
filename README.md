@@ -9,7 +9,7 @@
 [![Casual Maintenance Intended](https://casuallymaintained.tech/badge.svg)](https://casuallymaintained.tech/)
 [![Vibe Coded](https://img.shields.io/badge/vibe_coded-Claude-d97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
 
-A single-binary, multi-user bookmark manager with a web front end and a JSON API. Bookmarks have tags and notes, search has its own syntax, and bkd can check links, import and export browser bookmarks, and sign people in through a reverse proxy such as Authelia.
+A single-binary, multi-user bookmark manager with a web front end and a linkding-compatible API. Bookmarks have tags and notes, search has its own syntax, and bkd can check links, import and export browser bookmarks, and sign people in through a reverse proxy such as Authelia.
 
 ## Screenshots
 
@@ -50,7 +50,7 @@ go run ./cmd/bkd --db bkd.sqlite3 --addr 127.0.0.1:8080
 
 ### Setup and settings
 
-On the first start, with an empty database, bkd logs a one-time setup token like `WDP4S-V8PGD`. Whoever can read the log can create the first admin, so keep the log private. Open the site and enter it, with the first admin's username and password, on the setup page (or send them to `POST /api/setup`). Afterwards, admins manage accounts under "Manage users" (create, promote, demote, disable, reset password, delete); bkd never lets the last active admin be removed. Everyone can change their own password under "Change password": new passwords need at least 12 characters and must not contain the username, and a change signs the account out everywhere else. A session also ends after 7 days without use. "Account" also lists the browsers signed in to your account, where you can end any of them. Admin changes to accounts (create, promote, demote, disable, reset password, delete) ask for your password again if you have not typed it in the last 5 minutes.
+On the first start, with an empty database, bkd logs a one-time setup token like `WDP4S-V8PGD`. Whoever can read the log can create the first admin, so keep the log private. Open the site and enter it, with the first admin's username and password, on the setup page. Afterwards, admins manage accounts under "Manage users" (create, promote, demote, disable, reset password, delete); bkd never lets the last active admin be removed. Everyone can change their own password under "Change password": new passwords need at least 12 characters and must not contain the username, and a change signs the account out everywhere else. A session also ends after 7 days without use. "Account" also lists the browsers signed in to your account, where you can end any of them. Admin changes to accounts (create, promote, demote, disable, reset password, delete) ask for your password again if you have not typed it in the last 5 minutes.
 
 | Flag | Environment | Default | Meaning |
 | --- | --- | --- | --- |
@@ -113,11 +113,11 @@ Every screen has its own address: the search, the tag or status you chose in the
 
 ## Random
 
-The "Random" button next to the search box shows one bookmark picked from what the search and the tag filter show right now (with neither, from all of yours). "Another" picks again; changing the search or the tag, or adding, editing or deleting a bookmark, closes the pick. Over the API: `GET /api/bookmarks/random?q=&tag=` (404 when nothing matches).
+The "Random" button next to the search box shows one bookmark picked from what the search and the tag filter show right now (with neither, from all of yours). "Another" picks again; changing the search or the tag, or adding, editing or deleting a bookmark, closes the pick.
 
 ## Bulk actions
 
-"Select" next to the search box turns on checkboxes. Tick the bookmarks you want (Shift-click ticks a range, "Select all" ticks every row shown, and reads "Select the 50 shown" while "Load more" still hides some), then add a tag to all of them, remove a tag from all of them, or delete them. Tags are separated by commas, as in the add form. Delete asks first and cannot be undone. After an action, select mode ends. Over the API: `POST /api/bookmarks/bulk` with `{"ids": [...], "action": "delete" | "add_tags" | "remove_tags", "tags": [...]}` (up to 200 ids; one transaction, so it changes all of them or none; 404 if any id is missing or not yours). It answers `{"changed": n}`.
+"Select" next to the search box turns on checkboxes. Tick the bookmarks you want (Shift-click ticks a range, "Select all" ticks every row shown, and reads "Select the 50 shown" while "Load more" still hides some), then add a tag to all of them, remove a tag from all of them, or delete them. Tags are separated by commas, as in the add form. Delete asks first and cannot be undone. After an action, select mode ends.
 
 ## Link check
 
@@ -132,15 +132,15 @@ A site that answers 429 or 503 is asked to be left alone, and so is a site that 
 
 A result is cleared when you change the bookmark's URL. The sidebar lists each result under "Status" with a count (Broken, Moved, Not confirmed, OK, Not checked; a result with no bookmarks is left out); choose one to show only those bookmarks, or search with `status:broken`.
 
-The server only contacts public addresses, since it makes the requests on behalf of every user. Addresses for private networks, this machine and link-local ranges (such as cloud metadata) are never contacted, including through a redirect or a host name that resolves to one. This means bkd cannot check links to services on your own network. Each request has a 10 second limit and follows at most 5 redirects. One user can run one check at a time (429 otherwise). Over the API: `POST /api/bookmarks/check` with `{"ids": [...]}` (1 to 200 ids; 404 if any id is missing or not yours). It answers with a server-sent event stream: an event `result` with `{"id", "link": {"status", "checked_at", "detail"}}` for each link as soon as it is checked, then `done`. Closing the connection stops the check.
+The server only contacts public addresses, since it makes the requests on behalf of every user. Addresses for private networks, this machine and link-local ranges (such as cloud metadata) are never contacted, including through a redirect or a host name that resolves to one. This means bkd cannot check links to services on your own network. Each request has a 10 second limit and follows at most 5 redirects. One user can run one check at a time (429 otherwise). With the script, the page streams the results from `POST /api/bookmarks/check` as each link is checked; that route is for the page, not a public interface. Closing the connection stops the check.
 
 ### Background check
 
-bkd can also check your bookmarks without being asked. It is off until both sides agree: the administrator starts the server with `--link-check-interval` (seconds between rounds), and you tick "Check my bookmarks in the background" under "Settings". Each round checks up to `--link-check-batch` bookmarks of the users who ticked it, never-checked ones first and then the longest unchecked, with users taking turns so one large collection does not use up the rounds. A bookmark with a result less than 7 days old is skipped. Requests to one site are 1.5 seconds apart. Results are the same as for the button, and the same public-address rule applies. Over the API: `GET` and `PUT /api/settings` with `{"link_check_enabled": bool, "link_check_user_agent": string}`.
+bkd can also check your bookmarks without being asked. It is off until both sides agree: the administrator starts the server with `--link-check-interval` (seconds between rounds), and you tick "Check my bookmarks in the background" under "Settings". Each round checks up to `--link-check-batch` bookmarks of the users who ticked it, never-checked ones first and then the longest unchecked, with users taking turns so one large collection does not use up the rounds. A bookmark with a result less than 7 days old is skipped. Requests to one site are 1.5 seconds apart. Results are the same as for the button, and the same public-address rule applies.
 
 ### User-Agent
 
-Some sites turn away anything that says it is a robot. Under "Settings", "User-Agent" sets the `User-Agent` header that bkd sends to the sites your bookmarks point at: the "Check links" button, the background check, and the add and edit forms when they read a page for its title and description (see "Page details"); the box shows the built-in value as a hint. Leave it empty to keep the built-in one. The setting is yours alone: it does not change what other users' checks send. It is trimmed, at most 200 characters and printable ASCII only (a line break or an accented letter is refused with 400). Over the API, `PUT /api/settings` requires `link_check_enabled`; `link_check_user_agent` is optional there, and leaving it out (or sending `null`) keeps the stored value, while `""` goes back to the built-in one. `GET /api/settings` answers `""` when the built-in value is in use.
+Some sites turn away anything that says it is a robot. Under "Settings", "User-Agent" sets the `User-Agent` header that bkd sends to the sites your bookmarks point at: the "Check links" button, the background check, and the add and edit forms when they read a page for its title and description (see "Page details"); the box shows the built-in value as a hint. Leave it empty to keep the built-in one. The setting is yours alone: it does not change what other users' checks send. It is trimmed, at most 200 characters and printable ASCII only (a line break or an accented letter is refused with 400).
 
 ## Page details
 
@@ -148,11 +148,9 @@ The add and edit forms read the page behind the address while you fill them in, 
 
 bkd keeps the page's title and description apart from your own title and note (`site_title`, `site_description`), and your own text is never overwritten by them later. When you change a bookmark's URL, the stored details are replaced by those of the new address, or cleared when the new page could not be read. The details are not shown in the list and are not searched. Open Graph tags (`og:title`, `og:description`) are preferred; without them the page's `<title>` and `<meta name="description">` are used. Text is cleaned to one line (control characters removed) and cut to at most 300 characters for the title and 500 for the description, in the form's placeholders as well as in what is saved. Pages are read as UTF-8 only, and only the first 512 KiB, which is where the head of a page is. Images (`og:image`) are not read or shown.
 
-Reading a page follows the same rules as the link check: public addresses only, at most 5 redirects, 10 seconds, your User-Agent (see above), and the one-at-a-time slot of the link check (429 while one runs). Import and the API do not read pages: a bookmark made through them has no page details unless the linkding-compatible API was given a `description`. bkd's own JSON API still requires a title.
+Reading a page follows the same rules as the link check: public addresses only, at most 5 redirects, 10 seconds, your User-Agent (see above), and the one-at-a-time slot of the link check (429 while one runs). Import and the API do not read pages: a bookmark made through them has no page details unless the linkding-compatible API was given a `description`.
 
 To read the pages of bookmarks that have none (after an import, for example), go to select mode, tick them and press "Read pages". It works like "Check links": the server reads one page after another from the same site, the progress shows with a Stop button, a site that asks to be left alone is skipped, and when it ends a summary says how many pages were read, how many notes were filled and how many pages could not be read. For each page that says something, the page's title and description are stored as its details, and a note that is blank is filled with the description, so an imported bookmark gets one. Your own title and a note that has text are never changed, and a page that cannot be read or says nothing changes nothing. Up to 200 bookmarks at a time, like the link check, and one at a time with it. Without a script the server waits until the read ends and shows the list again; if some pages were not read, only those stay ticked, with a message saying how many, so that you can read them again.
-
-Over the API: `POST /api/bookmarks/read` with `{"ids": [1, 2]}` does the same as the button and answers with server-sent events like `POST /api/bookmarks/check`: `result` (`id`, `site`, `note_filled`), `failed` (`id`, `detail`), `skipped` (`id`, `reason`, `host`), `done`. `POST /api/site-preview` with `{"url": "https://..."}` answers `{"title", "description"}` (empty strings for what the page does not say). Errors: 422 (no `url`), 429 (a check or another read is running), 502 (the page could not be read; the message says why). A bookmark's `site` field is `{"title", "description"}`, or `null` when no page was read; `PUT /api/bookmarks/{id}` keeps it while the URL stays and clears it when the URL changes.
 
 ## API tokens
 
@@ -163,7 +161,6 @@ A program that cannot sign in through the browser, such as a browser extension o
 - Disabling an account, resetting its password and changing your own password all end every token of that user (and every session). If a cookie of yours was stolen, a new password therefore also ends a token the thief made.
 - A user a reverse proxy signs in can have tokens too. The proxy must let the program's requests to `/api/` through without its own sign-in, since a program cannot answer the proxy's sign-in page; the token is then the only credential on those requests. That location must still clear or replace `Remote-User` and `Remote-Groups` (for example `proxy_set_header Remote-User "";` in nginx): bkd trusts these headers from the proxy's address, so a client could otherwise send `Remote-User: admin` through the bypass.
 - A proxy user's token does not end when the identity provider removes the person or the proxy signs them out. Disable their account in bkd. If an admin group is set, their `is_admin` flag follows `Remote-Groups` only on requests that come through the proxy's sign-in, not on token requests.
-- Over the API (as a signed-in user): `GET /api/account/tokens` lists them (never the secret), `POST /api/account/tokens` with `{"name": "..."}` makes one and answers 201 with the secret in `token`, and `DELETE /api/account/tokens/{id}` ends one.
 
 ## linkding-compatible API
 
@@ -198,8 +195,6 @@ How bkd's fields map to linkding's, and what differs:
 ## Import and export
 
 Under "Import and export" in the sidebar, choose the bookmarks file your browser exported (Chrome, Firefox, Safari, Pocket and Raindrop all write the same `.html` format). Folders become tags, the date saved is kept when the file has one (Safari's does not), and a link you already have is skipped, so importing the same file twice is safe. Links that are not web links (`javascript:`, `place:`) are skipped and listed in the result. The same screen downloads your bookmarks as HTML (for a browser or another service) or JSON (a backup).
-
-Over the API: send the file to `POST /api/import` with `Content-Type: text/html` and your session cookie, and read `GET /api/export?format=html|json`.
 
 ## Health check
 

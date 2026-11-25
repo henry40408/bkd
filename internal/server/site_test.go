@@ -1,10 +1,10 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -43,15 +43,19 @@ func siteFields(address string) []string {
 	return []string{"site_url", address, "site_title", "Og title", "site_description", "Og description"}
 }
 
+// storedBookmark is the bookmark as stored for the session's user, in the shape
+// the JSON of a bookmark has. Another user's bookmark is not found.
 func storedBookmark(t *testing.T, app *testApp, token string, id int64) map[string]any {
 	t.Helper()
-	for _, item := range app.send(get("/api/bookmarks").as(token)).json()["bookmarks"].([]any) {
-		if bookmark := item.(map[string]any); int64(bookmark["id"].(float64)) == id {
-			return bookmark
-		}
+	encoded, err := json.Marshal(app.storedBookmark(app.ownerOf(token), id))
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Fatalf("no bookmark %d", id)
-	return nil
+	var saved map[string]any
+	if err := json.Unmarshal(encoded, &saved); err != nil {
+		t.Fatal(err)
+	}
+	return saved
 }
 
 // ---- POST /api/site-preview ----
@@ -88,7 +92,7 @@ func TestSitePreviewSendsTheUsersUserAgent(t *testing.T) {
 	mei := app.signIn("mei", false)
 	site, seen := userAgentSite()
 	defer site.Close()
-	assertStatus(t, putSettings(app, henry, map[string]any{"link_check_enabled": false, "link_check_user_agent": "Henry/1"}), http.StatusOK)
+	assertStatus(t, saveSettings(app, henry, false, agentOf("Henry/1")), http.StatusSeeOther)
 
 	assertStatus(t, app.send(previewAs(henry, site.URL+"/henry")), http.StatusOK)
 	assertStatus(t, app.send(previewAs(mei, site.URL+"/mei")), http.StatusOK)
@@ -183,6 +187,9 @@ func TestSitePreviewNeedsASessionTheSameOriginAndTheRightRequest(t *testing.T) {
 	assertStatus(t, app.send(previewAs(token, site.URL).originated("http://evil.test")), http.StatusForbidden)
 	assertStatus(t, app.send(get("/api/site-preview").as(token)), http.StatusMethodNotAllowed)
 	assertStatus(t, app.send(post("/api/site-preview", map[string]any{}).as(token)), http.StatusUnprocessableEntity)
+	assertStatus(t, app.send(post("/api/site-preview", map[string]any{"url": nil}).as(token)), http.StatusUnprocessableEntity)
+	broken := sent{method: "POST", uri: "/api/site-preview"}.withRaw("application/json", "{").as(token)
+	assertStatus(t, app.send(broken), http.StatusBadRequest)
 }
 
 func assertEqualText(t *testing.T, got, want string) {
@@ -394,36 +401,6 @@ func TestEditFormRefusedShowsTheDetailsAgain(t *testing.T) {
 	r := app.send(formPost("/bookmarks/1/edit", fieldsOf(append([]string{"url", address, "title", "", "note", "", "tags", tooLongTag, "back", "/"}, siteFields(address)...)...)).as(token))
 	assertStatus(t, r, http.StatusBadRequest)
 	mustContain(t, r, `name="site_title" value="Og title"`, `placeholder="Og title"`, `placeholder="Og description"`)
-}
-
-// ---- the JSON API ----
-
-func TestTheJSONAPIKeepsTheSiteWhileTheAddressStaysAndDropsItWhenItChanges(t *testing.T) {
-	app := runningApp(t)
-	token := app.signIn("henry", false)
-	address := "https://example.com/a"
-	app.saveThroughForm(token, fieldsOf(append([]string{"url", address, "title", "Mine", "note", "", "tags", ""}, siteFields(address)...)...))
-	uri := "/api/bookmarks/" + strconv.Itoa(1)
-
-	kept := app.send(put(uri, bookmarkBody(address, "Renamed")).as(token))
-	assertStatus(t, kept, http.StatusOK)
-	if got := kept.json()["site"].(map[string]any); got["title"] != "Og title" {
-		t.Fatalf("site = %v", got)
-	}
-	moved := app.send(put(uri, bookmarkBody("https://example.com/b", "Renamed")).as(token))
-	assertStatus(t, moved, http.StatusOK)
-	if moved.json()["site"] != nil {
-		t.Fatalf("site = %v after the address changed", moved.json()["site"])
-	}
-}
-
-func TestABookmarkMadeThroughTheJSONAPIHasNoSite(t *testing.T) {
-	app := runningApp(t)
-	token := app.signIn("henry", false)
-	created := app.createBookmark(token, "Plain")
-	if created["site"] != nil {
-		t.Fatalf("site = %v", created["site"])
-	}
 }
 
 // ---- text longer than a bookmark keeps ----

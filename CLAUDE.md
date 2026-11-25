@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## Overview
 
-bkd is a single-binary, multi-user bookmark manager (Go, standard library `net/http`, pure-Go SQLite): a web front end rendered on the server, a JSON API under `/api`, a link checker, browser bookmark import and export, and sign-in through a reverse proxy (forward auth). It was rewritten from Rust; the Rust server's behaviour was the specification; the values captured from it that remain are listed under Tests. `ARCHITECTURE.md` describes the design in depth and the README is the user documentation; read the section of `ARCHITECTURE.md` for the area you touch before changing security-related code.
+bkd is a single-binary, multi-user bookmark manager (Go, standard library `net/http`, pure-Go SQLite): a web front end rendered on the server, a linkding-compatible JSON API under `/api` (token only; four session routes the pages call sit beside it), a link checker, browser bookmark import and export, and sign-in through a reverse proxy (forward auth). It was rewritten from Rust; the Rust server's behaviour was the specification; the values captured from it that remain are listed under Tests. `ARCHITECTURE.md` describes the design in depth and the README is the user documentation; read the section of `ARCHITECTURE.md` for the area you touch before changing security-related code.
 
 ## Commands
 
@@ -72,7 +72,7 @@ Thin binary (`cmd/bkd`) over internal packages, so tests build the handler direc
 | `internal/truncate` | `Runes`: cut a text to a number of characters, shared by bookmarks, search, importer and server |
 | `internal/linkcheck` | The link checker and its SSRF guard (public addresses only) |
 | `internal/backgroundcheck` | The periodic background link check |
-| `internal/server` | `App`, `Config`, routes, middleware, JSON API (`api_*.go`), pages (`pages_*.go`), shared `service_*.go`, SSE |
+| `internal/server` | `App`, `Config`, routes, middleware, the four session routes the pages call (`api_*.go`), the linkding API (`linkding_*.go`), pages (`pages_*.go`), shared `service_*.go`, SSE |
 | `internal/views` | Page builders returning strings with an escaping builder (`html.go`) |
 | `internal/assets` | CSS, JS and icons in `static/`, embedded with `go:embed` |
 | `internal/version` | `Version()` |
@@ -82,7 +82,7 @@ Thin binary (`cmd/bkd`) over internal packages, so tests build the handler direc
 
 ### Routes and layers
 
-`Handler` (`internal/server/routes.go`) mounts the JSON API under `/api`, the HTML pages and the static assets; every response goes through `securityHeaders`. API routes add `apiHeaders` and `sameOriginOnly` (a state-changing request whose `Origin` is present must equal `Host`); page routes add `pageHeaders` and, for forms, `formOriginRequired`. Pages and API handlers share the `service_*.go` functions so the rules exist once. See `ARCHITECTURE.md` for the route table.
+`Handler` (`internal/server/routes.go`) mounts the HTML pages, the static assets, the four session routes under `/api` that `app.js` calls (`mountAPI`: link check, read pages, site preview, export) and the linkding-compatible API (`mountLinkding`, token only); every response goes through `securityHeaders`. `mountAPI` routes add `apiHeaders` and `sameOriginOnly` (a state-changing request whose `Origin` is present must equal `Host`); page routes add `pageHeaders` and, for forms, `formOriginRequired`. Pages and the API handlers share the `service_*.go` functions so the rules exist once. See `ARCHITECTURE.md` for the route table.
 
 ### Security design
 
@@ -117,7 +117,7 @@ The image is `gcr.io/distroless/static-debian12:nonroot` (uid 65532; existing vo
 ## Conventions
 
 - `go.mod` is the only source of the Go version (`go` and `toolchain` lines); `e2e/go.mod` mirrors those two lines (CI checks it).
-- Keep API error texts and statuses compatible with the Rust server (the expected values in the tests) when touching handlers.
+- Keep the error texts and statuses of the pages and of the four session routes compatible with the Rust server (the expected values in the tests) when touching handlers. The linkding routes follow linkding and Django REST framework instead (`{"detail": ...}`); bkd's own JSON API of the Rust server is gone, so nothing there needs to match.
 - GitHub Actions are pinned by commit SHA with the tag as a trailing comment (`uses: owner/repo@<sha> # v1.2.3`).
 
 ## Accepted differences from the Rust server

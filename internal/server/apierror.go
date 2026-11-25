@@ -13,7 +13,7 @@ import (
 type apiError struct {
 	status  int
 	message string
-	// code lets the front end tell failures with one status apart.
+	// code lets the page routes tell failures with one status apart.
 	code string
 	// field names the request field a 400 is about. Only the linkding-compatible
 	// routes use it: they answer {"<field>": ["<message>"]}, as linkding does.
@@ -60,8 +60,8 @@ func (e *apiError) isNotSignedIn() bool {
 	return e.status == http.StatusUnauthorized && e.message == notSignedInMessage
 }
 
-// reauthRequired is an admin change that needs the password typed again. The front
-// end looks for the code, asks for the password and repeats the request.
+// reauthRequired is an admin change that needs the password typed again. The page
+// routes look for the code and send the admin to the password page.
 func reauthRequired() *apiError {
 	return &apiError{
 		status:  http.StatusForbidden,
@@ -72,10 +72,6 @@ func reauthRequired() *apiError {
 
 func notFound() *apiError {
 	return &apiError{status: http.StatusNotFound, message: "not found"}
-}
-
-func unsupportedMediaType(message string) *apiError {
-	return &apiError{status: http.StatusUnsupportedMediaType, message: message}
 }
 
 func tooManyRequests(wait time.Duration) *apiError {

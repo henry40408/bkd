@@ -120,11 +120,24 @@ func TestLastAdminCannotBeDemotedThroughForm(t *testing.T) {
 	mustContain(t, r, "at least one active admin")
 }
 
+func TestLastAdminCannotBeDisabledOrDeletedThroughForm(t *testing.T) {
+	app, admin, _ := adminWithMember(t)
+	disabled := app.send(formPost("/users/1/disabled", "is_disabled=true").as(admin))
+	assertStatus(t, disabled, http.StatusConflict)
+	mustContain(t, disabled, "at least one active admin")
+	deleted := app.send(formPost("/users/1/delete", "").as(admin))
+	assertStatus(t, deleted, http.StatusConflict)
+	mustContain(t, deleted, "at least one active admin")
+	if app.userFlag(1, "disabled_at IS NOT NULL") {
+		t.Error("the last admin was disabled")
+	}
+}
+
 func TestAdminCreatesUserThroughForm(t *testing.T) {
 	app, admin, _ := adminWithMember(t)
 	fields := "username=Bob&password=" + strings.ReplaceAll(testPassword, " ", "+") + "&is_admin=on"
 	mustRedirect(t, app.send(formPost("/users", fields).as(admin)), "/users?notice=user-changed")
-	assertStatus(t, app.login("bob", testPassword), http.StatusOK)
+	assertStatus(t, app.login("bob", testPassword), http.StatusSeeOther)
 	var bob int64
 	if err := app.db.QueryRow("SELECT id FROM users WHERE username = 'bob'").Scan(&bob); err != nil {
 		t.Fatal(err)
@@ -157,7 +170,7 @@ func TestAdminResetsPasswordThroughForm(t *testing.T) {
 	assertStatus(t, form, http.StatusOK)
 	mustContain(t, form, "Reset password for mei")
 	mustRedirect(t, app.send(formPost(uri, "password=a+brand+new+secret").as(admin)), "/users?notice=user-changed")
-	assertStatus(t, app.login("mei", "a brand new secret"), http.StatusOK)
+	assertStatus(t, app.login("mei", "a brand new secret"), http.StatusSeeOther)
 	assertStatus(t, app.login("mei", testPassword), http.StatusUnauthorized)
 }
 
@@ -247,11 +260,18 @@ func TestSetupPageIsOpenOnlyBeforeFirstAdmin(t *testing.T) {
 
 func TestSetupFormCreatesFirstAdminAndSignsThemIn(t *testing.T) {
 	app := awaitingSetupApp(t)
-	fields := "token=" + app.setupDisplay + "&username=henry&password=correct+horse+battery"
+	fields := "token=" + app.setupDisplay + "&username=Henry&password=correct+horse+battery"
 	r := app.send(formPost("/setup", fields))
 	mustRedirect(t, r, "/")
 	if r.headers.Get("Set-Cookie") == "" {
 		t.Error("no session cookie")
+	}
+	var isAdmin bool
+	if err := app.db.QueryRow("SELECT is_admin FROM users WHERE username = 'henry'").Scan(&isAdmin); err != nil {
+		t.Fatalf("setup did not store the lowercased name: %v", err)
+	}
+	if !isAdmin {
+		t.Error("the first account is not an admin")
 	}
 }
 
@@ -387,7 +407,7 @@ func TestChangingPasswordThroughFormKeepsThisBrowserOnly(t *testing.T) {
 	fresh := sessionToken(t, r)
 	mustContain(t, app.send(get(locationOf(r)).as(fresh)), "Password changed.")
 	assertStatus(t, app.send(get("/account").as(other)), http.StatusSeeOther)
-	assertStatus(t, app.login("henry", "a brand new secret"), http.StatusOK)
+	assertStatus(t, app.login("henry", "a brand new secret"), http.StatusSeeOther)
 }
 
 func TestRefusedPasswordChangeShowsAccountPageWithReason(t *testing.T) {
@@ -408,7 +428,7 @@ func TestRefusedPasswordChangeShowsAccountPageWithReason(t *testing.T) {
 		assertStatus(t, r, c.status)
 		mustContain(t, r, `role="alert"`, c.reason, "This browser")
 	}
-	assertStatus(t, app.login("henry", testPassword), http.StatusOK)
+	assertStatus(t, app.login("henry", testPassword), http.StatusSeeOther)
 }
 
 func TestTransferPageLinksToBothExports(t *testing.T) {

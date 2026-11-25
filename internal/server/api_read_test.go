@@ -229,7 +229,7 @@ func TestReadSendsTheUsersUserAgent(t *testing.T) {
 	mei := app.signIn("mei", false)
 	site, seen := userAgentSite()
 	defer site.Close()
-	assertStatus(t, putSettings(app, henry, map[string]any{"link_check_enabled": false, "link_check_user_agent": "Henry/1"}), http.StatusOK)
+	assertStatus(t, saveSettings(app, henry, false, agentOf("Henry/1")), http.StatusSeeOther)
 	henrysPage := app.addBookmarkAt(henry, site.URL+"/henry")
 	meisPage := app.addBookmarkAt(mei, site.URL+"/mei")
 
@@ -289,6 +289,8 @@ func TestReadWithoutIDsIsUnprocessableAndNeedsASession(t *testing.T) {
 	mustContain(t, missing, "missing field `ids`")
 	assertStatus(t, app.send(post("/api/bookmarks/read", map[string]any{"ids": []int{1}})), http.StatusUnauthorized)
 	assertStatus(t, app.send(get("/api/bookmarks/read").as(token)), http.StatusMethodNotAllowed)
+	broken := sent{method: "POST", uri: "/api/bookmarks/read"}.withRaw("application/json", "{").as(token)
+	assertStatus(t, app.send(broken), http.StatusBadRequest)
 }
 
 func TestReadOfAnotherUsersBookmarkIsNotFoundAndFreesTheSlot(t *testing.T) {

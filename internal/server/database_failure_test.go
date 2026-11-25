@@ -19,70 +19,14 @@ func TestBookmarkRoutesAnswer500WhenTheBookmarkTableFails(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("alice", false)
 	app.breakTable("bookmarks")
-	body := bookmarkBody("https://example.com/a", "A")
 	cases := []sent{
-		get("/api/bookmarks"),
-		get("/api/bookmarks/random"),
-		get("/api/tags"),
 		get("/api/export?format=json"),
 		get("/api/export?format=html"),
-		post("/api/bookmarks", body),
-		put("/api/bookmarks/1", body),
-		del("/api/bookmarks/1"),
-		post("/api/bookmarks/bulk", map[string]any{"action": "delete", "ids": []int{1}}),
 		get("/"),
 		get("/random"),
 		get("/bookmarks/1/edit"),
 		get("/bookmarks/1/delete"),
 		get("/transfer"),
-	}
-	for _, c := range cases {
-		r := app.send(c.as(token))
-		if r.status != http.StatusInternalServerError {
-			t.Errorf("%s %s: status = %d, want 500; body %q", c.method, c.uri, r.status, r.text)
-		}
-	}
-}
-
-func TestUserRoutesAnswer500WhenTheUserTableRefusesChanges(t *testing.T) {
-	app := runningApp(t)
-	admin := app.confirmed("root")
-	app.addUser("mei", false)
-	for _, event := range []string{"UPDATE", "DELETE", "INSERT"} {
-		app.exec("CREATE TRIGGER refuse_" + event + " BEFORE " + event + " ON users BEGIN SELECT RAISE(ABORT, 'refused'); END")
-	}
-	var meiID int64
-	if err := app.db.QueryRow("SELECT id FROM users WHERE username = 'mei'").Scan(&meiID); err != nil {
-		t.Fatal(err)
-	}
-	base := fmt.Sprintf("/api/users/%d", meiID)
-	cases := []sent{
-		post("/api/users", map[string]any{"username": "new", "password": testPassword}),
-		put(base+"/role", map[string]any{"is_admin": true}),
-		put(base+"/disabled", map[string]any{"is_disabled": true}),
-		put(base+"/password", map[string]any{"password": "a brand new password"}),
-		del(base),
-	}
-	for _, c := range cases {
-		r := app.send(c.as(admin))
-		if r.status != http.StatusInternalServerError {
-			t.Errorf("%s %s: status = %d, want 500; body %q", c.method, c.uri, r.status, r.text)
-		}
-	}
-}
-
-func TestSessionRoutesAnswer500WhenTheSessionTableFails(t *testing.T) {
-	app := runningApp(t)
-	token := app.signIn("alice", false)
-	app.breakTable("sessions")
-	cases := []sent{
-		get("/api/bookmarks"),
-		get("/api/settings"),
-		get("/api/account/sessions"),
-		put("/api/account/password", map[string]any{"current_password": testPassword, "new_password": "another long password"}),
-		post("/api/account/confirm", map[string]any{"password": testPassword}),
-		post("/api/logout", nil),
-		post("/api/login", map[string]any{"username": "alice", "password": testPassword}),
 	}
 	for _, c := range cases {
 		r := app.send(c.as(token))
@@ -123,12 +67,6 @@ func TestAccountRoutesAnswer500WhenTheSessionTableRefusesChanges(t *testing.T) {
 	app.refuseChanges("sessions", "INSERT", "DELETE", "UPDATE")
 	passwords := passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")
 	expectEvery500(t, app, token, []sent{
-		post("/api/login", map[string]any{"username": "alice", "password": testPassword}),
-		post("/api/logout", nil),
-		post("/api/account/confirm", map[string]any{"password": testPassword}),
-		del("/api/account/sessions"),
-		del("/api/account/sessions/" + otherSession),
-		put("/api/account/password", map[string]any{"current": testPassword, "new": "a brand new secret"}),
 		formPost("/login", "username=alice&password=correct+horse+battery"),
 		formPost("/logout", ""),
 		formPost("/confirm", "password=correct+horse+battery"),
@@ -144,9 +82,6 @@ func TestAccountRoutesAnswer500WhenTheUserTableRefusesChanges(t *testing.T) {
 	app.refuseChanges("users", "UPDATE", "DELETE", "INSERT")
 	passwords := passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")
 	expectEvery500(t, app, token, []sent{
-		put("/api/settings", map[string]any{"link_check_enabled": true}),
-		put("/api/settings", map[string]any{"link_check_enabled": true, "link_check_user_agent": "Agent/1"}),
-		put("/api/account/password", map[string]any{"current": testPassword, "new": "a brand new secret"}),
 		formPost("/settings", "link_check_enabled=on"),
 		formPost("/settings", "link_check_enabled=on&link_check_user_agent=Agent%2F1"),
 		formPost("/account/password", passwords),
@@ -159,7 +94,6 @@ func TestSetupAnswers500WhenTheUserTableRefusesTheFirstAdmin(t *testing.T) {
 	fields := "token=" + app.setupDisplay + "&username=henry&password=correct+horse+battery"
 	expectEvery500(t, app, "", []sent{
 		formPost("/setup", fields),
-		post("/api/setup", map[string]any{"token": app.setupDisplay, "username": "henry", "password": testPassword}),
 	})
 }
 
@@ -190,11 +124,6 @@ func TestBookmarkPagesAnswer500WhenTheBookmarkTableRefusesChanges(t *testing.T) 
 	app.refuseChanges("bookmarks", "UPDATE", "DELETE", "INSERT")
 	fields := "url=https%3A%2F%2Fexample.com%2Fz&title=Z&note=&tags="
 	expectEvery500(t, app, token, []sent{
-		post("/api/bookmarks", bookmarkBody("https://example.com/z", "Z")),
-		put("/api/bookmarks/1", bookmarkBody("https://example.com/z", "Z")),
-		del("/api/bookmarks/1"),
-		post("/api/bookmarks/bulk", map[string]any{"action": "delete", "ids": []int{1}}),
-		post("/api/bookmarks/bulk", map[string]any{"action": "add_tags", "ids": []int{1}, "tags": []string{"x"}}),
 		formPost("/bookmarks", fields),
 		formPost("/bookmarks/1/edit", fields),
 		formPost("/bookmarks/delete", "id=1"),
@@ -221,8 +150,5 @@ func TestPagesAnswer500WhenTheSessionTableFails(t *testing.T) {
 		formPost("/users/1/role", "is_admin=true"),
 		formPost("/logout", ""),
 		formPost("/login", "username=root&password=correct+horse+battery"),
-		get("/api/users"),
-		post("/api/users", map[string]any{"username": "bob", "password": testPassword}),
-		put("/api/users/1/role", map[string]any{"is_admin": false}),
 	})
 }

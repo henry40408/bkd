@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -10,51 +11,57 @@ import (
 	"github.com/henry40408/bkd/internal/linkcheck"
 )
 
-func putSettings(app *testApp, token string, body map[string]any) reply {
-	return app.send(put("/api/settings", body).as(token))
+// saveSettings posts the settings form. A nil agent leaves the box out, as a
+// page from before the upgrade does.
+func saveSettings(app *testApp, token string, enabled bool, agent *string) reply {
+	fields := url.Values{}
+	if enabled {
+		fields.Set("link_check_enabled", "on")
+	}
+	if agent != nil {
+		fields.Set("link_check_user_agent", *agent)
+	}
+	return app.send(formPost("/settings", fields.Encode()).as(token))
+}
+
+func agentOf(text string) *string { return &text }
+
+// storedSettings is what the database holds for the user.
+func (a *testApp) storedSettings(username string) (enabled bool, agent string) {
+	a.t.Helper()
+	query := "SELECT link_check_enabled, COALESCE(link_check_user_agent, '') FROM users WHERE username = ?1"
+	if err := a.db.QueryRow(query, username).Scan(&enabled, &agent); err != nil {
+		a.t.Fatal(err)
+	}
+	return enabled, agent
+}
+
+func (a *testApp) assertSettings(username string, wantEnabled bool, wantAgent string) {
+	a.t.Helper()
+	if enabled, agent := a.storedSettings(username); enabled != wantEnabled || agent != wantAgent {
+		a.t.Errorf("settings of %s = (%v, %q), want (%v, %q)", username, enabled, agent, wantEnabled, wantAgent)
+	}
 }
 
 func TestSettingsStartWithoutAUserAgent(t *testing.T) {
 	app := runningApp(t)
-	token := app.signIn("henry", false)
-	got := app.send(get("/api/settings").as(token)).text
-	if want := `{"link_check_enabled":false,"link_check_user_agent":""}`; got != want {
-		t.Fatalf("settings = %s, want %s", got, want)
-	}
+	app.signIn("henry", false)
+	app.assertSettings("henry", false, "")
 }
 
 func TestAUserAgentIsSavedTrimmedKeptWhenOmittedAndCleared(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
-	agentOf := func(r reply) any {
-		t.Helper()
-		assertStatus(t, r, http.StatusOK)
-		return r.json()["link_check_user_agent"]
-	}
 
-	saved := putSettings(app, token, map[string]any{"link_check_enabled": true, "link_check_user_agent": "  Custom/1.0  "})
-	if got := agentOf(saved); got != "Custom/1.0" {
-		t.Fatalf("answered User-Agent = %v", got)
-	}
-	if got := agentOf(app.send(get("/api/settings").as(token))); got != "Custom/1.0" {
-		t.Fatalf("stored User-Agent = %v", got)
-	}
+	assertStatus(t, saveSettings(app, token, true, agentOf("  Custom/1.0  ")), http.StatusSeeOther)
+	app.assertSettings("henry", true, "Custom/1.0")
 
-	// A client that only knows link_check_enabled must not wipe the User-Agent.
-	omitted := putSettings(app, token, map[string]any{"link_check_enabled": false})
-	if got := agentOf(omitted); got != "Custom/1.0" {
-		t.Errorf("User-Agent after an update without it = %v", got)
-	}
-	if omitted.json()["link_check_enabled"] != false {
-		t.Error("the update without a User-Agent did not change the other setting")
-	}
-	if got := agentOf(putSettings(app, token, map[string]any{"link_check_enabled": false, "link_check_user_agent": nil})); got != "Custom/1.0" {
-		t.Errorf("User-Agent after null = %v", got)
-	}
+	// A form without the box must not wipe the User-Agent.
+	assertStatus(t, saveSettings(app, token, false, nil), http.StatusSeeOther)
+	app.assertSettings("henry", false, "Custom/1.0")
 
-	if got := agentOf(putSettings(app, token, map[string]any{"link_check_enabled": false, "link_check_user_agent": ""})); got != "" {
-		t.Errorf("User-Agent after clearing = %v", got)
-	}
+	assertStatus(t, saveSettings(app, token, false, agentOf("")), http.StatusSeeOther)
+	app.assertSettings("henry", false, "")
 }
 
 func TestABadUserAgentIsRefusedAndChangesNothing(t *testing.T) {
@@ -69,27 +76,22 @@ func TestABadUserAgentIsRefusedAndChangesNothing(t *testing.T) {
 	}
 	for name, agent := range cases {
 		t.Run(name, func(t *testing.T) {
-			r := putSettings(app, token, map[string]any{"link_check_enabled": true, "link_check_user_agent": agent})
+			r := saveSettings(app, token, true, agentOf(agent))
 			assertStatus(t, r, http.StatusBadRequest)
 			mustContain(t, r, "user agent")
-			got := app.send(get("/api/settings").as(token)).text
-			if want := `{"link_check_enabled":false,"link_check_user_agent":""}`; got != want {
-				t.Errorf("settings changed to %s", got)
-			}
+			app.assertSettings("henry", false, "")
 		})
 	}
 	atLimit := strings.Repeat("a", linkcheck.MaxUserAgentLength)
-	assertStatus(t, putSettings(app, token, map[string]any{"link_check_enabled": false, "link_check_user_agent": atLimit}), http.StatusOK)
+	assertStatus(t, saveSettings(app, token, false, agentOf(atLimit)), http.StatusSeeOther)
 }
 
 func TestEachUserHasTheirOwnUserAgent(t *testing.T) {
 	app := runningApp(t)
 	henry := app.signIn("henry", false)
-	mei := app.signIn("mei", false)
-	assertStatus(t, putSettings(app, henry, map[string]any{"link_check_enabled": false, "link_check_user_agent": "Henry/1"}), http.StatusOK)
-	if got := app.send(get("/api/settings").as(mei)).json()["link_check_user_agent"]; got != "" {
-		t.Errorf("mei's User-Agent = %v", got)
-	}
+	app.signIn("mei", false)
+	assertStatus(t, saveSettings(app, henry, false, agentOf("Henry/1")), http.StatusSeeOther)
+	app.assertSettings("mei", false, "")
 }
 
 // userAgentSite records the User-Agent of each request by its path.
@@ -114,7 +116,7 @@ func TestTheCheckButtonSendsTheUsersUserAgent(t *testing.T) {
 	mei := app.signIn("mei", false)
 	site, seen := userAgentSite()
 	defer site.Close()
-	assertStatus(t, putSettings(app, henry, map[string]any{"link_check_enabled": false, "link_check_user_agent": "Henry/1"}), http.StatusOK)
+	assertStatus(t, saveSettings(app, henry, false, agentOf("Henry/1")), http.StatusSeeOther)
 	henrysPage := app.addBookmarkAt(henry, site.URL+"/henry")
 	meisPage := app.addBookmarkAt(mei, site.URL+"/mei")
 
@@ -134,7 +136,7 @@ func TestTheNoScriptCheckSendsTheUsersUserAgent(t *testing.T) {
 	token := app.signIn("henry", false)
 	site, seen := userAgentSite()
 	defer site.Close()
-	assertStatus(t, putSettings(app, token, map[string]any{"link_check_enabled": false, "link_check_user_agent": "Henry/1"}), http.StatusOK)
+	assertStatus(t, saveSettings(app, token, false, agentOf("Henry/1")), http.StatusSeeOther)
 	app.addBookmarkAt(token, site.URL+"/page")
 
 	body := "id-1=1&action=check&" + bulkContext
@@ -164,73 +166,56 @@ func TestTheSettingsFormSavesTheUserAgentAndShowsItBack(t *testing.T) {
 	r := app.send(formPost("/settings", "link_check_enabled=on&link_check_user_agent=+Custom%2F1.0+").as(token))
 	mustRedirect(t, r, "/settings?notice=settings-saved")
 	mustContain(t, app.send(get("/settings").as(token)), `value="Custom/1.0"`)
-	if got := app.send(get("/api/settings").as(token)).json()["link_check_user_agent"]; got != "Custom/1.0" {
-		t.Errorf("stored User-Agent = %v", got)
-	}
+	app.assertSettings("henry", true, "Custom/1.0")
 
 	// An empty box goes back to the default.
 	mustRedirect(t, app.send(formPost("/settings", "link_check_user_agent=").as(token)), "/settings?notice=settings-saved")
-	if got := app.send(get("/api/settings").as(token)).json()["link_check_user_agent"]; got != "" {
-		t.Errorf("User-Agent after clearing = %v", got)
-	}
+	app.assertSettings("henry", false, "")
 }
 
 func TestTheSettingsFormShowsARefusedUserAgentAgainWithTheReason(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
-	assertStatus(t, putSettings(app, token, map[string]any{"link_check_enabled": false, "link_check_user_agent": "Kept/1"}), http.StatusOK)
+	assertStatus(t, saveSettings(app, token, false, agentOf("Kept/1")), http.StatusSeeOther)
 
 	r := app.send(formPost("/settings", "link_check_enabled=on&link_check_user_agent=caf%C3%A9").as(token))
 	assertStatus(t, r, http.StatusBadRequest)
 	mustContain(t, r, "user agent must use printable ASCII characters only", `value="café"`,
 		`name="link_check_enabled" value="on" checked>`)
-	stored := app.send(get("/api/settings").as(token)).json()
-	if stored["link_check_user_agent"] != "Kept/1" || stored["link_check_enabled"] != false {
-		t.Errorf("a refused form changed the settings to %v", stored)
-	}
+	app.assertSettings("henry", false, "Kept/1")
 }
 
 // A script or a page from before the upgrade posts no User-Agent box.
 func TestTheSettingsFormWithoutTheUserAgentBoxKeepsTheUserAgent(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
-	assertStatus(t, putSettings(app, token, map[string]any{"link_check_enabled": false, "link_check_user_agent": "Kept/1"}), http.StatusOK)
+	assertStatus(t, saveSettings(app, token, false, agentOf("Kept/1")), http.StatusSeeOther)
 
 	assertStatus(t, app.send(formPost("/settings", "link_check_enabled=on").as(token)), http.StatusSeeOther)
-	stored := app.send(get("/api/settings").as(token)).json()
-	if stored["link_check_user_agent"] != "Kept/1" || stored["link_check_enabled"] != true {
-		t.Errorf("settings = %v, want the User-Agent kept and the check on", stored)
-	}
+	app.assertSettings("henry", true, "Kept/1")
 
 	assertStatus(t, app.send(formPost("/settings", "link_check_enabled=on&link_check_user_agent=").as(token)), http.StatusSeeOther)
-	if got := app.send(get("/api/settings").as(token)).json()["link_check_user_agent"]; got != "" {
-		t.Errorf("an empty box left the User-Agent %q, want it cleared", got)
-	}
+	app.assertSettings("henry", true, "")
 }
 
 // Both settings go in one statement: when it fails, neither changes.
 func TestAFailedSettingsWriteChangesNeitherSetting(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
-	assertStatus(t, putSettings(app, token, map[string]any{"link_check_enabled": false, "link_check_user_agent": "Kept/1"}), http.StatusOK)
+	assertStatus(t, saveSettings(app, token, false, agentOf("Kept/1")), http.StatusSeeOther)
 	app.exec("CREATE TRIGGER refuse_enabled BEFORE UPDATE OF link_check_enabled ON users " +
 		"BEGIN SELECT RAISE(ABORT, 'refused'); END")
 
-	r := putSettings(app, token, map[string]any{"link_check_enabled": true, "link_check_user_agent": "New/1"})
+	r := saveSettings(app, token, true, agentOf("New/1"))
 	assertStatus(t, r, http.StatusInternalServerError)
 	app.exec("DROP TRIGGER refuse_enabled")
-	stored := app.send(get("/api/settings").as(token)).json()
-	if stored["link_check_user_agent"] != "Kept/1" || stored["link_check_enabled"] != false {
-		t.Errorf("a failed write left %v", stored)
-	}
+	app.assertSettings("henry", false, "Kept/1")
 }
 
 func TestAUserAgentWithMarkupIsEscapedOnThePage(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
-	assertStatus(t, putSettings(app, token, map[string]any{
-		"link_check_enabled": false, "link_check_user_agent": `"><script>alert(1)</script>`,
-	}), http.StatusOK)
+	assertStatus(t, saveSettings(app, token, false, agentOf(`"><script>alert(1)</script>`)), http.StatusSeeOther)
 
 	r := app.send(get("/settings").as(token))
 	mustLack(t, r, "<script>alert(1)")

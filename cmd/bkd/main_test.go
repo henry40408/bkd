@@ -330,13 +330,13 @@ func TestForwardAuthOptionsReachTheServer(t *testing.T) {
 		"--forward-auth-trusted-proxies", "127.0.0.1",
 		"--forward-auth-user-header", "X-Who")
 	server.waitListening(t)
-	if got := server.get(t, "/api/bookmarks", nil).StatusCode; got != http.StatusUnauthorized {
+	if got := server.get(t, "/api/export?format=json", nil).StatusCode; got != http.StatusUnauthorized {
 		t.Errorf("no header: status %d", got)
 	}
-	if got := server.get(t, "/api/bookmarks", map[string]string{"X-Who": "alice"}).StatusCode; got != http.StatusOK {
+	if got := server.get(t, "/api/export?format=json", map[string]string{"X-Who": "alice"}).StatusCode; got != http.StatusOK {
 		t.Errorf("custom header: status %d", got)
 	}
-	if got := server.get(t, "/api/bookmarks", map[string]string{"Remote-User": "alice"}).StatusCode; got != http.StatusUnauthorized {
+	if got := server.get(t, "/api/export?format=json", map[string]string{"Remote-User": "alice"}).StatusCode; got != http.StatusUnauthorized {
 		t.Errorf("default header is not the configured one: status %d", got)
 	}
 }
@@ -344,7 +344,7 @@ func TestForwardAuthOptionsReachTheServer(t *testing.T) {
 func TestForwardAuthStaysOffWithoutTrustedProxies(t *testing.T) {
 	server := startServer(t, nil)
 	server.waitListening(t)
-	if got := server.get(t, "/api/bookmarks", map[string]string{"Remote-User": "alice"}).StatusCode; got != http.StatusUnauthorized {
+	if got := server.get(t, "/api/export?format=json", map[string]string{"Remote-User": "alice"}).StatusCode; got != http.StatusUnauthorized {
 		t.Errorf("status %d", got)
 	}
 }

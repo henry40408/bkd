@@ -4,8 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,22 +21,22 @@ const Password = "correct-horse-battery"
 // SessionCookie is the name of the cookie that carries a session.
 const SessionCookie = "bkd_session"
 
-// Session is a signed-in API caller.
+// Session is a signed-in caller.
 type Session struct {
 	Token string
 }
 
 // NewBookmark is what a scenario needs to exist, not what it is about.
 type NewBookmark struct {
-	URL   string   `json:"url"`
-	Title string   `json:"title"`
-	Note  string   `json:"note"`
-	Tags  []string `json:"tags"`
+	URL   string
+	Title string
+	Note  string
+	Tags  []string
 }
 
-// Api makes direct JSON calls to set a scenario up quickly. What a scenario is
-// about goes through the browser; what it merely needs to exist goes through
-// here.
+// Api posts the same forms the pages post, to set a scenario up quickly. What a
+// scenario is about goes through the browser; what it merely needs to exist
+// goes through here.
 type Api struct {
 	client     *http.Client
 	baseURL    string
@@ -41,30 +46,35 @@ type Api struct {
 // NewApi returns a client for the server.
 func NewApi(server *Server) *Api {
 	return &Api{
-		client:     &http.Client{Timeout: 30 * time.Second},
-		baseURL:    server.BaseURL + "/api",
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+			// A form post is answered with a redirect, and the session cookie
+			// and the address that tells accepted from refused are on it.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
+		baseURL:    server.BaseURL,
 		setupToken: server.SetupToken,
 	}
 }
 
 // Setup creates the first admin, as the setup page does.
 func (a *Api) Setup(username, password string) (Session, error) {
-	body := map[string]string{"token": a.setupToken, "username": username, "password": password}
-	return a.signIn("/setup", body)
+	fields := url.Values{"token": {a.setupToken}, "username": {username}, "password": {password}}
+	return a.signIn("/setup", fields)
 }
 
 // Login signs in and returns the session.
 func (a *Api) Login(username, password string) (Session, error) {
-	return a.signIn("/login", map[string]string{"username": username, "password": password})
+	return a.signIn("/login", url.Values{"username": {username}, "password": {password}})
 }
 
-func (a *Api) signIn(path string, body any) (Session, error) {
-	response, err := a.send(request{method: http.MethodPost, path: path, json: body})
+func (a *Api) signIn(path string, fields url.Values) (Session, error) {
+	response, err := a.send(formPost(path, fields))
 	if err != nil {
 		return Session{}, err
 	}
-	if response.status/100 != 2 {
-		return Session{}, fmt.Errorf("sign-in at %s was refused with %d: %s", path, response.status, response.body)
+	if response.status != http.StatusSeeOther {
+		return Session{}, fmt.Errorf("sign-in at %s was refused with %d", path, response.status)
 	}
 	token := sessionTokenFrom(response.header)
 	if token == "" {
@@ -82,33 +92,36 @@ func sessionTokenFrom(header http.Header) string {
 	return ""
 }
 
-// CreateUser creates an account as the admin.
+// CreateUser creates an account as the admin. The admin's last password
+// confirmation must be recent, as for the Manage users page.
 func (a *Api) CreateUser(admin Session, username, password string, isAdmin bool) error {
-	body := map[string]any{"username": username, "password": password, "is_admin": isAdmin}
-	return a.expectSuccess("creating a user", request{method: http.MethodPost, path: "/users", json: body, who: &admin})
+	fields := url.Values{"username": {username}, "password": {password}}
+	if isAdmin {
+		// The form's checkbox sends a value when it is ticked and nothing otherwise.
+		fields.Set("is_admin", "on")
+	}
+	return a.expectRedirect("creating a user", "/users?notice=user-changed", formPost("/users", fields).as(admin))
 }
 
 // CreateBookmark adds a bookmark to the account.
 func (a *Api) CreateBookmark(who Session, bookmark NewBookmark) error {
-	if bookmark.Tags == nil {
-		bookmark.Tags = []string{}
+	fields := url.Values{
+		"url": {bookmark.URL}, "title": {bookmark.Title}, "note": {bookmark.Note},
+		"tags": {strings.Join(bookmark.Tags, ",")},
 	}
-	return a.expectSuccess("creating a bookmark", request{method: http.MethodPost, path: "/bookmarks", json: bookmark, who: &who})
+	return a.expectRedirect("creating a bookmark", "/?notice=bookmark-saved", formPost("/bookmarks", fields).as(who))
 }
 
-// Bookmarks lists what the account sees, newest first, as the API returns it.
+// Bookmarks lists what the account has, as the JSON export gives it.
 func (a *Api) Bookmarks(who Session) ([]map[string]any, error) {
-	response, err := a.send(request{method: http.MethodGet, path: "/bookmarks?limit=200", who: &who})
+	body, err := a.read("listing bookmarks", "/api/export?format=json", who)
 	if err != nil {
 		return nil, err
-	}
-	if response.status/100 != 2 {
-		return nil, fmt.Errorf("listing bookmarks failed with %d", response.status)
 	}
 	var list struct {
 		Bookmarks []map[string]any `json:"bookmarks"`
 	}
-	if err := json.Unmarshal([]byte(response.body), &list); err != nil {
+	if err := json.Unmarshal([]byte(body), &list); err != nil {
 		return nil, fmt.Errorf("reading the bookmark list: %w", err)
 	}
 	return list.Bookmarks, nil
@@ -117,73 +130,100 @@ func (a *Api) Bookmarks(who Session) ([]map[string]any, error) {
 // ExportHTML returns the account's bookmarks as the HTML file the export route
 // serves.
 func (a *Api) ExportHTML(who Session) (string, error) {
-	response, err := a.send(request{method: http.MethodGet, path: "/export?format=html", who: &who})
-	if err != nil {
-		return "", err
-	}
-	if response.status/100 != 2 {
-		return "", fmt.Errorf("exporting failed with %d", response.status)
-	}
-	return response.body, nil
+	return a.read("exporting", "/api/export?format=html", who)
 }
 
-// ImportReport is the server's answer to an import.
+// ImportReport is what the page says an import did.
 type ImportReport struct {
-	Added      int `json:"added"`
-	Duplicates int `json:"duplicates"`
-	Invalid    int `json:"invalid"`
+	Added      int
+	Duplicates int
+	Invalid    int
 }
 
-// ImportHTML uploads an HTML bookmarks file and returns the import report.
-func (a *Api) ImportHTML(who Session, html string) (ImportReport, error) {
-	response, err := a.send(request{
-		method: http.MethodPost, path: "/import", who: &who,
-		contentType: "text/html", raw: html,
-	})
+var importSummary = regexp.MustCompile(`Added (\d+), skipped (\d+) you already had(?:, and ignored (\d+) that are not web links)?`)
+
+// ImportHTML uploads an HTML bookmarks file and returns the report the page
+// shows.
+func (a *Api) ImportHTML(who Session, bookmarksFile string) (ImportReport, error) {
+	upload, err := uploadOf("/transfer/import", bookmarksFile)
 	if err != nil {
 		return ImportReport{}, err
 	}
-	if response.status/100 != 2 {
-		return ImportReport{}, fmt.Errorf("importing failed with %d: %s", response.status, response.body)
+	response, err := a.send(upload.as(who))
+	if err != nil {
+		return ImportReport{}, err
 	}
-	var report ImportReport
-	if err := json.Unmarshal([]byte(response.body), &report); err != nil {
-		return ImportReport{}, fmt.Errorf("reading the import report %q: %w", response.body, err)
+	if response.status != http.StatusOK {
+		return ImportReport{}, fmt.Errorf("importing failed with %d", response.status)
 	}
-	return report, nil
+	found := importSummary.FindStringSubmatch(response.body)
+	if found == nil {
+		return ImportReport{}, fmt.Errorf("the page after the import has no report")
+	}
+	// The digits always parse; the count of ignored links is absent when it is 0.
+	added, _ := strconv.Atoi(found[1])
+	duplicates, _ := strconv.Atoi(found[2])
+	invalid, _ := strconv.Atoi(found[3])
+	return ImportReport{Added: added, Duplicates: duplicates, Invalid: invalid}, nil
 }
 
 // SignedInUser is the username the server still sees behind the session, or
 // "" once the session no longer works.
 func (a *Api) SignedInUser(who Session) (string, error) {
-	response, err := a.send(request{method: http.MethodGet, path: "/state", who: &who})
+	response, err := a.send(request{method: http.MethodGet, path: "/account"}.as(who))
 	if err != nil {
 		return "", err
 	}
-	if response.status/100 != 2 {
-		return "", fmt.Errorf("reading the state failed with %d", response.status)
-	}
-	var state struct {
-		User *struct {
-			Username string `json:"username"`
-		} `json:"user"`
-	}
-	if err := json.Unmarshal([]byte(response.body), &state); err != nil {
-		return "", fmt.Errorf("reading the state: %w", err)
-	}
-	if state.User == nil {
+	if response.status == http.StatusSeeOther && strings.HasPrefix(response.header.Get("Location"), "/login") {
 		return "", nil
 	}
-	return state.User.Username, nil
+	if response.status != http.StatusOK {
+		return "", fmt.Errorf("reading the account page failed with %d", response.status)
+	}
+	const marker = "Signed in as <strong>"
+	_, rest, found := strings.Cut(response.body, marker)
+	name, _, closed := strings.Cut(rest, "</strong>")
+	if !found || !closed {
+		return "", fmt.Errorf("the account page does not say who is signed in")
+	}
+	return html.UnescapeString(name), nil
 }
 
 type request struct {
 	method      string
 	path        string
 	who         *Session
-	json        any
-	raw         string
 	contentType string
+	body        string
+}
+
+func formPost(path string, fields url.Values) request {
+	return request{
+		method: http.MethodPost, path: path,
+		contentType: "application/x-www-form-urlencoded", body: fields.Encode(),
+	}
+}
+
+// uploadOf is the multipart post the import form sends.
+func uploadOf(path, contents string) (request, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "bookmarks.html")
+	if err != nil {
+		return request{}, err
+	}
+	if _, err := io.WriteString(part, contents); err != nil {
+		return request{}, err
+	}
+	if err := writer.Close(); err != nil {
+		return request{}, err
+	}
+	return request{method: http.MethodPost, path: path, contentType: writer.FormDataContentType(), body: body.String()}, nil
+}
+
+func (r request) as(who Session) request {
+	r.who = &who
+	return r
 }
 
 type reply struct {
@@ -192,29 +232,42 @@ type reply struct {
 	body   string
 }
 
-func (a *Api) expectSuccess(what string, req request) error {
+// expectRedirect checks that a form was accepted. A refusal is another status,
+// or a redirect to the sign-in or the confirmation page, so the status alone
+// does not tell.
+func (a *Api) expectRedirect(what, location string, req request) error {
 	response, err := a.send(req)
 	if err != nil {
 		return err
 	}
-	if response.status/100 != 2 {
-		return fmt.Errorf("%s failed with %d: %s", what, response.status, response.body)
+	if got := response.header.Get("Location"); response.status != http.StatusSeeOther || got != location {
+		return fmt.Errorf("%s was answered with %d and a redirect to %q, not to %q", what, response.status, got, location)
 	}
 	return nil
 }
 
+// read fetches a page or a download and returns its body.
+func (a *Api) read(what, path string, who Session) (string, error) {
+	response, err := a.send(request{method: http.MethodGet, path: path}.as(who))
+	if err != nil {
+		return "", err
+	}
+	if response.status != http.StatusOK {
+		return "", fmt.Errorf("%s failed with %d", what, response.status)
+	}
+	return response.body, nil
+}
+
 func (a *Api) send(req request) (reply, error) {
-	body, contentType, err := req.payload()
+	httpRequest, err := http.NewRequest(req.method, a.baseURL+req.path, strings.NewReader(req.body))
 	if err != nil {
 		return reply{}, err
 	}
-	httpRequest, err := http.NewRequest(req.method, a.baseURL+req.path, body)
-	if err != nil {
-		return reply{}, err
+	if req.contentType != "" {
+		httpRequest.Header.Set("Content-Type", req.contentType)
 	}
-	if contentType != "" {
-		httpRequest.Header.Set("Content-Type", contentType)
-	}
+	// The server refuses a form post that does not say it comes from its own site.
+	httpRequest.Header.Set("Origin", a.baseURL)
 	if req.who != nil {
 		httpRequest.AddCookie(&http.Cookie{Name: SessionCookie, Value: req.who.Token})
 	}
@@ -228,15 +281,4 @@ func (a *Api) send(req request) (reply, error) {
 		return reply{}, err
 	}
 	return reply{status: response.StatusCode, header: response.Header, body: string(text)}, nil
-}
-
-func (r request) payload() (io.Reader, string, error) {
-	if r.json != nil {
-		encoded, err := json.Marshal(r.json)
-		return bytes.NewReader(encoded), "application/json", err
-	}
-	if r.raw != "" {
-		return strings.NewReader(r.raw), r.contentType, nil
-	}
-	return nil, "", nil
 }

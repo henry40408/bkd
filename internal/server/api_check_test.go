@@ -36,9 +36,27 @@ func checkAs(token string, ids ...int) sent {
 // addBookmarkAt saves a bookmark whose address is a path on the site.
 func (a *testApp) addBookmarkAt(token, address string) int64 {
 	a.t.Helper()
-	r := a.send(post("/api/bookmarks", bookmarkBody(address, "Page")).as(token))
-	assertStatus(a.t, r, http.StatusCreated)
-	return int64(r.json()["id"].(float64))
+	return a.createBookmarkAt(token, address, "Page").ID
+}
+
+// linkStatuses is the stored link status of every bookmark, oldest first;
+// a bookmark that was never checked has an empty one.
+func (a *testApp) linkStatuses() []string {
+	a.t.Helper()
+	rows, err := a.db.Query("SELECT COALESCE(link_status, '') FROM bookmarks ORDER BY id")
+	if err != nil {
+		a.t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var statuses []string
+	for rows.Next() {
+		var status string
+		if err := rows.Scan(&status); err != nil {
+			a.t.Fatal(err)
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses
 }
 
 func TestCheckStreamsAResultPerLinkThenDone(t *testing.T) {
@@ -60,8 +78,9 @@ func TestCheckStreamsAResultPerLinkThenDone(t *testing.T) {
 		t.Error("x-accel-buffering is not no")
 	}
 	mustContain(t, r, `"status":"ok"`, `"status":"broken"`, `"detail":"HTTP 404"`, "event: done\ndata: {}\n\n")
-	list := app.send(get("/api/bookmarks").as(token))
-	mustContain(t, list, `"status":"ok"`, `"status":"broken"`)
+	if got := strings.Join(app.linkStatuses(), ","); got != "ok,broken" {
+		t.Errorf("stored statuses %q", got)
+	}
 }
 
 func TestCheckSkipsTheRestOfASiteThatAsksToWait(t *testing.T) {
@@ -92,7 +111,9 @@ func TestCheckDoesNotSendAResultThatWasNotSaved(t *testing.T) {
 	if got := eventsOf(r.text); strings.Join(got, ",") != "done" {
 		t.Fatalf("events %v in %q", got, r.text)
 	}
-	mustContain(t, app.send(get("/api/bookmarks").as(token)), `"link":null`)
+	if got := strings.Join(app.linkStatuses(), ","); got != "" {
+		t.Errorf("stored statuses %q", got)
+	}
 }
 
 func TestCheckThatCannotSaveSendsErrorAndStops(t *testing.T) {
@@ -303,7 +324,9 @@ func TestAResultIsSavedEvenWhenTheClientHasLeft(t *testing.T) {
 	if err != nil || len(stored) != 1 {
 		t.Fatalf("stored %v, error %v", stored, err)
 	}
-	mustContain(t, app.send(get("/api/bookmarks").as(token)), `"status":"ok"`)
+	if got := strings.Join(app.linkStatuses(), ","); got != "ok" {
+		t.Errorf("stored statuses %q", got)
+	}
 }
 
 func TestACheckStreamOutlivesTheBodyReadDeadline(t *testing.T) {
@@ -339,7 +362,7 @@ func TestABodyThatArrivesTooSlowlyIsGivenUpOn(t *testing.T) {
 	defer func() { _ = conn.Close() }()
 
 	// 50 bytes are promised and one arrives.
-	_, _ = io.WriteString(conn, "POST /api/bookmarks HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"+
+	_, _ = io.WriteString(conn, "POST /api/bookmarks/check HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"+
 		"Cookie: bkd_session="+token+"\r\nContent-Length: 50\r\n\r\n{")
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	answer, _ := io.ReadAll(conn)

@@ -15,24 +15,21 @@ func TestIntegerQueryErrorsNameTheParameter(t *testing.T) {
 		"-1":          "invalid digit found in string",
 	}
 	for value, wording := range cases {
-		r := app.send(get("/api/bookmarks?limit=" + value).as(token))
+		r := app.send(get("/?page=" + value).as(token))
 		assertStatus(t, r, http.StatusBadRequest)
-		want := "Failed to deserialize query string: limit: " + wording
-		if r.text != want {
-			t.Errorf("limit=%q: body = %q, want %q", value, r.text, want)
-		}
+		mustContain(t, r, "Failed to deserialize query string: page: "+wording)
 	}
 }
 
 func TestUncleanPathsAreRedirectedToTheCleanPath(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
-	for _, path := range []string{"/api//state", "/api/./state", "/api/x/../state"} {
+	for _, path := range []string{"//settings", "/./settings", "/x/../settings"} {
 		r := app.send(get(path).as(token))
 		assertStatus(t, r, http.StatusTemporaryRedirect)
-		if got := r.headers.Get("Location"); got != "/api/state" {
+		if got := r.headers.Get("Location"); got != "/settings" {
 			t.Errorf("%s: Location = %q", path, got)
 		}
 	}
-	assertStatus(t, app.send(get("/api/state").as(token)), http.StatusOK)
+	assertStatus(t, app.send(get("/settings").as(token)), http.StatusOK)
 }

@@ -57,19 +57,6 @@ func TestAQueryNumberMayStartWithAPlusSign(t *testing.T) {
 		app.createBookmark(token, fmt.Sprintf("bookmark %02d", index))
 	}
 
-	limited := app.send(get("/api/bookmarks?limit=%2B5").as(token))
-	assertStatus(t, limited, http.StatusOK)
-	if got := len(titlesOf(t, limited)); got != 5 {
-		t.Errorf("limit=+5 listed %d bookmarks, want 5", got)
-	}
-
-	skipped := app.send(get("/api/bookmarks?limit=3&offset=%2B2").as(token))
-	assertStatus(t, skipped, http.StatusOK)
-	plain := app.send(get("/api/bookmarks?limit=3&offset=2").as(token))
-	if skipped.text != plain.text {
-		t.Errorf("offset=+2 gave %q, want what offset=2 gave, %q", skipped.text, plain.text)
-	}
-
 	second := app.send(get("/?page=%2B2").as(token))
 	assertStatus(t, second, http.StatusOK)
 	wantSecond := app.send(get("/?page=2").as(token))
@@ -86,49 +73,11 @@ func TestAFormNumberMayStartWithAPlusSign(t *testing.T) {
 	token := app.signIn("henry", false)
 	created := app.createBookmark(token, "doomed")
 
-	r := app.send(formPost("/bookmarks/delete", fmt.Sprintf("id=%%2B%v", created["id"])).as(token))
+	r := app.send(formPost("/bookmarks/delete", fmt.Sprintf("id=%%2B%d", created.ID)).as(token))
 
 	assertStatus(t, r, http.StatusSeeOther)
-	if listed := titlesOf(t, app.send(get("/api/bookmarks").as(token))); len(listed) != 0 {
-		t.Errorf("bookmarks left after the delete: %v", listed)
-	}
-}
-
-// Every required JSON field that is absent, or null, is a 422 naming it.
-func TestARequiredJSONFieldThatIsMissingOrNullIsRefused(t *testing.T) {
-	app := runningApp(t)
-	token := app.signIn("henry", false)
-	bookmark := app.createBookmark(token, "kept")
-	bookmarkURI := fmt.Sprintf("/api/bookmarks/%v", bookmark["id"])
-	cases := []struct {
-		name  string
-		send  sent
-		field string
-	}{
-		{"setup without token", post("/api/setup", map[string]any{"username": "a", "password": "b"}), "token"},
-		{"setup with a null token", post("/api/setup", map[string]any{"token": nil, "username": "a", "password": "b"}), "token"},
-		{"setup without password", post("/api/setup", map[string]any{"token": "t", "username": "a"}), "password"},
-		{"setup with a null password", post("/api/setup", map[string]any{"token": "t", "username": "a", "password": nil}), "password"},
-		{"change password without current", put("/api/account/password", map[string]any{"new": "x"}), "current"},
-		{"change password without new", put("/api/account/password", map[string]any{"current": "x"}), "new"},
-		{"change password with a null new", put("/api/account/password", map[string]any{"current": "x", "new": nil}), "new"},
-		{"confirm without password", post("/api/account/confirm", map[string]any{}), "password"},
-		{"confirm with a null password", post("/api/account/confirm", map[string]any{"password": nil}), "password"},
-		{"create without url", post("/api/bookmarks", map[string]any{"title": "t"}), "url"},
-		{"create without title", post("/api/bookmarks", map[string]any{"url": "https://a.b"}), "title"},
-		{"create with a null url", post("/api/bookmarks", map[string]any{"url": nil, "title": "t"}), "url"},
-		{"create with a null title", post("/api/bookmarks", map[string]any{"url": "https://a.b", "title": nil}), "title"},
-		{"update without url", put(bookmarkURI, map[string]any{"title": "t"}), "url"},
-		{"update without title", put(bookmarkURI, map[string]any{"url": "https://a.b"}), "title"},
-		{"update with a null url", put(bookmarkURI, map[string]any{"url": nil, "title": "t"}), "url"},
-		{"update with a null title", put(bookmarkURI, map[string]any{"url": "https://a.b", "title": nil}), "title"},
-	}
-	for _, c := range cases {
-		r := app.send(c.send.as(token))
-		want := "Failed to deserialize the JSON body into the target type: missing field `" + c.field + "`"
-		if r.status != http.StatusUnprocessableEntity || r.text != want {
-			t.Errorf("%s: status = %d, body %q; want 422 %q", c.name, r.status, r.text, want)
-		}
+	if left := app.bookmarkCount(1); left != 0 {
+		t.Errorf("%d bookmarks left after the delete", left)
 	}
 }
 
@@ -152,19 +101,20 @@ func TestAFormBodyIsRefusedOnlyBeyondTheLimit(t *testing.T) {
 }
 
 // A JSON body may carry parameters and any application/*+json type; others are
-// a 415. An accepted body reaches the handler, which refuses the login as 401.
+// a 415. An accepted body reaches the handler, which refuses the empty check.
 func TestJSONContentTypesAreMatchedByMediaType(t *testing.T) {
 	app := runningApp(t)
-	const body = `{"username":"nobody","password":"wrong"}`
+	token := app.signIn("henry", false)
+	const body = `{"ids":[]}`
 	cases := []struct {
 		contentType string
 		status      int
 	}{
-		{"application/json", http.StatusUnauthorized},
-		{"application/json; charset=utf-8", http.StatusUnauthorized},
-		{"Application/JSON", http.StatusUnauthorized},
-		{"application/problem+json", http.StatusUnauthorized},
-		{"application/vnd.api+json; charset=utf-8", http.StatusUnauthorized},
+		{"application/json", http.StatusBadRequest},
+		{"application/json; charset=utf-8", http.StatusBadRequest},
+		{"Application/JSON", http.StatusBadRequest},
+		{"application/problem+json", http.StatusBadRequest},
+		{"application/vnd.api+json; charset=utf-8", http.StatusBadRequest},
 		{"text/json", http.StatusUnsupportedMediaType},
 		{"application/jsonx", http.StatusUnsupportedMediaType},
 		{"application/json+text", http.StatusUnsupportedMediaType},
@@ -172,7 +122,7 @@ func TestJSONContentTypesAreMatchedByMediaType(t *testing.T) {
 		{"", http.StatusUnsupportedMediaType},
 	}
 	for _, c := range cases {
-		r := app.send(sent{method: "POST", uri: "/api/login"}.withRaw(c.contentType, body))
+		r := app.send(sent{method: "POST", uri: "/api/bookmarks/check"}.withRaw(c.contentType, body).as(token))
 		if r.status != c.status {
 			t.Errorf("Content-Type %q: status = %d, want %d; body %q", c.contentType, r.status, c.status, r.text)
 		}
@@ -181,33 +131,22 @@ func TestJSONContentTypesAreMatchedByMediaType(t *testing.T) {
 
 // Timestamps are Unix seconds as integers, so a millisecond or fractional value
 // fails here.
-func TestTimestampsAreWholeUnixSeconds(t *testing.T) {
+func TestExportedTimestampsAreWholeUnixSeconds(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
-	pattern := regexp.MustCompile(`"(created_at|updated_at)":(\d+)[,}]`)
-	check := func(label string, r reply) {
-		t.Helper()
-		found := pattern.FindAllStringSubmatch(r.text, -1)
-		if len(found) != 2 {
-			t.Fatalf("%s: found %d timestamps in %s, want 2", label, len(found), r.text)
-		}
-		for _, match := range found {
-			seconds, err := strconv.ParseInt(match[2], 10, 64)
-			if err != nil || len(match[2]) != 10 {
-				t.Errorf("%s: %s = %q, want 10 digits", label, match[1], match[2])
-			}
-			if drift := time.Now().Unix() - seconds; drift < 0 || drift > 5 {
-				t.Errorf("%s: %s = %d is %d seconds from now", label, match[1], seconds, drift)
-			}
-		}
+	app.createBookmark(token, "t")
+	exported := app.send(get("/api/export?format=json").as(token))
+	assertStatus(t, exported, http.StatusOK)
+
+	found := regexp.MustCompile(`"created_at": (\d+)[,\n]`).FindAllStringSubmatch(exported.text, -1)
+	if len(found) != 1 {
+		t.Fatalf("found %d timestamps in %s, want 1", len(found), exported.text)
 	}
-
-	created := app.send(post("/api/bookmarks", bookmarkBody("https://a.b", "t")).as(token))
-	assertStatus(t, created, http.StatusCreated)
-	check("created", created)
-
-	id := created.json()["id"]
-	changed := app.send(put(fmt.Sprintf("/api/bookmarks/%v", id), bookmarkBody("https://a.b", "u")).as(token))
-	assertStatus(t, changed, http.StatusOK)
-	check("changed", changed)
+	seconds, err := strconv.ParseInt(found[0][1], 10, 64)
+	if err != nil || len(found[0][1]) != 10 {
+		t.Errorf("created_at = %q, want 10 digits", found[0][1])
+	}
+	if drift := time.Now().Unix() - seconds; drift < 0 || drift > 5 {
+		t.Errorf("created_at = %d is %d seconds from now", seconds, drift)
+	}
 }
