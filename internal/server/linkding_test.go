@@ -149,10 +149,20 @@ func TestLinkdingAnswersAreNeverCachedAndAreJSON(t *testing.T) {
 func TestOtherMethodsOfALinkdingRouteAreRefused(t *testing.T) {
 	app := runningApp(t)
 	token, _ := app.linkdingUser("henry")
-	r := app.send(withToken(post("/api/bookmarks/", map[string]any{"url": "https://a.b"}), token))
-	assertStatus(t, r, http.StatusMethodNotAllowed)
-	if r.headers.Get("Allow") != "GET,HEAD" {
-		t.Fatalf("Allow = %q", r.headers.Get("Allow"))
+	for _, tc := range []struct {
+		request sent
+		allow   string
+	}{
+		{del("/api/bookmarks/"), "GET,HEAD,POST"},
+		{post("/api/bookmarks/1/", map[string]any{}), "GET,HEAD,PUT,PATCH,DELETE"},
+		{post("/api/bookmarks/check/", map[string]any{}), "GET,HEAD"},
+		{post("/api/tags/", map[string]any{}), "GET,HEAD"},
+	} {
+		r := app.send(withToken(tc.request, token))
+		assertStatus(t, r, http.StatusMethodNotAllowed)
+		if r.headers.Get("Allow") != tc.allow {
+			t.Errorf("%s %s: Allow = %q, want %q", tc.request.method, tc.request.uri, r.headers.Get("Allow"), tc.allow)
+		}
 	}
 }
 

@@ -148,7 +148,7 @@ The add and edit forms read the page behind the address while you fill them in, 
 
 bkd keeps the page's title and description apart from your own title and note (`site_title`, `site_description`), and your own text is never overwritten by them later. When you change a bookmark's URL, the stored details are replaced by those of the new address, or cleared when the new page could not be read. The details are not shown in the list and are not searched. Open Graph tags (`og:title`, `og:description`) are preferred; without them the page's `<title>` and `<meta name="description">` are used. Text is cleaned to one line (control characters removed) and cut to at most 300 characters for the title and 500 for the description, in the form's placeholders as well as in what is saved. Pages are read as UTF-8 only, and only the first 512 KiB, which is where the head of a page is. Images (`og:image`) are not read or shown.
 
-Reading a page follows the same rules as the link check: public addresses only, at most 5 redirects, 10 seconds, your User-Agent (see above), and the one-at-a-time slot of the link check (429 while one runs). Import and the JSON API do not read pages: a bookmark made through them has no page details, and the API still requires a title.
+Reading a page follows the same rules as the link check: public addresses only, at most 5 redirects, 10 seconds, your User-Agent (see above), and the one-at-a-time slot of the link check (429 while one runs). Import and the API do not read pages: a bookmark made through them has no page details unless the linkding-compatible API was given a `description`. bkd's own JSON API still requires a title.
 
 To read the pages of bookmarks that have none (after an import, for example), go to select mode, tick them and press "Read pages". It works like "Check links": the server reads one page after another from the same site, the progress shows with a Stop button, a site that asks to be left alone is skipped, and when it ends a summary says how many pages were read, how many notes were filled and how many pages could not be read. For each page that says something, the page's title and description are stored as its details, and a note that is blank is filled with the description, so an imported bookmark gets one. Your own title and a note that has text are never changed, and a page that cannot be read or says nothing changes nothing. Up to 200 bookmarks at a time, like the link check, and one at a time with it. Without a script the server waits until the read ends and shows the list again; if some pages were not read, only those stay ticked, with a message saying how many, so that you can read them again.
 
@@ -167,12 +167,15 @@ A program that cannot sign in through the browser, such as a browser extension o
 
 ## linkding-compatible API
 
-Programs written for [linkding](https://linkding.link/api/) can read your bookmarks with an API token (see above): send `Authorization: Token <token>` (`Bearer` works too). Only reading is supported for now.
+Programs written for [linkding](https://linkding.link/api/) can read and change your bookmarks with an API token (see above): send `Authorization: Token <token>` (`Bearer` works too).
 
 | Request | Answers |
 | --- | --- |
 | `GET /api/bookmarks/` | your bookmarks, newest first, as `{count, next, previous, results}`. Parameters: `q`, `limit` (default 100, at most 1000), `offset`, `added_since`, `modified_since` |
+| `POST /api/bookmarks/` | saves a bookmark and answers it with 201. If you already saved that address (a trailing slash does not matter) it changes that bookmark instead, as linkding does. Fields: `url` (required), `title`, `description`, `notes`, `tag_names` |
 | `GET /api/bookmarks/{id}/` | one bookmark |
+| `PUT /api/bookmarks/{id}/`, `PATCH /api/bookmarks/{id}/` | change a bookmark and answer it with 200; `PUT` needs `url`, `PATCH` needs nothing |
+| `DELETE /api/bookmarks/{id}/` | 204 with no body |
 | `GET /api/bookmarks/check/?url=` | `{bookmark, metadata, auto_tags}`: whether you saved that address (a trailing slash does not matter) |
 | `GET /api/bookmarks/archived/`, `GET /api/bookmarks/shared/` | always an empty list: bkd has no archive and shares nothing |
 | `GET /api/tags/` | your tags, by name (`limit` up to 5000) |
@@ -183,8 +186,13 @@ How bkd's fields map to linkding's, and what differs:
 - bkd has no archive, unread, sharing, favicon or preview image: `is_archived`, `unread` and `shared` are always `false`, the two image fields `null`.
 - `q` uses bkd's search syntax (see "Search"), not linkding's. `added_since` and `modified_since` accept an RFC 3339 time, one without a zone (taken as UTC), one without seconds or a date, and compare whole seconds. Reading pages ("Read pages") moves a bookmark's `date_modified` when it finds something new.
 - Tag ids are made up from the tag's name, so they stay the same; there is no tag table behind them, so use the name to be sure.
+- A field you leave out keeps its value: on `PUT`, `PATCH` and on `POST` for an address you already saved. linkding blanks what a `POST` leaves out; bkd does not, so a client that sends only a `url` cannot erase your notes and tags. `null` counts as left out. To clear a value, send it empty: `"notes": ""`, `"description": ""` or `"tag_names": []`.
+- A blank `title` is not a title: a new bookmark gets its address as title, and a changed one keeps the title it had. Changing the `url`, even by a trailing slash, forgets the old page's `website_title` and `website_description`; changing only the `description` keeps the `website_title`.
+- `is_archived`, `unread`, `shared` and `?disable_scraping` are accepted and ignored (bkd has no archive, and never reads a page when it saves a bookmark), so a client that always sends them works.
+- bkd's own limits apply: `title` 300 characters (linkding 512), `notes` 5000, `description` cut at 500, a tag 50 characters and at most 20 tags, lowercased and with spaces kept (linkding turns them into `-`). A refused field is 400 with `{"<field>": ["<message>"]}`, as in linkding: `{"url": ["Enter a valid URL."]}`, `{"title": ["This field is too long."]}`.
+- `PUT` or `PATCH` to the address of another of your bookmarks is 400 `{"url": ["A bookmark with this URL already exists."]}`. The `POST` match ignores only a trailing slash; linkding also lowercases the host and sorts the query.
 - `check` does not fetch the page: `metadata` is `{url, title, description, preview_image}`: the site's title and description that bkd stored for a bookmark you already have, `null` in each field for any other address; `auto_tags` is empty.
-- Errors are `{"detail": "..."}` as in linkding. These routes accept the token only, never a cookie.
+- Errors are `{"detail": "..."}` as in linkding (a refused field is `{"<field>": ["..."]}`, see above), also for a body that is not JSON (415), cannot be read (400, 422) or is over 64 KiB (413). These routes accept the token only, never a cookie.
 - A link to the next page is built from the `Host` the request came with, and is `https` with `--secure-cookies` or when the proxy sends `X-Forwarded-Proto: https`. Behind a reverse proxy, pass `Host` through.
 
 ## Import and export

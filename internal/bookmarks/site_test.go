@@ -145,6 +145,35 @@ func TestUpdateWithTheSameURLAndNoDetailsLeavesAnUnreadBookmarkUnread(t *testing
 	}
 }
 
+// ReplaceSite is how a caller says "the page's details are now these", empty or
+// not: without it an empty Site means "none were sent" and keeps what is stored.
+func TestUpdateWithReplaceSiteStoresAnEmptySiteAndKeepsTheOtherColumnAlone(t *testing.T) {
+	cases := []struct {
+		name string
+		sent Site
+		want *Site
+	}{
+		{"nothing left", Site{}, nil},
+		{"only the title left", Site{Title: "Og"}, &Site{Title: "Og"}},
+		{"only the description left", Site{Description: "d"}, &Site{Description: "d"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			store, pool := newStore(t)
+			user := dbtest.InsertUser(t, pool, "henry")
+			saved := create(t, store, user, withSite(valid(t, "Page"), Site{Title: "Og", Description: "d"}), 100)
+
+			updated, _, err := store.Update(bg, UpdateRequest{
+				UserID: user, ID: saved.ID, Bookmark: withSite(valid(t, "Page"), c.sent), Now: 200, ReplaceSite: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertEqual(t, updated.Site, c.want)
+		})
+	}
+}
+
 func TestChangingTheURLToAPageThatSaysNothingForgetsTheOldDetails(t *testing.T) {
 	store, pool := newStore(t)
 	user := dbtest.InsertUser(t, pool, "henry")

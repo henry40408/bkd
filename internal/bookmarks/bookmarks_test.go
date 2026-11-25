@@ -122,6 +122,17 @@ func TestValidationMessages(t *testing.T) {
 	}
 }
 
+func TestTitleFromURLIsTheTrimmedAddressCutToATitle(t *testing.T) {
+	assertEqual(t, TitleFromURL("  https://a.b/x  "), "https://a.b/x")
+	exact := "https://a.b/" + strings.Repeat("x", maxTitleChars-len("https://a.b/"))
+	assertEqual(t, TitleFromURL(exact), exact)
+	cut := TitleFromURL(exact + "y")
+	assertEqual(t, cut, exact)
+	if _, err := input("https://a.b", cut).Validate(); err != nil {
+		t.Errorf("the cut title is not a valid title: %v", err)
+	}
+}
+
 func TestTagsAreLowercasedTrimmedAndDeduplicated(t *testing.T) {
 	in := input("https://a.b", "t")
 	in.Tags = []string{"Rust", " rust ", "ÉCOLE", "", "  ", "日本語", "Go"}

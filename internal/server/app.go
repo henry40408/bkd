@@ -75,6 +75,11 @@ type App struct {
 
 	setupMu    sync.Mutex
 	setupToken *auth.SetupToken
+
+	// linkdingWrites makes a linkding write one step: look up, then store. No
+	// unique index stops two POSTs of one address from both finding nothing and
+	// both inserting, which a client that retries or double-clicks would do.
+	linkdingWrites sync.Mutex
 }
 
 // New builds the App. Call Handler for the routes.
