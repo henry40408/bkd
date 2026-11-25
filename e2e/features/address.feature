@@ -59,10 +59,10 @@ Feature: The address bar keeps the view
     And the search box holds ""
     And the list shows "Other"
 
-  Scenario: Clicking the bkd brand leaves the Account page
+  Scenario: Clicking the bkd brand leaves the Settings page
     When I open the site
-    And I open Account
-    Then the address is "/account"
+    And I open Settings
+    Then the address is "/settings"
     When I mark the page
     And I click the bkd brand
     Then the address is "/"
@@ -71,8 +71,8 @@ Feature: The address bar keeps the view
 
   Scenario: Every page has its own address that survives a reload
     When I open the site
-    And I open Account
+    And I open Settings
     And I reload the page
-    Then the address is "/account"
+    Then the address is "/settings"
     And I am signed in as "root"
     And the list of browsers has 1 rows

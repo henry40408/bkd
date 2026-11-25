@@ -14,6 +14,7 @@ const (
 	loginForm     = "form[action='/login']"
 	setupForm     = "form[action='/setup']"
 	confirmForm   = "form[action='/confirm']"
+	settingsForm  = "form[action='/settings']"
 	passwordForm  = "form[action$='/password']"
 	searchBoxPath = "[role=search] input[name=q]"
 )
@@ -42,7 +43,7 @@ func registerSessionSteps(sc *godog.ScenarioContext, w *world) {
 	sc.Step(`^I see the error `+quoted+`$`, withString(w.seesError))
 	sc.Step(`^the sign-in page says exactly `+quoted+`$`, withString(w.signInPageSaysExactly))
 	sc.Step(`^the address has no query string$`, w.addressHasNoQuery)
-	sc.Step(`^I open Account$`, w.openAccount)
+	sc.Step(`^I open Settings$`, w.openSettings)
 	sc.Step(`^I mark the page$`, w.markPage)
 	sc.Step(`^the page was not reloaded$`, w.pageWasNotReloaded)
 	sc.Step(`^I click the bkd brand$`, func() error { return w.click("#sidebar a.brand") })
@@ -56,9 +57,9 @@ func registerSessionSteps(sc *godog.ScenarioContext, w *world) {
 	})
 	sc.Step(`^I am also signed in on another browser$`, w.alsoSignedInElsewhere)
 	sc.Step(`^the list of browsers has (\d+) rows$`, w.browserListHasRows)
-	sc.Step(`^I sign out the other browser$`, func() error { return w.click(".sessions button") })
+	sc.Step(`^I sign out the other browser$`, func() error { return w.click("form[action^='/settings/sessions/'][action$='/revoke'] button") })
 	sc.Step(`^I sign out all other browsers$`, func() error {
-		return w.click("form[action='/account/sessions/revoke-others'] button")
+		return w.click("form[action='/settings/sessions/revoke-others'] button")
 	})
 	sc.Step(`^my password confirmation is old$`, func() error { return w.server.AgeConfirmations() })
 	sc.Step(`^I am asked to confirm my password$`, func() error { _, err := w.element(confirmForm); return err })
@@ -277,11 +278,11 @@ func (w *world) addressHasNoQuery() error {
 	return nil
 }
 
-func (w *world) openAccount() error {
-	if err := w.click("#sidebar a[href='/account']"); err != nil {
+func (w *world) openSettings() error {
+	if err := w.click("#sidebar a[href='/settings']"); err != nil {
 		return err
 	}
-	_, err := w.element(passwordForm)
+	_, err := w.element(settingsForm)
 	return err
 }
 

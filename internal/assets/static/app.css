@@ -203,9 +203,11 @@ form.stack { display: grid; gap: var(--sp-3); }
 .bulk .inline-form .summary { color: inherit; }
 
 /* ---- Other screens: forms on a sheet, sign-in ---- */
-.sheet { max-width: var(--form-w); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); } /* minmax: an auto column grows to the file input's own width */
+.sheet, .sheet > form { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); } /* minmax: an auto column grows to the file input's own width */
+.sheet { max-width: var(--form-w); }
 .sheet section { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); padding-top: var(--sp-4); border-top: 1px solid var(--rule); }
-.sheet section:first-of-type { border-top: 2px solid var(--ink); }
+/* :first-child, not :first-of-type: a form that holds the first sections would leave the next section outside it the first of its type. */
+.sheet section:first-child { border-top: 2px solid var(--ink); }
 .sheet h2 { margin: 0; }
 .sheet p { max-width: 65ch; }
 .people li, .sessions li { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); align-items: center; padding: var(--sp-2) 0; border-bottom: 1px solid var(--rule); }

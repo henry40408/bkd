@@ -140,28 +140,28 @@ func TestLogoutEndsTheSessionAndClearsTheCookie(t *testing.T) {
 	if !strings.Contains(r.headers.Get("Set-Cookie"), "Max-Age=0") {
 		t.Fatalf("cookie = %q", r.headers.Get("Set-Cookie"))
 	}
-	assertStatus(t, app.send(get("/account").as(token)), http.StatusSeeOther)
+	assertStatus(t, app.send(get("/settings").as(token)), http.StatusSeeOther)
 }
 
 func TestDisablingAUserCutsOffTheExistingSession(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
-	assertStatus(t, app.send(get("/account").as(token)), http.StatusOK)
+	assertStatus(t, app.send(get("/settings").as(token)), http.StatusOK)
 	app.exec("UPDATE users SET disabled_at = 1")
-	assertStatus(t, app.send(get("/account").as(token)), http.StatusSeeOther)
+	assertStatus(t, app.send(get("/settings").as(token)), http.StatusSeeOther)
 }
 
 func TestChangingThePasswordEndsOtherSessionsAndTheOldPassword(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("henry", false)
 	other := sessionToken(t, app.login("henry", testPassword))
-	r := app.send(formPost("/account/password", passwordChangeFields(testPassword, "a brand new password", "a brand new password")).as(token))
-	mustRedirect(t, r, "/account?notice=password-changed")
+	r := app.send(formPost("/settings/password", passwordChangeFields(testPassword, "a brand new password", "a brand new password")).as(token))
+	mustRedirect(t, r, "/settings?notice=password-changed")
 	fresh := sessionToken(t, r)
 	for _, old := range []string{token, other} {
-		assertStatus(t, app.send(get("/account").as(old)), http.StatusSeeOther)
+		assertStatus(t, app.send(get("/settings").as(old)), http.StatusSeeOther)
 	}
-	assertStatus(t, app.send(get("/account").as(fresh)), http.StatusOK)
+	assertStatus(t, app.send(get("/settings").as(fresh)), http.StatusOK)
 	assertStatus(t, app.login("henry", testPassword), http.StatusUnauthorized)
 	assertStatus(t, app.login("henry", "a brand new password"), http.StatusSeeOther)
 }
@@ -169,7 +169,7 @@ func TestChangingThePasswordEndsOtherSessionsAndTheOldPassword(t *testing.T) {
 func TestAnonymousVisitorsCannotChangeAPassword(t *testing.T) {
 	app := runningApp(t)
 	app.addUser("henry", false)
-	r := app.send(formPost("/account/password", passwordChangeFields(testPassword, "a brand new password", "a brand new password")))
+	r := app.send(formPost("/settings/password", passwordChangeFields(testPassword, "a brand new password", "a brand new password")))
 	assertStatus(t, r, http.StatusSeeOther)
 	assertStatus(t, app.login("henry", testPassword), http.StatusSeeOther)
 }

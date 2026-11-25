@@ -406,21 +406,22 @@ func TestEditPageOffersTheMovedAddressOnlyForAMovedLink(t *testing.T) {
 		`<button class="btn" type="button" data-moved-to="https://new.test/?a=1&amp;b=&quot;2&quot;" data-script-only hidden>Use new address</button>`)
 }
 
-func TestAccountPageListsSessions(t *testing.T) {
-	view := AccountView{
-		Shell: alice(SectionAccount), Now: goldenNow, Error: "current password is wrong",
+func TestSettingsPageListsSessionsAndTheChangePasswordForm(t *testing.T) {
+	view := SettingsView{
+		Shell: alice(SectionSettings), Now: goldenNow, PasswordError: "current password is wrong",
 		Sessions: []SessionRow{
 			{ID: "abc", Agent: "Firefox <1>", IP: "10.0.0.1", LastUsedAt: 1577836800, IsCurrent: true},
 			{ID: "def", Agent: "Unknown browser", IP: "::1", LastUsedAt: 1577836800},
 		},
 	}
-	page := AccountPage(view)
+	page := SettingsPage(view)
 	for _, want := range []string{
 		`<span class="who"><b>Firefox &lt;1&gt;</b><span class="hint">10.0.0.1 · last used <time datetime="2020-01-01T00:00:00Z" title="2020-01-01 00:00 UTC">6 years ago</time></span></span><span class="badge admin">This browser</span>`,
-		`<form method="post" action="/account/sessions/def/revoke"><button class="btn ico" type="submit" title="Sign out" aria-label="Sign out Unknown browser"><svg viewBox="0 0 16 16" aria-hidden="true">`,
+		`<form method="post" action="/settings/sessions/def/revoke"><button class="btn ico" type="submit" title="Sign out" aria-label="Sign out Unknown browser"><svg viewBox="0 0 16 16" aria-hidden="true">`,
 		`<span class="lbl">Sign out</span></button></form>`,
 		`At least 12 characters, without your username. Changing it signs you out everywhere else.`,
-		`action="/account/sessions/revoke-others"`,
+		`action="/settings/sessions/revoke-others"`,
+		`action="/settings/password"`,
 		`<input type="password" name="new" autocomplete="new-password" minlength="12" required>`,
 		`<input type="password" name="again" autocomplete="new-password" required>`,
 		`<p class="err" role="alert">current password is wrong</p>`,
@@ -429,24 +430,67 @@ func TestAccountPageListsSessions(t *testing.T) {
 			t.Errorf("page lacks %s", want)
 		}
 	}
-	if strings.Contains(page, "/account/sessions/abc/revoke") {
+	if strings.Contains(page, "/settings/sessions/abc/revoke") {
 		t.Error("the current session must not offer a sign-out button")
 	}
 	view.Sessions = view.Sessions[:1]
-	if strings.Contains(AccountPage(view), "revoke-others") {
+	if strings.Contains(SettingsPage(view), "revoke-others") {
 		t.Error("a single session must not offer to sign out the others")
 	}
 }
 
-func TestForwardedUsersSeeNoAccountLinkOrSignOut(t *testing.T) {
+func TestTheSettingsPageHasItsSectionsInOrderAndNoAccountPage(t *testing.T) {
+	page := SettingsPage(SettingsView{Shell: alice(SectionSettings), MaxUserAgentLength: 200})
+	previous := -1
+	for _, heading := range []string{
+		"<h2>Link check</h2>", "<h2>User-Agent</h2>", "<h2>API tokens</h2>", "<h2>Sessions</h2>", "<h2>Change password</h2>",
+	} {
+		at := strings.Index(page, heading)
+		if at <= previous {
+			t.Errorf("%s is at %d, want it after %d", heading, at, previous)
+		}
+		previous = at
+	}
+	if got := strings.Count(page, `<div class="sheet">`); got != 1 {
+		t.Errorf("sheets = %d, want one, so that the page has one heavy rule", got)
+	}
+	requireAbsent(t, page, `href="/account"`, ">Account<", "/account/")
+}
+
+// An error belongs to the form that was refused: the rest of the page must not repeat it.
+func TestEachFormShowsOnlyItsOwnError(t *testing.T) {
+	forms := []struct {
+		name  string
+		view  SettingsView
+		field string
+	}{
+		{"settings", SettingsView{Error: "user agent is too long"}, `action="/settings"`},
+		{"token", SettingsView{TokenError: "name is too long"}, `action="/settings/tokens"`},
+		{"password", SettingsView{PasswordError: "current password is wrong"}, `action="/settings/password"`},
+	}
+	for _, form := range forms {
+		t.Run(form.name, func(t *testing.T) {
+			form.view.Shell = alice(SectionSettings)
+			page := SettingsPage(form.view)
+			if got := strings.Count(page, `role="alert"`); got != 1 {
+				t.Fatalf("errors shown = %d, want 1", got)
+			}
+			start := strings.Index(page, form.field)
+			own := page[start : start+strings.Index(page[start:], "</form>")]
+			if !strings.Contains(own, `role="alert"`) {
+				t.Errorf("the error is not inside the form %s", form.field)
+			}
+		})
+	}
+}
+
+func TestForwardedUsersSeeNoPasswordSectionsAndNoSignOut(t *testing.T) {
 	shell := alice(SectionSettings)
 	shell.Forwarded = true
 	page := SettingsPage(SettingsView{Shell: shell, LinkCheckEnabled: true, ServerChecksLinks: true})
-	for _, unwanted := range []string{`href="/account"`, `action="/logout"`, "Background checks are turned off"} {
-		if strings.Contains(page, unwanted) {
-			t.Errorf("page contains %s", unwanted)
-		}
-	}
+	requireAbsent(t, page, `action="/logout"`, "Background checks are turned off",
+		"<h2>Sessions</h2>", "<h2>Change password</h2>", `action="/settings/password"`)
+	requireContains(t, page, "<h2>Link check</h2>", "<h2>User-Agent</h2>", "<h2>API tokens</h2>")
 	if !strings.Contains(page, `name="link_check_enabled" value="on" checked>`) {
 		t.Error("the checkbox must start ticked")
 	}
@@ -560,7 +604,9 @@ func TestTheTokenListShowsEachTokenWithItsOwnRevokeButton(t *testing.T) {
 }
 
 func TestNoTokensMeansNoList(t *testing.T) {
-	page := SettingsPage(SettingsView{Shell: alice(SectionSettings), MaxTokenNameLength: 100})
+	shell := alice(SectionSettings)
+	shell.Forwarded = true // the session list shares the class of the token list
+	page := SettingsPage(SettingsView{Shell: shell, MaxTokenNameLength: 100})
 	requireAbsent(t, page, "/revoke", "never used", `class="sessions"`)
 }
 

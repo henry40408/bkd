@@ -20,7 +20,7 @@ func TestPasswordChangeLosingARaceIsRefusedWithoutANewSession(t *testing.T) {
 	token := app.signIn("alice", false)
 	app.skipChanges("users", "UPDATE")
 
-	r := app.send(formPost("/account/password", passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")).as(token))
+	r := app.send(formPost("/settings/password", passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")).as(token))
 
 	assertStatus(t, r, http.StatusConflict)
 	if cookie := r.headers.Get("Set-Cookie"); cookie != "" {
@@ -34,7 +34,7 @@ func TestPasswordChangeThatCannotStartASessionAsksToSignInAgain(t *testing.T) {
 	token := app.signIn("alice", false)
 	app.skipChanges("sessions", "INSERT")
 
-	r := app.send(formPost("/account/password", passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")).as(token))
+	r := app.send(formPost("/settings/password", passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")).as(token))
 
 	assertStatus(t, r, http.StatusConflict)
 	if !strings.Contains(r.text, "sign in again") {
@@ -81,7 +81,7 @@ func TestConfirmAndPasswordChangeShareTheLoginRateLimit(t *testing.T) {
 	}
 
 	assertStatus(t, last, http.StatusTooManyRequests)
-	assertStatus(t, app.send(formPost("/account/password", passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")).as(token)), http.StatusTooManyRequests)
+	assertStatus(t, app.send(formPost("/settings/password", passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")).as(token)), http.StatusTooManyRequests)
 }
 
 func TestSignInAndSetupAnswer500WhenTheUserTableFails(t *testing.T) {
@@ -99,12 +99,15 @@ func TestLoggingOutWithoutASessionIsAQuietSuccess(t *testing.T) {
 	assertStatus(t, app.send(formPost("/logout", "")), http.StatusSeeOther)
 }
 
-func TestASingleSignOnUserIsRefusedTheAccountPagesThatNeedAPassword(t *testing.T) {
+func TestASingleSignOnUserIsRefusedTheRoutesThatNeedAPassword(t *testing.T) {
 	app := newTestApp(t, forwardAuthConfig(t))
 	passwords := passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")
+	mismatch := passwordChangeFields(testPassword, "a brand new secret", "another new secret")
 	for _, request := range []sent{
-		get("/account"),
-		formPost("/account/password", passwords),
+		formPost("/settings/password", passwords),
+		formPost("/settings/password", mismatch),
+		formPost("/settings/sessions/revoke-others", ""),
+		formPost("/settings/sessions/0123456789abcdef/revoke", ""),
 		formPost("/confirm", "password=correct+horse+battery"),
 	} {
 		r := app.send(viaProxy(request, "alice"))
@@ -112,4 +115,22 @@ func TestASingleSignOnUserIsRefusedTheAccountPagesThatNeedAPassword(t *testing.T
 			t.Errorf("%s %s: status = %d, body %q", request.method, request.uri, r.status, r.text)
 		}
 	}
+}
+
+func TestASingleSignOnUserSeesTheSettingsWithoutSessionsAndPassword(t *testing.T) {
+	app := newTestApp(t, forwardAuthConfig(t))
+
+	r := app.send(viaProxy(get("/settings"), "alice"))
+
+	assertStatus(t, r, http.StatusOK)
+	mustContain(t, r, "<h2>Link check</h2>", "<h2>User-Agent</h2>", "<h2>API tokens</h2>")
+	for _, unwanted := range []string{"<h2>Sessions</h2>", "<h2>Change password</h2>", "/settings/password", "/settings/sessions/", `href="/account"`} {
+		mustLack(t, r, unwanted)
+	}
+}
+
+func TestASingleSignOnUserFollowsTheOldAccountAddressToTheSettings(t *testing.T) {
+	app := newTestApp(t, forwardAuthConfig(t))
+
+	mustRedirect(t, app.send(viaProxy(get("/account"), "alice")), "/settings")
 }

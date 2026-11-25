@@ -27,6 +27,8 @@ func registerLayoutSteps(sc *godog.ScenarioContext, w *world) {
 		return err
 	}))
 	sc.Step(`^the page does not scroll sideways$`, w.noSidewaysScroll)
+	sc.Step(`^the rules above the sections are `+quoted+`$`, withString(w.sectionRulesAre))
+	sc.Step(`^the Save button is clear of the rule below it$`, w.saveButtonIsClearOfTheRuleBelow)
 }
 
 // formChecksOff matters because the script is what turns a refusal into a
@@ -72,6 +74,39 @@ func (w *world) shownIs(selector string, shown bool) error {
 		displayed, err := element.Displayed()
 		return displayed == shown, err
 	})
+}
+
+// sectionRulesAre reads the rule above each section of the page, top to bottom:
+// one heavy rule at the top and light ones between the rest.
+func (w *world) sectionRulesAre(expected string) error {
+	rules, err := harness.Exec[string](w.browser, `
+		return [...document.querySelectorAll("#main section")]
+			.map((section) => getComputedStyle(section).borderTopWidth).join(" ");`)
+	if err != nil {
+		return err
+	}
+	if rules != expected {
+		return fmt.Errorf("the rules above the sections are %q, want %q", rules, expected)
+	}
+	return nil
+}
+
+// minimumGapBelowSave is the least space, in pixels, between the Save button and
+// the next section's rule: the gap between two sections is 1.5rem.
+const minimumGapBelowSave = 16
+
+func (w *world) saveButtonIsClearOfTheRuleBelow() error {
+	gap, err := harness.Exec[float64](w.browser, `
+		const save = document.querySelector("#main form[action='/settings'] button[type=submit]");
+		const next = save.closest("form").nextElementSibling;
+		return next.getBoundingClientRect().top - save.getBoundingClientRect().bottom;`)
+	if err != nil {
+		return err
+	}
+	if gap < minimumGapBelowSave {
+		return fmt.Errorf("the Save button is %vpx above the next rule, want at least %d", gap, minimumGapBelowSave)
+	}
+	return nil
 }
 
 func (w *world) noSidewaysScroll() error {

@@ -14,7 +14,7 @@ func TestEveryFormPageRefusesABodyOfTheWrongType(t *testing.T) {
 	admin := app.confirmed("root")
 	routes := []string{
 		"/bookmarks", "/bookmarks/bulk", "/bookmarks/delete", "/bookmarks/1/edit",
-		"/login", "/confirm", "/settings", "/account/password",
+		"/login", "/confirm", "/settings", "/settings/password",
 		"/users", "/users/2/role", "/users/2/disabled", "/users/2/password",
 	}
 	for _, route := range routes {
