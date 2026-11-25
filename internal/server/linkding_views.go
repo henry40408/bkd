@@ -1,10 +1,12 @@
 package server
 
 import (
+	"errors"
 	"math"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/henry40408/bkd/internal/bookmarks"
@@ -77,28 +79,39 @@ func linkdingTagOf(entry bookmarks.TagEntry) linkdingTag {
 
 const (
 	linkdingDefaultLimit uint32 = 100
-	// linkdingMaxLimit is more than the 200 of the page-sized lists: a program
-	// that mirrors every bookmark asks for big pages, and a page is small.
-	linkdingMaxLimit uint32 = 1000
+	// linkdingMaxBookmarkLimit is more than the 200 of the page-sized lists: a
+	// program that mirrors every bookmark asks for big pages.
+	linkdingMaxBookmarkLimit uint32 = 1000
+	// linkdingMaxTagLimit is what the official browser extension asks for: it
+	// reads one page of tags for its autocomplete and never follows `next`.
+	linkdingMaxTagLimit uint32 = 5000
 )
 
 // linkdingPaging is limit and offset as Django REST framework reads them: a value
-// that is not a number, or a limit below 1, is the default and not an error.
+// that is not a number, or a limit below 1, is the default and not an error, and
+// a number too big is the biggest allowed.
 type linkdingPaging struct {
 	limit  uint32
 	offset uint32
 }
 
-func linkdingPagingOf(r *http.Request) linkdingPaging {
+func linkdingPagingOf(r *http.Request, maxLimit uint32) linkdingPaging {
 	query := r.URL.Query()
 	paging := linkdingPaging{limit: linkdingDefaultLimit}
-	if limit, err := strconv.ParseUint(query.Get("limit"), 10, 32); err == nil && limit > 0 {
-		paging.limit = uint32(min(limit, uint64(linkdingMaxLimit)))
+	if limit, ok := wholeNumber(query.Get("limit")); ok && limit > 0 {
+		paging.limit = uint32(min(limit, uint64(maxLimit)))
 	}
-	if offset, err := strconv.ParseUint(query.Get("offset"), 10, 64); err == nil {
+	if offset, ok := wholeNumber(query.Get("offset")); ok {
 		paging.offset = uint32(min(offset, math.MaxUint32))
 	}
 	return paging
+}
+
+// wholeNumber reads digits. A number beyond 64 bits comes back as the largest one
+// rather than as a failure, so the caller's cap applies to it.
+func wholeNumber(text string) (uint64, bool) {
+	number, err := strconv.ParseUint(text, 10, 64)
+	return number, err == nil || errors.Is(err, strconv.ErrRange)
 }
 
 func (paging linkdingPaging) page() bookmarks.Page {
@@ -125,11 +138,14 @@ func newLinkdingList[T any](r *http.Request, scheme string, paging linkdingPagin
 	}
 }
 
-// publicScheme is https when the operator says the site is served over it, or
-// when the connection is TLS itself: a link to the next page has to be one the
-// client can follow.
+// publicScheme is https when the operator says the site is served over it, when
+// the connection is TLS itself, or when a proxy says it received the request over
+// TLS. The header is believed only in this direction: a client that forges it
+// can make a link that does not work for itself, and a plain http link would
+// make a client send its token in the clear.
 func (a *App) publicScheme(r *http.Request) string {
-	if a.secureCookies || r.TLS != nil {
+	forwarded, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
+	if a.secureCookies || r.TLS != nil || strings.EqualFold(strings.TrimSpace(forwarded), "https") {
 		return "https"
 	}
 	return "http"

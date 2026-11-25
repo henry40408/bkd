@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -74,7 +75,8 @@ func TestLinkdingRoutesAnswerOnlyToATokenInLinkdingsWords(t *testing.T) {
 		detail string
 	}{
 		{"no header", "", messageNoCredentials},
-		{"another scheme", "Bearer " + token, messageNoCredentials},
+		{"another scheme", "Basic " + token, messageNoCredentials},
+		{"a keyword that is only a prefix", "Tokens " + token, messageNoCredentials},
 		{"no token", "Token", messageNoToken},
 		{"spaces in the token", "Token " + token + " more", messageSpacedToken},
 		{"a wrong token", "Token " + strings.Repeat("0", 64), messageBadToken},
@@ -92,11 +94,22 @@ func TestLinkdingRoutesAnswerOnlyToATokenInLinkdingsWords(t *testing.T) {
 	}
 }
 
-func TestLinkdingKeywordIgnoresCase(t *testing.T) {
+// linkding takes "Bearer" as well as "Token", and clients send either.
+func TestLinkdingKeywordIsTokenOrBearerInAnyCase(t *testing.T) {
 	app := runningApp(t)
 	token, _ := app.linkdingUser("henry")
-	request := get("/api/bookmarks/")
-	request.headers = map[string]string{"Authorization": "tOkEn  " + token}
+	for _, keyword := range []string{"Token", "tOkEn", "Bearer", "BEARER"} {
+		request := get("/api/bookmarks/")
+		request.headers = map[string]string{"Authorization": keyword + "  " + token}
+		assertStatus(t, app.send(request), http.StatusOK)
+	}
+}
+
+func TestLinkdingRoutesAnswerHEADLikeGET(t *testing.T) {
+	app := runningApp(t)
+	token, _ := app.linkdingUser("henry")
+	request := withToken(get("/api/tags/"), token)
+	request.method = http.MethodHead
 	assertStatus(t, app.send(request), http.StatusOK)
 }
 
@@ -308,24 +321,89 @@ func TestLinkdingLinksAreHTTPSWhenTheSiteIsServedOverIt(t *testing.T) {
 func TestLinkdingPagingReadsLimitAndOffsetLikeDjangoRESTFramework(t *testing.T) {
 	cases := []struct {
 		query         string
+		max           uint32
 		limit, offset uint32
 	}{
-		{"", 100, 0},
-		{"limit=7&offset=3", 7, 3},
-		{"limit=abc&offset=abc", 100, 0},
-		{"limit=0", 100, 0},
-		{"limit=-5&offset=-5", 100, 0},
-		{"limit=1000", 1000, 0},
-		{"limit=1001", 1000, 0},
-		{"limit=99999999999", 100, 0},
-		{"offset=99999999999", 100, 4294967295},
+		{"", 1000, 100, 0},
+		{"limit=7&offset=3", 1000, 7, 3},
+		{"limit=abc&offset=abc", 1000, 100, 0},
+		{"limit=0", 1000, 100, 0},
+		{"limit=-5&offset=-5", 1000, 100, 0},
+		{"limit=1000", 1000, 1000, 0},
+		{"limit=1001", 1000, 1000, 0},
+		{"limit=5000", 5000, 5000, 0},
+		{"limit=5001", 5000, 5000, 0},
+		{"limit=99999999999", 1000, 1000, 0},
+		{"limit=99999999999999999999999", 1000, 1000, 0},
+		{"offset=99999999999", 1000, 100, 4294967295},
+		{"offset=99999999999999999999999", 1000, 100, 4294967295},
+		{"offset=4294967295", 1000, 100, 4294967295},
+		{"offset=4294967294", 1000, 100, 4294967294},
 	}
 	for _, c := range cases {
 		request := httptest.NewRequest(http.MethodGet, "/api/bookmarks/?"+c.query, nil)
-		got := linkdingPagingOf(request)
+		got := linkdingPagingOf(request, c.max)
 		if got.limit != c.limit || got.offset != c.offset {
 			t.Errorf("%q: limit %d offset %d, want %d and %d", c.query, got.limit, got.offset, c.limit, c.offset)
 		}
+	}
+}
+
+func TestLinkdingTagsAllowTheLimitTheBrowserExtensionAsksFor(t *testing.T) {
+	app := runningApp(t)
+	token, user := app.linkdingUser("henry")
+	tags := make([]string, 0, 12)
+	for _, name := range "abcdefghijkl" {
+		tags = append(tags, string(name))
+	}
+	app.saveBookmark(user, bookmarks.Input{URL: "https://example.com/1", Title: "1", Tags: tags[:10]}, 1)
+	app.saveBookmark(user, bookmarks.Input{URL: "https://example.com/2", Title: "2", Tags: tags[10:]}, 2)
+	r := app.send(withToken(get("/api/tags/?limit=5000"), token))
+	if len(r.results()) != 12 || r.json()["next"] != nil {
+		t.Fatalf("tags = %s", r.text)
+	}
+}
+
+func TestLinkdingLinksUseHTTPSWhenAProxySaysTheRequestWasSecure(t *testing.T) {
+	app := runningApp(t)
+	token, user := app.linkdingUser("henry")
+	fiveBookmarks(app, user)
+	cases := map[string]string{"https": "https://", "HTTPS, http": "https://", "http": "http://", "": "http://", "gopher": "http://"}
+	for forwarded, prefix := range cases {
+		request := withToken(get("/api/bookmarks/?limit=2"), token)
+		if forwarded != "" {
+			request.headers["X-Forwarded-Proto"] = forwarded
+		}
+		next, _ := app.send(request).json()["next"].(string)
+		if !strings.HasPrefix(next, prefix+"bkd.test/") {
+			t.Errorf("X-Forwarded-Proto %q: next = %q, want %s…", forwarded, next, prefix)
+		}
+	}
+}
+
+func TestLinkdingNextLinkKeepsAQueryThatNeedsEncoding(t *testing.T) {
+	app := runningApp(t)
+	token, user := app.linkdingUser("henry")
+	for i := range 3 {
+		app.saveBookmark(user, bookmarks.Input{URL: "https://example.com/" + strconv.Itoa(i), Title: "a&b#c+d " + strconv.Itoa(i)}, int64(i))
+	}
+	r := app.send(withToken(get("/api/bookmarks/?limit=1&q=a%26b%23c%2Bd"), token))
+	if r.json()["count"] != float64(3) || r.json()["next"] != "http://bkd.test/api/bookmarks/?limit=1&offset=1&q=a%26b%23c%2Bd" {
+		t.Fatalf("body = %s", r.text)
+	}
+}
+
+func TestLinkdingListsBkdHasNothingForAreEmptyNotMissing(t *testing.T) {
+	app := runningApp(t)
+	token, user := app.linkdingUser("henry")
+	fiveBookmarks(app, user)
+	for _, path := range []string{"/api/bookmarks/archived/", "/api/bookmarks/shared/"} {
+		r := app.send(withToken(get(path), token))
+		assertStatus(t, r, http.StatusOK)
+		if r.text != `{"count":0,"next":null,"previous":null,"results":[]}` {
+			t.Errorf("%s: body = %s", path, r.text)
+		}
+		assertStatus(t, app.send(get(path)), http.StatusUnauthorized)
 	}
 }
 
@@ -372,12 +450,20 @@ func TestLinkdingTimeBoundsTakeTheSpellingsClientsSend(t *testing.T) {
 		"2020-09-13%2012:26:39",       // a space in place of the T
 		"2020-09-13T12:26:39.5Z",      // a fraction is rounded down
 		"2020-09-13",                  // a date is its midnight in UTC
+		"2020-09-13T12:26",            // no seconds
+		"2020-09-13%2012:26",          // no seconds, a space for the T
+		"2020-09-13T14:26:39%2B0200",  // an offset without a colon
+		"2020-09-13T14:26:39+02:00",   // a "+" that was not encoded reads as a space
+		"2020-09-13T14:26:39.5+02:00", // the same with a fraction
+		"2020-09-13%2014:26:39+02:00", // the same with a space for the T
 	} {
 		r := app.send(withToken(get("/api/bookmarks/?added_since="+bound), token))
 		assertStatus(t, r, http.StatusOK)
 		assertIDs(t, r, saved.ID)
 	}
-	for _, bound := range []string{"2020-09-13T12:26:40Z", "2020-09-13T14:26:40%2B02:00", "2020-09-14"} {
+	for _, bound := range []string{
+		"2020-09-13T12:26:40Z", "2020-09-13T14:26:40%2B02:00", "2020-09-14", "2020-09-13T14:26:40+02:00",
+	} {
 		assertIDs(t, app.send(withToken(get("/api/bookmarks/?added_since="+bound), token)))
 	}
 }
@@ -486,6 +572,20 @@ func TestLinkdingCheckFindsABookmarkedAddress(t *testing.T) {
 	}
 }
 
+// A browser shows https://example.com/ for a page saved as https://example.com.
+func TestLinkdingCheckIgnoresATrailingSlash(t *testing.T) {
+	app := runningApp(t)
+	token, user := app.linkdingUser("henry")
+	saved := app.saveBookmark(user, bookmarks.Input{URL: "https://example.com", Title: "root"}, 5)
+	for _, address := range []string{"https://example.com/", "https://example.com"} {
+		r := app.send(withToken(get("/api/bookmarks/check/?url="+address), token))
+		bookmark, _ := r.json()["bookmark"].(map[string]any)
+		if bookmark["id"] != float64(saved.ID) {
+			t.Errorf("%s: body = %s", address, r.text)
+		}
+	}
+}
+
 func TestLinkdingCheckOfAnUnknownAddressHasNoBookmarkAndNoMetadata(t *testing.T) {
 	app := runningApp(t)
 	token, user := app.linkdingUser("henry")
@@ -493,7 +593,7 @@ func TestLinkdingCheckOfAnUnknownAddressHasNoBookmarkAndNoMetadata(t *testing.T)
 	app.saveBookmark(other, bookmarks.Input{URL: "https://example.com/theirs", Title: "theirs"}, 5)
 	app.saveBookmark(user, bookmarks.Input{URL: "https://example.com/mine", Title: "mine"}, 5)
 
-	for _, address := range []string{"https://example.com/theirs", "https://example.com/min", "https://example.com/mine/"} {
+	for _, address := range []string{"https://example.com/theirs", "https://example.com/min", "https://example.com/mine/x"} {
 		r := app.send(withToken(get("/api/bookmarks/check/?url="+address), token))
 		assertStatus(t, r, http.StatusOK)
 		want := `{"bookmark":null,"metadata":{"url":"` + address +
@@ -544,4 +644,22 @@ func TestTheOtherAPIRoutesStillAnswerTheCookieSession(t *testing.T) {
 	assertStatus(t, app.send(get("/api/tags").as(session)), http.StatusOK)
 	assertStatus(t, app.send(get("/api/bookmarks/random").as(session)), http.StatusNotFound)
 	assertStatus(t, app.send(post("/api/bookmarks/check", map[string]any{"ids": []int{}}).as(session)), http.StatusBadRequest)
+}
+
+func TestLinkdingLogsTheCauseOfAFaultButOnlyThen(t *testing.T) {
+	app, log := loggedApp(t)
+	app.app.writeDetailError(httptest.NewRecorder(), unauthenticated(messageBadToken))
+	app.app.writeDetailError(httptest.NewRecorder(), detailNotFound())
+	if log.Len() != 0 {
+		t.Fatalf("a client error was logged as a fault: %s", log)
+	}
+
+	recorder := httptest.NewRecorder()
+	app.app.writeDetailError(recorder, internal(errors.New("disk on fire")))
+	if !strings.Contains(log.String(), "disk on fire") {
+		t.Errorf("the cause was not logged: %s", log)
+	}
+	if strings.Contains(recorder.Body.String(), "disk on fire") {
+		t.Errorf("the cause reached the client: %s", recorder.Body)
+	}
 }

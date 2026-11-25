@@ -85,8 +85,12 @@ func TestReadStoresTheDetailsAndFillsABlankNoteOnly(t *testing.T) {
 	assertStatus(t, app.send(readAs(token, 1)), http.StatusOK)
 	saved := storedBookmark(t, app, token, 1)
 	assertSiteOf(t, saved, "Og title", "Og description")
-	if saved["title"] != "Page" || saved["note"] != "Og description" || saved["updated_at"] != float64(1000) {
-		t.Fatalf("title = %v, note = %v, updated_at = %v", saved["title"], saved["note"], saved["updated_at"])
+	if saved["title"] != "Page" || saved["note"] != "Og description" {
+		t.Fatalf("title = %v, note = %v", saved["title"], saved["note"])
+	}
+	// The read changed the details and the note, so the bookmark counts as modified.
+	if updated, _ := saved["updated_at"].(float64); updated <= 1000 {
+		t.Fatalf("updated_at = %v, want it moved past 1000", saved["updated_at"])
 	}
 }
 

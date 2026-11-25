@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,8 +21,18 @@ func (a *App) mountLinkding(mux *http.ServeMux) {
 	token := a.tokenGuarded
 	route("/api/bookmarks/{$}", onGet(token(a.linkdingListBookmarks)))
 	route("/api/bookmarks/check/{$}", onGet(token(a.linkdingCheckBookmark)))
+	route("/api/bookmarks/archived/{$}", onGet(token(a.linkdingListNothing)))
+	route("/api/bookmarks/shared/{$}", onGet(token(a.linkdingListNothing)))
 	route("/api/bookmarks/{id}/{$}", onGet(token(a.linkdingGetBookmark)))
 	route("/api/tags/{$}", onGet(token(a.linkdingListTags)))
+}
+
+// linkdingListNothing answers the lists bkd has nothing for: it has no archive,
+// and no bookmark is shared with other users. An empty list is true, and a client
+// with an "archived" tab shows an empty tab instead of an error.
+func (a *App) linkdingListNothing(w http.ResponseWriter, r *http.Request, _ auth.SessionUser) {
+	paging := linkdingPagingOf(r, linkdingMaxBookmarkLimit)
+	writeJSON(w, http.StatusOK, newLinkdingList(r, a.publicScheme(r), paging, 0, []linkdingBookmark{}))
 }
 
 func (a *App) linkdingListBookmarks(w http.ResponseWriter, r *http.Request, user auth.SessionUser) {
@@ -30,7 +41,7 @@ func (a *App) linkdingListBookmarks(w http.ResponseWriter, r *http.Request, user
 		a.writeDetailError(w, fault)
 		return
 	}
-	paging := linkdingPagingOf(r)
+	paging := linkdingPagingOf(r, linkdingMaxBookmarkLimit)
 	count, err := a.bookmarks.Count(r.Context(), user.UserID, filter)
 	if err != nil {
 		a.writeDetailError(w, internal(err))
@@ -63,13 +74,22 @@ func linkdingFilterOf(r *http.Request) (bookmarks.Filter, *apiError) {
 }
 
 // linkdingTimeLayouts are the spellings of a time that clients send: the one
-// linkding writes, then the same without a zone (taken as UTC) and a plain date.
+// linkding writes, the same without a zone (taken as UTC), without seconds, with
+// an offset that has no colon, and a plain date.
 var linkdingTimeLayouts = []string{
 	time.RFC3339,
 	"2006-01-02T15:04:05",
 	"2006-01-02 15:04:05",
+	"2006-01-02T15:04",
+	"2006-01-02 15:04",
+	"2006-01-02T15:04:05-0700",
+	"2006-01-02 15:04:05Z07:00",
 	"2006-01-02",
 }
+
+// unencodedPlus finds an offset whose "+" a client did not encode, so the query
+// string turned it into a space: "2024-01-01T00:00:00 02:00".
+var unencodedPlus = regexp.MustCompile(`^(\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?) (\d\d:\d\d)$`)
 
 // linkdingTimeParameter reads a time bound as whole Unix seconds, rounded down,
 // which is how finely bkd keeps times. nil is no bound.
@@ -78,6 +98,7 @@ func linkdingTimeParameter(r *http.Request, name string) (*int64, *apiError) {
 	if raw == "" {
 		return nil, nil
 	}
+	raw = unencodedPlus.ReplaceAllString(raw, "$1+$2")
 	for _, layout := range linkdingTimeLayouts {
 		if parsed, err := time.Parse(layout, raw); err == nil {
 			seconds := parsed.Unix()
@@ -106,7 +127,7 @@ func (a *App) linkdingGetBookmark(w http.ResponseWriter, r *http.Request, user a
 }
 
 func (a *App) linkdingListTags(w http.ResponseWriter, r *http.Request, user auth.SessionUser) {
-	paging := linkdingPagingOf(r)
+	paging := linkdingPagingOf(r, linkdingMaxTagLimit)
 	entries, count, err := a.bookmarks.TagEntries(r.Context(), user.UserID, paging.page())
 	if err != nil {
 		a.writeDetailError(w, internal(err))

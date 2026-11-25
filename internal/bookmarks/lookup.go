@@ -2,6 +2,8 @@ package bookmarks
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"strings"
 )
@@ -29,13 +31,22 @@ func (since Since) SQL() (conditions string, args []any) {
 	return conditions, args
 }
 
-// FindByURL returns the user's bookmark with exactly this address (after
-// trimming, as a stored address is). When several share it, the oldest wins, so
-// the answer does not change while nothing is added.
+// FindByURL returns the user's bookmark with this address, trimmed as a stored
+// address is. A trailing slash does not tell addresses apart: a browser shows
+// https://example.com/ for a page saved as https://example.com, and the lookup
+// that asks "is this page bookmarked?" must find it. The spelling that was asked
+// for wins, then the lowest id, so the answer does not change while nothing is
+// added.
 func (s *Store) FindByURL(ctx context.Context, userID int64, url string) (bookmark Bookmark, found bool, err error) {
+	asked := strings.TrimSpace(url)
+	bare := strings.TrimRight(asked, "/")
+	if bare == "" {
+		return Bookmark{}, false, nil
+	}
 	rows, err := s.query(ctx,
-		selectBookmark+" WHERE bookmarks.user_id = ?1 AND bookmarks.url = ?2 ORDER BY bookmarks.id LIMIT 1",
-		userID, strings.TrimSpace(url))
+		selectBookmark+` WHERE bookmarks.user_id = ?1 AND bookmarks.url IN (?3, ?4)
+		 ORDER BY bookmarks.url = ?2 DESC, bookmarks.id LIMIT 1`,
+		userID, asked, bare, bare+"/")
 	if err != nil || len(rows) == 0 {
 		return Bookmark{}, false, err
 	}
@@ -44,9 +55,10 @@ func (s *Store) FindByURL(ctx context.Context, userID int64, url string) (bookma
 
 // TagEntry is a tag as a program that expects tags to be records sees it. A tag
 // here is only a word on bookmarks, so ID and AddedAt are made up from them: ID is
-// the smallest row number the tag has among the user's bookmarks, and AddedAt is
-// when the oldest bookmark that carries it was saved. ID is stable while that
-// bookmark keeps the tag and unique among one user's tags.
+// 53 bits of the name's SHA-256 (the most a JSON number holds exactly), so it does
+// not change when bookmarks are edited and collides with another of the user's
+// tags only by chance; AddedAt is when the oldest bookmark that carries the tag
+// was saved.
 type TagEntry struct {
 	ID      int64
 	Name    string
@@ -64,7 +76,7 @@ func (s *Store) TagEntries(ctx context.Context, userID int64, page Page) (entrie
 		return nil, 0, fmt.Errorf("count tags: %w", err)
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT bookmark_tags.tag, min(bookmark_tags.rowid), min(bookmarks.created_at)
+		`SELECT bookmark_tags.tag, min(bookmarks.created_at)
          FROM bookmark_tags JOIN bookmarks ON bookmarks.id = bookmark_tags.bookmark_id
          WHERE bookmarks.user_id = ?1
          GROUP BY bookmark_tags.tag ORDER BY bookmark_tags.tag LIMIT ?2 OFFSET ?3`,
@@ -76,13 +88,19 @@ func (s *Store) TagEntries(ctx context.Context, userID int64, page Page) (entrie
 	entries = []TagEntry{}
 	for rows.Next() {
 		var entry TagEntry
-		if err := rows.Scan(&entry.Name, &entry.ID, &entry.AddedAt); err != nil {
+		if err := rows.Scan(&entry.Name, &entry.AddedAt); err != nil {
 			return nil, 0, fmt.Errorf("scan tag: %w", err)
 		}
+		entry.ID = tagID(entry.Name)
 		entries = append(entries, entry)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("read tags: %w", err)
 	}
 	return entries, total, nil
+}
+
+func tagID(name string) int64 {
+	sum := sha256.Sum256([]byte(name))
+	return int64(binary.BigEndian.Uint64(sum[:8]) >> 11)
 }

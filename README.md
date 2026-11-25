@@ -167,24 +167,25 @@ A program that cannot sign in through the browser, such as a browser extension o
 
 ## linkding-compatible API
 
-Programs written for [linkding](https://linkding.link/api/) can read your bookmarks with an API token (see above): send `Authorization: Token <token>`. Only reading is supported for now.
+Programs written for [linkding](https://linkding.link/api/) can read your bookmarks with an API token (see above): send `Authorization: Token <token>` (`Bearer` works too). Only reading is supported for now.
 
 | Request | Answers |
 | --- | --- |
 | `GET /api/bookmarks/` | your bookmarks, newest first, as `{count, next, previous, results}`. Parameters: `q`, `limit` (default 100, at most 1000), `offset`, `added_since`, `modified_since` |
 | `GET /api/bookmarks/{id}/` | one bookmark |
-| `GET /api/bookmarks/check/?url=` | `{bookmark, metadata, auto_tags}`: whether you saved that exact address |
-| `GET /api/tags/` | your tags, by name |
+| `GET /api/bookmarks/check/?url=` | `{bookmark, metadata, auto_tags}`: whether you saved that address (a trailing slash does not matter) |
+| `GET /api/bookmarks/archived/`, `GET /api/bookmarks/shared/` | always an empty list: bkd has no archive and shares nothing |
+| `GET /api/tags/` | your tags, by name (`limit` up to 5000) |
 
 How bkd's fields map to linkding's, and what differs:
 
 - linkding's `description` is bkd's *site description* (what the page says about itself) and `notes` is bkd's note. `title` is your title. `website_title` and `website_description` are the site's, `null` when bkd read none.
 - bkd has no archive, unread, sharing, favicon or preview image: `is_archived`, `unread` and `shared` are always `false`, the two image fields `null`.
-- `q` uses bkd's search syntax (see "Search"), not linkding's. `added_since` and `modified_since` accept an RFC 3339 time, one without a zone (taken as UTC) or a date, and compare whole seconds.
-- Tag ids are made up from the tag's place in the list and change when you add or remove tags; use the name.
-- `check` does not fetch the page: `metadata` is what bkd stored for a bookmark you already have, and `null` for any other address; `auto_tags` is empty.
+- `q` uses bkd's search syntax (see "Search"), not linkding's. `added_since` and `modified_since` accept an RFC 3339 time, one without a zone (taken as UTC), one without seconds or a date, and compare whole seconds. Reading pages ("Read pages") moves a bookmark's `date_modified` when it finds something new.
+- Tag ids are made up from the tag's name, so they stay the same; there is no tag table behind them, so use the name to be sure.
+- `check` does not fetch the page: `metadata` is `{url, title, description, preview_image}`: the site's title and description that bkd stored for a bookmark you already have, `null` in each field for any other address; `auto_tags` is empty.
 - Errors are `{"detail": "..."}` as in linkding. These routes accept the token only, never a cookie.
-- A link to the next page is built from the `Host` the request came with, and is `https` with `--secure-cookies`. Behind a reverse proxy, pass `Host` through.
+- A link to the next page is built from the `Host` the request came with, and is `https` with `--secure-cookies` or when the proxy sends `X-Forwarded-Proto: https`. Behind a reverse proxy, pass `Host` through.
 
 ## Import and export
 

@@ -90,7 +90,7 @@ func (a *App) storeRead(ctx context.Context, user auth.SessionUser, checked link
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), storeResultTimeout)
 	defer cancel()
 	stored, err := a.bookmarks.SetSite(ctx, bookmarks.SetSiteRequest{
-		UserID: user.UserID, ID: checked.Target.ID, URL: checked.Target.URL, Site: site,
+		UserID: user.UserID, ID: checked.Target.ID, URL: checked.Target.URL, Site: site, Now: auth.UnixNow(),
 	})
 	if err != nil {
 		return storedRead{}, err

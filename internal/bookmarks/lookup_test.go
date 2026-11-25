@@ -78,13 +78,48 @@ func TestFindByURLIsExactTrimmedAndOwnedByTheUser(t *testing.T) {
 	if err != nil || !ok || found.ID != mine.ID {
 		t.Fatalf("FindByURL = %v, %v, %v", found.ID, ok, err)
 	}
-	for _, miss := range []string{mine.URL + "/", "HTTPS://example.com/mine", "https://example.com/min", ""} {
+	for _, miss := range []string{"HTTPS://example.com/mine", "https://example.com/min", "https://example.com/mine/x", "", "///"} {
 		if _, ok, err := store.FindByURL(bg, alice, miss); err != nil || ok {
 			t.Errorf("%q: found = %v, %v", miss, ok, err)
 		}
 	}
 	if _, ok, err := store.FindByURL(bg, dbtest.InsertUser(t, pool, "carol"), mine.URL); err != nil || ok {
 		t.Fatalf("another user's bookmark was found: %v, %v", ok, err)
+	}
+}
+
+func TestFindByURLIgnoresATrailingSlashButPrefersTheSpellingAsked(t *testing.T) {
+	store, pool := newStore(t)
+	user := dbtest.InsertUser(t, pool, "alice")
+	save := func(url string) Bookmark {
+		bookmark, err := Input{URL: url, Title: url}.Validate()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return create(t, store, user, bookmark, 100)
+	}
+	bare := save("https://example.com")
+	slashed := save("https://example.org/")
+	both := save("https://example.net/a")
+	bothSlashed := save("https://example.net/a/")
+
+	cases := []struct {
+		asked string
+		want  int64
+	}{
+		{"https://example.com/", bare.ID},
+		{"https://example.com//", bare.ID},
+		{"https://example.org", slashed.ID},
+		{" https://example.org/ ", slashed.ID},
+		{"https://example.net/a", both.ID},
+		{"https://example.net/a/", bothSlashed.ID},
+		{"https://example.net/a//", both.ID},
+	}
+	for _, c := range cases {
+		found, ok, err := store.FindByURL(bg, user, c.asked)
+		if err != nil || !ok || found.ID != c.want {
+			t.Errorf("%q: found %d, %v, %v, want %d", c.asked, found.ID, ok, err, c.want)
+		}
 	}
 }
 
@@ -128,6 +163,42 @@ func TestTagEntriesListTagsByNameWithAStableIDAndTheOldestDate(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertEqual(t, again, entries)
+}
+
+// A program keeps a tag's id between visits, so it must not depend on which
+// bookmark rows exist: an edit rewrites a bookmark's tags.
+func TestTagEntryIDsComeFromTheNameAndSurviveAnEdit(t *testing.T) {
+	store, pool := newStore(t)
+	alice := dbtest.InsertUser(t, pool, "alice")
+	bob := dbtest.InsertUser(t, pool, "bob")
+	saved := create(t, store, alice, valid(t, "one", "go", "web"), 100)
+	create(t, store, bob, valid(t, "theirs", "go"), 100)
+
+	idsOf := func(user int64) map[string]int64 {
+		entries, _, err := store.TagEntries(bg, user, NewPage(nil, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := map[string]int64{}
+		for _, entry := range entries {
+			ids[entry.Name] = entry.ID
+		}
+		return ids
+	}
+	before := idsOf(alice)
+	assertEqual(t, before, map[string]int64{"go": 2702720969687282, "web": 2651794393884136})
+
+	if _, _, err := store.Update(bg, UpdateRequest{UserID: alice, ID: saved.ID, Bookmark: valid(t, "one", "go", "web", "api"), Now: 200}); err != nil {
+		t.Fatal(err)
+	}
+	after := idsOf(alice)
+	assertEqual(t, after, map[string]int64{"api": 730394954991921, "go": 2702720969687282, "web": 2651794393884136})
+	assertEqual(t, idsOf(bob)["go"], before["go"])
+	for name, id := range after {
+		if id <= 0 || id >= 1<<53 {
+			t.Errorf("%s: id %d is not a positive integer a JSON number holds exactly", name, id)
+		}
+	}
 }
 
 func TestTagEntriesPageThroughTheTagsAndCountThemAll(t *testing.T) {

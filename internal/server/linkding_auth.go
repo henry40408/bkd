@@ -9,7 +9,7 @@ import (
 )
 
 // The linkding-compatible API (/api/bookmarks/, /api/tags/) is for programs that
-// send `Authorization: Token <token>`. It answers in linkding's shapes, so its
+// send `Authorization: Token <token>` (or `Bearer`, as linkding allows). It answers in linkding's shapes, so its
 // errors are {"detail": "..."} where the rest of the API sends {"error": "..."}.
 //
 // These routes take the token and nothing else: no cookie, no forwarded user. A
@@ -42,7 +42,7 @@ func (a *App) tokenGuarded(handle userHandler) http.Handler {
 // authentication does, so a client sees the messages it knows.
 func (a *App) userFromToken(r *http.Request) (auth.SessionUser, *apiError) {
 	fields := strings.Fields(r.Header.Get("Authorization"))
-	if len(fields) == 0 || !strings.EqualFold(fields[0], "Token") {
+	if len(fields) == 0 || !isTokenKeyword(fields[0]) {
 		return auth.SessionUser{}, unauthenticated(messageNoCredentials)
 	}
 	if len(fields) == 1 {
@@ -59,6 +59,12 @@ func (a *App) userFromToken(r *http.Request) (auth.SessionUser, *apiError) {
 		return auth.SessionUser{}, unauthenticated(messageBadToken)
 	}
 	return user, nil
+}
+
+// isTokenKeyword accepts the two words linkding does, in any case: clients send
+// "Token" (its own documentation) or "Bearer" (what many HTTP libraries expect).
+func isTokenKeyword(word string) bool {
+	return strings.EqualFold(word, "Token") || strings.EqualFold(word, "Bearer")
 }
 
 func unauthenticated(message string) *apiError {

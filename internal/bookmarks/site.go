@@ -18,6 +18,9 @@ type SetSiteRequest struct {
 	// describe it.
 	URL  string
 	Site Site
+	// Now is when the page was read. It becomes updated_at, but only when the
+	// read changed something.
+	Now int64
 }
 
 // SiteStored says what SetSite did.
@@ -31,8 +34,10 @@ type SiteStored struct {
 
 // SetSite keeps the details of a page that was read apart from the title and the
 // note, and fills a blank note with the description. The title and a note that
-// has text are never touched, nor is updated_at: reading a page is not an edit
-// by the user, and a batch of reads must not reorder the list.
+// has text are never touched. updated_at moves only when a detail or the note
+// actually changed, so reading an unchanged page again leaves it alone, while a
+// program that syncs by modification time (the linkding API's modified_since)
+// still sees a description or note that the read filled in.
 func (s *Store) SetSite(ctx context.Context, req SetSiteRequest) (SiteStored, error) {
 	site := req.Site.Fitted()
 	if site == (Site{}) {
@@ -54,9 +59,12 @@ func (s *Store) SetSite(ctx context.Context, req SetSiteRequest) (SiteStored, er
 		fillNote := note == "" && site.Description != ""
 		_, err = conn.ExecContext(ctx,
 			`UPDATE bookmarks SET site_title = NULLIF(?4, ''), site_description = NULLIF(?5, ''),
-			        note = CASE WHEN ?6 THEN ?5 ELSE note END
+			        note = CASE WHEN ?6 THEN ?5 ELSE note END,
+			        updated_at = CASE
+			            WHEN ?6 OR site_title IS NOT NULLIF(?4, '') OR site_description IS NOT NULLIF(?5, '')
+			            THEN ?7 ELSE updated_at END
 			 WHERE id = ?1 AND user_id = ?2 AND url = ?3`,
-			req.ID, req.UserID, req.URL, site.Title, site.Description, fillNote)
+			req.ID, req.UserID, req.URL, site.Title, site.Description, fillNote, req.Now)
 		if err != nil {
 			return fmt.Errorf("store site details: %w", err)
 		}
