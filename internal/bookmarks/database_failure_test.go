@@ -32,6 +32,8 @@ func storeOperations(t *testing.T) []failureCase {
 		{"Count", func(s *Store) error { _, err := s.Count(bg, 1, nil); return err }},
 		{"Random", func(s *Store) error { _, _, err := s.Random(bg, 1, nil); return err }},
 		{"All", func(s *Store) error { _, err := s.All(bg, 1); return err }},
+		{"FindByURL", func(s *Store) error { _, _, err := s.FindByURL(bg, 1, "https://example.com/x"); return err }},
+		{"TagEntries", func(s *Store) error { _, _, err := s.TagEntries(bg, 1, NewPage(nil, nil)); return err }},
 		{"TagCounts", func(s *Store) error { _, err := s.TagCounts(bg, 1); return err }},
 		{"LinkCounts", func(s *Store) error { _, err := s.LinkCounts(bg, 1); return err }},
 		{"Import", func(s *Store) error {
@@ -72,7 +74,7 @@ func TestOperationsThatTouchTagsReportAFailingTagTable(t *testing.T) {
 	}
 	for _, c := range storeOperations(t) {
 		switch c.name {
-		case "Create", "Update", "Import", "TagCounts", "List", "Get", "All", "Random",
+		case "Create", "Update", "Import", "TagCounts", "TagEntries", "FindByURL", "List", "Get", "All", "Random",
 			"ApplyBulk add_tags", "ApplyBulk remove_tags":
 			if err := c.run(store); err == nil {
 				t.Errorf("%s: no error although the tag table fails", c.name)

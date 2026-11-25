@@ -127,7 +127,7 @@ jobs:
           - name: server-api
             exclude: '^(e2e|vendor|cmd)/|^internal/(assets|auth|backgroundcheck|bookmarks|db|dbtest|importer|linkcheck|netscape|search|sitemeta|truncate|users|version|views)/|^internal/server/(pages|forms|guard|routes|app|cookie|sse|middleware|pageerror)'
           - name: server-pages
-            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|auth|backgroundcheck|bookmarks|db|dbtest|importer|linkcheck|netscape|search|sitemeta|truncate|users|version|views)/|^internal/server/(api|service|json|request)'
+            exclude: '^(e2e|vendor|cmd)/|^internal/(assets|auth|backgroundcheck|bookmarks|db|dbtest|importer|linkcheck|netscape|search|sitemeta|truncate|users|version|views)/|^internal/server/(api|service|json|request|linkding)'
           - name: auth-users-db
             exclude: '^(e2e|vendor|cmd)/|^internal/(assets|backgroundcheck|bookmarks|dbtest|importer|linkcheck|netscape|search|sitemeta|truncate|server|version|views)/'
           - name: linkcheck

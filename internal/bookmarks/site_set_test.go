@@ -26,7 +26,12 @@ func reload(t *testing.T, store *Store, user, id int64) Bookmark {
 
 func setSite(t *testing.T, store *Store, user int64, saved Bookmark, site Site) SiteStored {
 	t.Helper()
-	stored, err := store.SetSite(bg, SetSiteRequest{UserID: user, ID: saved.ID, URL: saved.URL, Site: site})
+	return setSiteAt(t, store, user, saved, site, 200)
+}
+
+func setSiteAt(t *testing.T, store *Store, user int64, saved Bookmark, site Site, now int64) SiteStored {
+	t.Helper()
+	stored, err := store.SetSite(bg, SetSiteRequest{UserID: user, ID: saved.ID, URL: saved.URL, Site: site, Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,9 +63,49 @@ func TestSetSiteReplacesBothDetailsAndFillsABlankNote(t *testing.T) {
 			assertEqual(t, got.Site, &c.wantSite)
 			assertEqual(t, []string{got.Title, got.Note}, []string{"Page", c.wantNote})
 			assertEqual(t, got.Tags, []string{"go"})
-			assertEqual(t, []int64{got.CreatedAt, got.UpdatedAt}, []int64{100, 100})
+			assertEqual(t, []int64{got.CreatedAt, got.UpdatedAt}, []int64{100, 200})
 		})
 	}
+}
+
+func TestSetSiteMovesUpdatedAtOnlyWhenTheReadChangedSomething(t *testing.T) {
+	cases := []struct {
+		name          string
+		note          string
+		page          Site
+		wantUpdatedAt int64
+	}{
+		{"the same details again", "mine", Site{Title: "Old title", Description: "old"}, 100},
+		{"a new title", "mine", Site{Title: "New title", Description: "old"}, 200},
+		{"a new description", "mine", Site{Title: "Old title", Description: "new"}, 200},
+		{"a title only, dropping the description", "mine", Site{Title: "Old title"}, 200},
+		{"the same details, but a blank note gets filled", "", Site{Title: "Old title", Description: "old"}, 200},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			store, pool := newStore(t)
+			user := dbtest.InsertUser(t, pool, "henry")
+			saved := createRead(t, store, user, c.note)
+
+			setSite(t, store, user, saved, c.page)
+
+			assertEqual(t, reload(t, store, user, saved.ID).UpdatedAt, c.wantUpdatedAt)
+		})
+	}
+}
+
+// A page that has no description leaves that column NULL, and a read that again
+// finds none is not a change: NULL against an empty text must not count as one.
+func TestSetSiteLeavesUpdatedAtAloneWhenADetailStaysEmpty(t *testing.T) {
+	store, pool := newStore(t)
+	user := dbtest.InsertUser(t, pool, "henry")
+	bookmark := withSite(valid(t, "Page"), Site{Title: "Only a title"})
+	bookmark.Note = "mine"
+	saved := create(t, store, user, bookmark, 100)
+
+	setSite(t, store, user, saved, Site{Title: "Only a title"})
+
+	assertEqual(t, reload(t, store, user, saved.ID).UpdatedAt, int64(100))
 }
 
 func TestSetSiteKeepsANoteThatHasText(t *testing.T) {
@@ -74,7 +119,7 @@ func TestSetSiteKeepsANoteThatHasText(t *testing.T) {
 	got := reload(t, store, user, saved.ID)
 	assertEqual(t, got.Site, &Site{Title: "T", Description: "D"})
 	assertEqual(t, got.Note, "mine")
-	assertEqual(t, got.UpdatedAt, int64(100))
+	assertEqual(t, got.UpdatedAt, int64(200))
 }
 
 func TestSetSiteCutsTheDetailsAtTheLimitsAndFillsTheNoteWithTheCutText(t *testing.T) {
