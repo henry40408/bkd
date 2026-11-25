@@ -1,0 +1,895 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "bkd API (linkding-compatible)",
+    "version": "linkding-v1.47.0",
+    "x-linkding-version": "1.47.0",
+    "description": "The part of the REST API of [linkding](https://linkding.link/api/) that bkd answers, for programs written for linkding (browser extensions, mobile apps, scripts).\n\n**Follows linkding v1.47.0** (released 2026-09-13, [its API documentation](https://github.com/sissbruecker/linkding/blob/v1.47.0/docs/src/content/docs/api.md)). Where bkd differs, the operation or the field says so; the README has the full list.\n\n**Authentication.** Make a token under *Settings*, *API tokens*, and send `Authorization: Token <token>` (`Bearer` works too). A cookie never signs a request in here. In the *Authorize* dialog type the whole value, `Token <token>`.\n\n**Not answered** (linkding v1.47.0 has them; bkd answers an empty 404, and 405 for `POST /api/tags/` and `POST /api/bookmarks/singlefile/`, whose address exists for other methods): archive and unarchive (`/api/bookmarks/{id}/archive/`, `/unarchive/`), bookmark assets, the SingleFile upload, retrieving, creating and deleting a tag, bundles (and the `bundle` filter, which is ignored), and the user profile.\n\n**Errors** are `{\"detail\": \"...\"}`, or `{\"<field>\": [\"...\"]}` for a field a write refused.",
+    "license": {
+      "name": "MIT",
+      "url": "https://github.com/henry40408/bkd/blob/main/LICENSE"
+    }
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Bookmarks"
+    },
+    {
+      "name": "Tags"
+    }
+  ],
+  "security": [
+    {
+      "token": []
+    }
+  ],
+  "paths": {
+    "/api/bookmarks/": {
+      "get": {
+        "operationId": "listBookmarks",
+        "tags": ["Bookmarks"],
+        "summary": "List bookmarks",
+        "description": "Your bookmarks, newest first.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "A search phrase in **bkd's** search syntax (see \"Search\" in the README), not linkding's: `#tag` and `!archived` are searched as plain text here, so they match nothing unless a bookmark says so.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/BookmarkLimit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "name": "modified_since",
+            "in": "query",
+            "description": "Only bookmarks changed after this time. RFC 3339; a time without a zone is UTC, and so is one without seconds or a plain date. Compared in whole seconds. Anything else is 400.",
+            "schema": {
+              "type": "string",
+              "example": "2025-01-01T00:00:00Z"
+            }
+          },
+          {
+            "name": "added_since",
+            "in": "query",
+            "description": "Only bookmarks added after this time. Same spellings as `modified_since`.",
+            "schema": {
+              "type": "string",
+              "example": "2025-05-29T00:00:00Z"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of bookmarks.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmarkList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createBookmark",
+        "tags": ["Bookmarks"],
+        "summary": "Save a bookmark",
+        "description": "Saves a bookmark. If you already saved that address (a trailing slash does not matter), it **changes that bookmark instead** and answers it with 201 as well, as linkding does. A field the request leaves out keeps its value (linkding blanks it); clear `description`, `notes` or the tags by sending them empty (a blank `title` keeps the stored one). bkd never reads the page while it saves, so the title is the address unless you send one.",
+        "parameters": [
+          {
+            "name": "disable_scraping",
+            "in": "query",
+            "description": "Accepted and ignored: bkd never reads a page while it saves a bookmark.",
+            "allowEmptyValue": true,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookmarkCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The bookmark that was saved or changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bookmark"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/NotJSON"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unreadable"
+          }
+        }
+      }
+    },
+    "/api/bookmarks/check/": {
+      "get": {
+        "operationId": "checkBookmark",
+        "tags": ["Bookmarks"],
+        "summary": "Check whether an address is bookmarked",
+        "description": "Says whether you saved the address (a trailing slash does not matter). Unlike linkding, bkd does not fetch the page: `metadata` holds the site details bkd stored for a bookmark you already have, and `null` fields for any other address. `auto_tags` is always empty.",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "description": "The address to look for.",
+            "schema": {
+              "type": "string",
+              "example": "https://example.com"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The bookmark, if there is one, and what is known about the address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/bookmarks/archived/": {
+      "get": {
+        "operationId": "listArchivedBookmarks",
+        "tags": ["Bookmarks"],
+        "summary": "List archived bookmarks",
+        "description": "Always an empty list: bkd has no archive. A client with an \"archived\" tab shows an empty tab instead of an error.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BookmarkLimit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "An empty page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmarkList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/bookmarks/shared/": {
+      "get": {
+        "operationId": "listSharedBookmarks",
+        "tags": ["Bookmarks"],
+        "summary": "List shared bookmarks",
+        "description": "Always an empty list: bkd shares no bookmark with other users. Unlike linkding, which answers this one without a token, it needs one.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BookmarkLimit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "An empty page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmarkList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/bookmarks/{id}/": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "The bookmark's id. An id that is not a number, or is another user's, is 404.",
+          "schema": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getBookmark",
+        "tags": ["Bookmarks"],
+        "summary": "Retrieve a bookmark",
+        "responses": {
+          "200": {
+            "description": "The bookmark.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bookmark"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "operationId": "replaceBookmark",
+        "tags": ["Bookmarks"],
+        "summary": "Change a bookmark (needs the url)",
+        "description": "Like `PATCH`, but `url` is required. A field the request leaves out keeps its value, as with `PATCH`. A blank `title` keeps the stored one. Changing the `url` (even by a trailing slash) forgets the old page's `website_title` and `website_description`. A `url` that another of your bookmarks has is 400.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookmarkCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The bookmark as changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bookmark"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/NotJSON"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unreadable"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateBookmark",
+        "tags": ["Bookmarks"],
+        "summary": "Change some fields of a bookmark",
+        "description": "Changes the fields the request has. A field it leaves out, or sends as `null`, keeps its value; clear one by sending it empty (`\"notes\": \"\"`, `\"tag_names\": []`). A blank `title` keeps the stored one. Changing only `description` keeps the `website_title`. A `url` that another of your bookmarks has is 400.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookmarkChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The bookmark as changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bookmark"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/NotJSON"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unreadable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteBookmark",
+        "tags": ["Bookmarks"],
+        "summary": "Delete a bookmark",
+        "responses": {
+          "204": {
+            "description": "Deleted. No body."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/tags/": {
+      "get": {
+        "operationId": "listTags",
+        "tags": ["Tags"],
+        "summary": "List tags",
+        "description": "Your tags, ordered by name. bkd has no tag table: a tag's `id` is made up from its name (the same name always gives the same id), and its `date_added` is the date of the oldest bookmark that carries it. Use the name to be sure.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "The most results to return. At most 5000 (the official browser extension asks for that many); a value that is not a number, or below 1, is the default.",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "minimum": 1,
+              "maximum": 5000
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of tags.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "token": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "`Token <token>`, with a token from *Settings*, *API tokens*. `Bearer <token>` is accepted too."
+      }
+    },
+    "parameters": {
+      "BookmarkLimit": {
+        "name": "limit",
+        "in": "query",
+        "description": "The most results to return. At most 1000; a value that is not a number, or below 1, is the default.",
+        "schema": {
+          "type": "integer",
+          "default": 100,
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "Offset": {
+        "name": "offset",
+        "in": "query",
+        "description": "The index to start from. A value that is not a number is 0.",
+        "schema": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "A field was refused (`{\"<field>\": [\"<message>\"]}`), or the request could not be read (`{\"detail\": \"...\"}`).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/FieldErrors"
+                },
+                {
+                  "$ref": "#/components/schemas/Detail"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No token, or one that is not valid. The answer carries `WWW-Authenticate: Token`.",
+        "headers": {
+          "WWW-Authenticate": {
+            "schema": {
+              "type": "string",
+              "example": "Token"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Detail"
+            },
+            "example": {
+              "detail": "Invalid token."
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "There is no such bookmark of yours.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Detail"
+            },
+            "example": {
+              "detail": "Not found."
+            }
+          }
+        }
+      },
+      "TooLarge": {
+        "description": "The body is over 64 KiB.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Detail"
+            }
+          }
+        }
+      },
+      "NotJSON": {
+        "description": "The body is not sent as `Content-Type: application/json`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Detail"
+            }
+          }
+        }
+      },
+      "Unreadable": {
+        "description": "The body is JSON, but not an object of this shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Detail"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Detail": {
+        "type": "object",
+        "required": ["detail"],
+        "properties": {
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "FieldErrors": {
+        "type": "object",
+        "description": "The messages for each field that was refused.",
+        "additionalProperties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "url": ["Enter a valid URL."]
+        }
+      },
+      "Bookmark": {
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "title",
+          "description",
+          "notes",
+          "web_archive_snapshot_url",
+          "favicon_url",
+          "preview_image_url",
+          "is_archived",
+          "unread",
+          "shared",
+          "tag_names",
+          "date_added",
+          "date_modified",
+          "website_title",
+          "website_description"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "description": "Your title. A bookmark always has one: the address, when you gave none."
+          },
+          "description": {
+            "type": "string",
+            "description": "What the page says about itself (bkd's *site description*), `\"\"` when bkd read none. It is not a text of your own: that is `notes`."
+          },
+          "notes": {
+            "type": "string",
+            "description": "Your own text about the bookmark."
+          },
+          "web_archive_snapshot_url": {
+            "type": "string",
+            "description": "Always `\"\"`: bkd has no Web Archive integration.",
+            "enum": [""]
+          },
+          "favicon_url": {
+            "type": "string",
+            "nullable": true,
+            "description": "Always `null`: bkd keeps no favicon.",
+            "enum": [null]
+          },
+          "preview_image_url": {
+            "type": "string",
+            "nullable": true,
+            "description": "Always `null`: bkd keeps no preview image.",
+            "enum": [null]
+          },
+          "is_archived": {
+            "type": "boolean",
+            "description": "Always `false`: bkd has no archive.",
+            "enum": [false]
+          },
+          "unread": {
+            "type": "boolean",
+            "description": "Always `false`: bkd has no unread flag.",
+            "enum": [false]
+          },
+          "shared": {
+            "type": "boolean",
+            "description": "Always `false`: bkd shares nothing.",
+            "enum": [false]
+          },
+          "tag_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "date_added": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2020-09-26T09:46:23.000000Z"
+          },
+          "date_modified": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2020-09-26T16:01:14.000000Z"
+          },
+          "website_title": {
+            "type": "string",
+            "nullable": true,
+            "description": "The page's own title, as bkd stored it; `null` when it read none. (linkding v1.47.0 always answers `null` here.)"
+          },
+          "website_description": {
+            "type": "string",
+            "nullable": true,
+            "description": "The page's own description, as bkd stored it; `null` when it read none. (linkding v1.47.0 always answers `null` here.)"
+          }
+        },
+        "example": {
+          "id": 1,
+          "url": "https://example.com",
+          "title": "Example title",
+          "description": "Example description",
+          "notes": "Example notes",
+          "web_archive_snapshot_url": "",
+          "favicon_url": null,
+          "preview_image_url": null,
+          "is_archived": false,
+          "unread": false,
+          "shared": false,
+          "tag_names": ["tag1", "tag2"],
+          "date_added": "2020-09-26T09:46:23.000000Z",
+          "date_modified": "2020-09-26T16:01:14.000000Z",
+          "website_title": "Example Domain",
+          "website_description": "Example description"
+        }
+      },
+      "BookmarkChange": {
+        "type": "object",
+        "description": "The fields to set. A field that is left out, or `null`, keeps its value.",
+        "properties": {
+          "url": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 2048,
+            "description": "An http or https address. Not blank."
+          },
+          "title": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 300,
+            "description": "Your title. A blank title is not a title: a new bookmark gets its address, a changed one keeps the title it had."
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "description": "The page's description. Cut at 500 characters. Send `\"\"` to clear it."
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 5000,
+            "description": "Your own text. Send `\"\"` to clear it."
+          },
+          "tag_names": {
+            "type": "array",
+            "nullable": true,
+            "description": "The tags, by name, lowercased with spaces kept (linkding turns them into `-`). Blank and repeated names are dropped, then at most 20 may be left. Send `[]` to clear them.",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          "is_archived": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Accepted and ignored: bkd has no archive."
+          },
+          "unread": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Accepted and ignored: bkd has no unread flag."
+          },
+          "shared": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Accepted and ignored: bkd shares nothing."
+          }
+        },
+        "example": {
+          "title": "Example title",
+          "notes": "Example notes",
+          "tag_names": ["tag1", "tag2"]
+        }
+      },
+      "BookmarkCreate": {
+        "description": "The same fields as a change, with `url` required.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BookmarkChange"
+          },
+          {
+            "type": "object",
+            "required": ["url"],
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "example": {
+          "url": "https://example.com",
+          "title": "Example title",
+          "description": "Example description",
+          "notes": "Example notes",
+          "tag_names": ["tag1", "tag2"]
+        }
+      },
+      "BookmarkList": {
+        "type": "object",
+        "required": ["count", "next", "previous", "results"],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many bookmarks there are in all, not on this page."
+          },
+          "next": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true,
+            "description": "The next page, built from the `Host` of the request (`https` with `--secure-cookies`, or when the proxy sends `X-Forwarded-Proto: https`). `null` on the last page."
+          },
+          "previous": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true,
+            "description": "The page before, or `null` on the first."
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bookmark"
+            }
+          }
+        }
+      },
+      "Tag": {
+        "type": "object",
+        "required": ["id", "name", "date_added"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Made up from the name, so it does not change. There is no tag table behind it."
+          },
+          "name": {
+            "type": "string"
+          },
+          "date_added": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the oldest bookmark that carries the tag was added.",
+            "example": "2020-09-26T09:46:23.000000Z"
+          }
+        }
+      },
+      "TagList": {
+        "type": "object",
+        "required": ["count", "next", "previous", "results"],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "next": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true
+          },
+          "previous": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Tag"
+            }
+          }
+        }
+      },
+      "CheckResult": {
+        "type": "object",
+        "required": ["bookmark", "metadata", "auto_tags"],
+        "properties": {
+          "bookmark": {
+            "type": "object",
+            "nullable": true,
+            "description": "Your bookmark with that address, or `null`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Bookmark"
+              }
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "required": ["url", "title", "description", "preview_image"],
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "The address that was asked for."
+              },
+              "title": {
+                "type": "string",
+                "nullable": true,
+                "description": "The stored `website_title` of the bookmark; `null` for an address that is not bookmarked."
+              },
+              "description": {
+                "type": "string",
+                "nullable": true,
+                "description": "The stored `website_description` of the bookmark; `null` for an address that is not bookmarked."
+              },
+              "preview_image": {
+                "type": "string",
+                "nullable": true,
+                "description": "Always `null`.",
+                "enum": [null]
+              }
+            }
+          },
+          "auto_tags": {
+            "type": "array",
+            "description": "Always empty: bkd has no auto-tagging rules.",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

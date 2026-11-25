@@ -164,7 +164,9 @@ A program that cannot sign in through the browser, such as a browser extension o
 
 ## linkding-compatible API
 
-Programs written for [linkding](https://linkding.link/api/) can read and change your bookmarks with an API token (see above): send `Authorization: Token <token>` (`Bearer` works too).
+Programs written for [linkding](https://linkding.link/api/) can read and change your bookmarks with an API token (see above): send `Authorization: Token <token>` (`Bearer` works too). The API follows linkding v1.47.0 (released 2026-09-13, [its API documentation](https://github.com/sissbruecker/linkding/blob/v1.47.0/docs/src/content/docs/api.md)); the parts of it that bkd does not answer are listed below.
+
+An OpenAPI description and a Swagger UI come with the server: open `/api/docs` (for example <http://127.0.0.1:8080/api/docs>), press "Authorize", type `Token <token>`, and "Try it out" sends real requests as you. The description itself is at `/api/docs/openapi.json`, for a client generator. Neither needs a sign-in, and both work without internet access.
 
 | Request | Answers |
 | --- | --- |
@@ -176,6 +178,8 @@ Programs written for [linkding](https://linkding.link/api/) can read and change 
 | `GET /api/bookmarks/check/?url=` | `{bookmark, metadata, auto_tags}`: whether you saved that address (a trailing slash does not matter) |
 | `GET /api/bookmarks/archived/`, `GET /api/bookmarks/shared/` | always an empty list: bkd has no archive and shares nothing |
 | `GET /api/tags/` | your tags, by name (`limit` up to 5000) |
+
+Not answered, though linkding v1.47.0 has them (an empty 404, or 405 for `POST /api/tags/` and `POST /api/bookmarks/singlefile/`): archive and unarchive, bookmark assets, the SingleFile upload, retrieving, creating and deleting a tag, bundles (the `bundle` filter of the list is ignored) and the user profile.
 
 How bkd's fields map to linkding's, and what differs:
 

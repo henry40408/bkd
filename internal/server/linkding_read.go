@@ -11,23 +11,37 @@ import (
 	"github.com/henry40408/bkd/internal/search"
 )
 
+// linkdingRoute is one path of the linkding-compatible API and its methods.
+type linkdingRoute struct {
+	pattern  string
+	handlers []methodHandler
+}
+
+// linkdingRoutes is the whole linkding-compatible API. It is a list, apart from
+// the mux, so a test can hold it against the OpenAPI document (internal/apidocs).
+func (a *App) linkdingRoutes() []linkdingRoute {
+	token := a.tokenGuarded
+	return []linkdingRoute{
+		{"/api/bookmarks/{$}", []methodHandler{
+			onGet(token(a.linkdingListBookmarks)), onPost(token(a.linkdingCreateBookmark))}},
+		{"/api/bookmarks/check/{$}", []methodHandler{onGet(token(a.linkdingCheckBookmark))}},
+		{"/api/bookmarks/archived/{$}", []methodHandler{onGet(token(a.linkdingListNothing))}},
+		{"/api/bookmarks/shared/{$}", []methodHandler{onGet(token(a.linkdingListNothing))}},
+		{"/api/bookmarks/{id}/{$}", []methodHandler{
+			onGet(token(a.linkdingGetBookmark)),
+			onPut(token(a.linkdingChangeBookmark(true))),
+			onPatch(token(a.linkdingChangeBookmark(false))),
+			onDelete(token(a.linkdingDeleteBookmark))}},
+		{"/api/tags/{$}", []methodHandler{onGet(token(a.linkdingListTags))}},
+	}
+}
+
 // mountLinkding routes the linkding-compatible API. A route here is answered only
 // to a token (see linkding_auth.go), and the paths keep linkding's trailing slash.
 func (a *App) mountLinkding(mux *http.ServeMux) {
-	route := func(path string, handlers ...methodHandler) {
-		mux.Handle(path, limitBody(maxBodyBytes, a.bodyTimeout, apiHeaders(byMethod(handlers...))))
+	for _, route := range a.linkdingRoutes() {
+		mux.Handle(route.pattern, limitBody(maxBodyBytes, a.bodyTimeout, apiHeaders(byMethod(route.handlers...))))
 	}
-	token := a.tokenGuarded
-	route("/api/bookmarks/{$}", onGet(token(a.linkdingListBookmarks)), onPost(token(a.linkdingCreateBookmark)))
-	route("/api/bookmarks/check/{$}", onGet(token(a.linkdingCheckBookmark)))
-	route("/api/bookmarks/archived/{$}", onGet(token(a.linkdingListNothing)))
-	route("/api/bookmarks/shared/{$}", onGet(token(a.linkdingListNothing)))
-	route("/api/bookmarks/{id}/{$}",
-		onGet(token(a.linkdingGetBookmark)),
-		onPut(token(a.linkdingChangeBookmark(true))),
-		onPatch(token(a.linkdingChangeBookmark(false))),
-		onDelete(token(a.linkdingDeleteBookmark)))
-	route("/api/tags/{$}", onGet(token(a.linkdingListTags)))
 }
 
 // linkdingListNothing answers the lists bkd has nothing for: it has no archive,

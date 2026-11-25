@@ -75,6 +75,7 @@ Thin binary (`cmd/bkd`) over internal packages, so tests build the handler direc
 | `internal/server` | `App`, `Config`, routes, middleware, the four session routes the pages call (`api_*.go`), the linkding API (`linkding_*.go`), pages (`pages_*.go`), shared `service_*.go`, SSE |
 | `internal/views` | Page builders returning strings with an escaping builder (`html.go`) |
 | `internal/assets` | CSS, JS and icons in `static/`, embedded with `go:embed` |
+| `internal/apidocs` | The OpenAPI document of the linkding-compatible API (`openapi.json`, written by hand, names the linkding version it follows) and a vendored Swagger UI, served under `/api/docs` |
 | `internal/version` | `Version()` |
 | `vendor/` | Vendored third-party modules, committed |
 
@@ -118,6 +119,7 @@ The image is `gcr.io/distroless/static-debian12:nonroot` (uid 65532; existing vo
 
 - `go.mod` is the only source of the Go version (`go` and `toolchain` lines); `e2e/go.mod` mirrors those two lines (CI checks it).
 - Keep the error texts and statuses of the pages and of the four session routes compatible with the Rust server (the expected values in the tests) when touching handlers. The linkding routes follow linkding and Django REST framework instead (`{"detail": ...}`); bkd's own JSON API of the Rust server is gone, so nothing there needs to match.
+- A change to the linkding routes or to what they answer is made in `internal/apidocs/openapi.json` too (tests compare its paths, methods and fields with the real ones) and in the README's list of differences. The document names the linkding version it follows (`x-linkding-version`); the README must name the same.
 - GitHub Actions are pinned by commit SHA with the tag as a trailing comment (`uses: owner/repo@<sha> # v1.2.3`).
 
 ## Accepted differences from the Rust server
