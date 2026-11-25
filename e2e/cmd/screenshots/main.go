@@ -3,7 +3,7 @@
 //
 //	cd e2e && go run ./cmd/screenshots
 //
-// The bookmarks are made-up and written through the server's own API into a
+// The bookmarks are made-up and saved through the server's own forms into a
 // throwaway database, with their ages and link checks set in place, so no
 // picture needs the network or changes with the date. Font rendering and the
 // Chrome version differ by machine: an unrelated image changing in the diff

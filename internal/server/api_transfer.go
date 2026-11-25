@@ -3,35 +3,11 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"github.com/henry40408/bkd/internal/auth"
 	"github.com/henry40408/bkd/internal/bookmarks"
 	"github.com/henry40408/bkd/internal/netscape"
 )
-
-// handleImport takes only text/html. A cross-site form cannot send that type, and
-// a script that sets it needs a CORS preflight this server never grants, so the
-// check keeps the CSRF protection the JSON-only routes get from their content type.
-// The body is read first, so a file over the limit is 413 whatever its type.
-func (a *App) handleImport(w http.ResponseWriter, r *http.Request, user auth.SessionUser) {
-	body, failure := readBody(r)
-	if failure != nil {
-		failure.write(w)
-		return
-	}
-	contentType := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
-	if !strings.HasPrefix(contentType, "text/html") {
-		a.writeAPIError(w, unsupportedMediaType("send the file as text/html"))
-		return
-	}
-	report, fault := a.importBookmarks(r.Context(), user, strings.ToValidUTF8(string(body), "\uFFFD"))
-	if fault != nil {
-		a.writeAPIError(w, fault)
-		return
-	}
-	writeJSON(w, http.StatusOK, report)
-}
 
 type exportedBookmark struct {
 	URL       string   `json:"url"`

@@ -45,21 +45,3 @@ func TestEveryPageWithAnIdRefusesOneThatIsNotANumber(t *testing.T) {
 		}
 	}
 }
-
-func TestEveryJSONRouteRefusesABrokenBody(t *testing.T) {
-	app := runningApp(t)
-	token := app.signIn("alice", false)
-	for _, route := range []struct{ method, uri string }{
-		{"POST", "/api/login"},
-		{"POST", "/api/setup"},
-		{"POST", "/api/account/confirm"},
-		{"PUT", "/api/account/password"},
-		{"PUT", "/api/settings"},
-	} {
-		request := sent{method: route.method, uri: route.uri}.withRaw("application/json", "{")
-		r := app.send(request.as(token))
-		if r.status != http.StatusBadRequest {
-			t.Errorf("%s %s: status = %d, want 400; body %q", route.method, route.uri, r.status, r.text)
-		}
-	}
-}

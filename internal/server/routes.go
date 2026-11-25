@@ -116,6 +116,10 @@ func (a *App) api(limit int64, route http.Handler) http.Handler {
 	return limitBody(limit, a.bodyTimeout, apiHeaders(a.sameOriginOnly(route)))
 }
 
+// mountAPI routes the four endpoints the pages themselves call: the link check
+// and the page reading (server-sent events), the site preview of the bookmark
+// form and the export download. They answer the session cookie. The API for
+// programs is the linkding-compatible one (mountLinkding), which takes a token.
 func (a *App) mountAPI(mux *http.ServeMux) {
 	route := func(path string, handlers ...methodHandler) {
 		mux.Handle("/api"+path, a.api(maxBodyBytes, byMethod(handlers...)))
@@ -123,40 +127,11 @@ func (a *App) mountAPI(mux *http.ServeMux) {
 	signedIn := func(handle func(http.ResponseWriter, *http.Request, auth.SessionUser)) http.Handler {
 		return a.withUser(handle)
 	}
-	admin := func(handle func(http.ResponseWriter, *http.Request, auth.SessionUser)) http.Handler {
-		return a.withAdmin(handle)
-	}
-	confirmed := func(handle func(http.ResponseWriter, *http.Request, auth.SessionUser)) http.Handler {
-		return a.withConfirmedAdmin(handle)
-	}
 
-	route("/state", onGet(http.HandlerFunc(a.handleState)))
-	route("/setup", onPost(http.HandlerFunc(a.handleSetup)))
-	route("/login", onPost(http.HandlerFunc(a.handleLogin)))
-	route("/logout", onPost(http.HandlerFunc(a.handleLogout)))
-	route("/settings", onGet(signedIn(a.handleGetSettings)), onPut(signedIn(a.handlePutSettings)))
-	route("/account/password", onPut(signedIn(a.handleChangePassword)))
-	route("/account/confirm", onPost(signedIn(a.handleConfirmPassword)))
-	route("/account/sessions",
-		onGet(signedIn(a.handleListSessions)), onDelete(signedIn(a.handleRevokeOtherSessions)))
-	route("/account/sessions/{id}", onDelete(signedIn(a.handleRevokeSession)))
-	route("/account/tokens", onGet(signedIn(a.handleListTokens)), onPost(signedIn(a.handleCreateToken)))
-	route("/account/tokens/{id}", onDelete(signedIn(a.handleRevokeToken)))
-	route("/bookmarks", onGet(signedIn(a.handleListBookmarks)), onPost(signedIn(a.handleCreateBookmark)))
-	route("/bookmarks/random", onGet(signedIn(a.handleRandomBookmark)))
-	route("/bookmarks/bulk", onPost(signedIn(a.handleBulkBookmarks)))
 	route("/bookmarks/check", onPost(signedIn(a.handleCheck)))
 	route("/bookmarks/read", onPost(signedIn(a.handleReadPages)))
-	route("/bookmarks/{id}", onPut(signedIn(a.handleUpdateBookmark)), onDelete(signedIn(a.handleDeleteBookmark)))
 	route("/site-preview", onPost(signedIn(a.handleSitePreview)))
-	route("/tags", onGet(signedIn(a.handleTags)))
-	mux.Handle("/api/import", a.api(maxImportBytes, byMethod(onPost(signedIn(a.handleImport)))))
 	route("/export", onGet(signedIn(a.handleExport)))
-	route("/users", onGet(admin(a.handleListUsers)), onPost(confirmed(a.handleCreateUser)))
-	route("/users/{id}", onDelete(confirmed(a.handleDeleteUser)))
-	route("/users/{id}/role", onPut(confirmed(a.handleSetRole)))
-	route("/users/{id}/disabled", onPut(confirmed(a.handleSetDisabled)))
-	route("/users/{id}/password", onPut(confirmed(a.handleResetPassword)))
 }
 
 type userHandler func(http.ResponseWriter, *http.Request, auth.SessionUser)
@@ -165,14 +140,6 @@ type userHandler func(http.ResponseWriter, *http.Request, auth.SessionUser)
 // before the body is read.
 func (a *App) withUser(handle userHandler) http.Handler {
 	return a.guarded(a.currentUser, handle)
-}
-
-func (a *App) withAdmin(handle userHandler) http.Handler {
-	return a.guarded(a.adminUser, handle)
-}
-
-func (a *App) withConfirmedAdmin(handle userHandler) http.Handler {
-	return a.guarded(a.confirmedAdmin, handle)
 }
 
 func (a *App) guarded(check func(*http.Request) (auth.SessionUser, *apiError), handle userHandler) http.Handler {

@@ -8,15 +8,13 @@ import (
 	"testing"
 )
 
-func idOf(bookmark map[string]any) int64 { return int64(bookmark["id"].(float64)) }
-
 func TestBookmarkPages(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("olga", false)
 	intruder := app.signIn("ivan", false)
 
 	t.Run("another user's bookmark answers 404", func(t *testing.T) {
-		id := idOf(app.createBookmark(token, "secret"))
+		id := app.createBookmark(token, "secret").ID
 		edit := fmt.Sprintf("/bookmarks/%d/edit", id)
 		requests := map[string]sent{
 			"edit form":   get(edit),
@@ -38,7 +36,7 @@ func TestBookmarkPages(t *testing.T) {
 		mustLack(t, r, "<b>bold</b>")
 	})
 	t.Run("a submitted edit is saved and redirects back", func(t *testing.T) {
-		id := idOf(app.createBookmark(token, "first"))
+		id := app.createBookmark(token, "first").ID
 		edit := fmt.Sprintf("/bookmarks/%d/edit", id)
 		r := app.send(formPost(edit, "url=https%3A%2F%2Fexample.org&title=renamed&back=%2F%3Fpage%3D2").as(token))
 		assertStatus(t, r, http.StatusSeeOther)
@@ -46,7 +44,7 @@ func TestBookmarkPages(t *testing.T) {
 		mustContain(t, app.send(get("/").as(token)), "renamed")
 	})
 	t.Run("a bad URL shows the error and keeps the input", func(t *testing.T) {
-		id := idOf(app.createBookmark(token, "kept-original"))
+		id := app.createBookmark(token, "kept-original").ID
 		edit := fmt.Sprintf("/bookmarks/%d/edit", id)
 		r := app.send(formPost(edit, "url=not-a-url&title=kept").as(token))
 		assertStatus(t, r, http.StatusBadRequest)
@@ -66,7 +64,7 @@ func TestBookmarkPages(t *testing.T) {
 		mustLack(t, r, "doomed <i>")
 	})
 	t.Run("a confirmed delete removes the bookmark", func(t *testing.T) {
-		id := idOf(app.createBookmark(token, "removable"))
+		id := app.createBookmark(token, "removable").ID
 		r := app.send(formPost("/bookmarks/delete", fmt.Sprintf("id=%d&back=%%2F", id)).as(token))
 		assertStatus(t, r, http.StatusSeeOther)
 		mustContain(t, reply{text: locationOf(r)}, "bookmark-deleted")
@@ -76,8 +74,11 @@ func TestBookmarkPages(t *testing.T) {
 
 func (a *testApp) newestBookmarkID(token string) int64 {
 	a.t.Helper()
-	list := a.send(get("/api/bookmarks?limit=1").as(token)).json()["bookmarks"].([]any)
-	return idOf(list[0].(map[string]any))
+	var id int64
+	if err := a.db.QueryRow("SELECT max(id) FROM bookmarks WHERE user_id = ?1", a.ownerOf(token)).Scan(&id); err != nil {
+		a.t.Fatal(err)
+	}
+	return id
 }
 
 func TestListPageFiltersByTagAndSearchAndPicksRandom(t *testing.T) {
@@ -124,7 +125,7 @@ func TestListPageNamesTheListCountsItAndOffersChips(t *testing.T) {
 func TestThePickCanBeEditedAndDeleted(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("olga", false)
-	id := idOf(app.createBookmark(token, "alpha"))
+	id := app.createBookmark(token, "alpha").ID
 	picked := app.send(get("/random").as(token))
 	mustContain(t, picked, fmt.Sprintf(`href="/bookmarks/%d/edit?back=%%2F"`, id),
 		fmt.Sprintf(`href="/bookmarks/%d/delete?back=%%2F"`, id))
@@ -133,7 +134,7 @@ func TestThePickCanBeEditedAndDeleted(t *testing.T) {
 func TestTheEditFormOffersTheNewAddressOnlyOfAMovedLink(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("olga", false)
-	id := idOf(app.createBookmark(token, "alpha"))
+	id := app.createBookmark(token, "alpha").ID
 	edit := fmt.Sprintf("/bookmarks/%d/edit", id)
 	cases := []struct {
 		name, status, detail string
@@ -175,11 +176,11 @@ func TestAccountPages(t *testing.T) {
 		r := app.send(formPost("/settings", "link_check_enabled=on").as(admin))
 		mustRedirect(t, r, "/settings?notice=settings-saved")
 		mustContain(t, app.send(get("/settings?notice=settings-saved").as(admin)), "checked")
-		if app.send(get("/api/settings").as(admin)).json()["link_check_enabled"] != true {
+		if enabled, _ := app.storedSettings("root"); !enabled {
 			t.Fatal("setting not saved")
 		}
 		mustRedirect(t, app.send(formPost("/settings", "").as(admin)), "/settings?notice=settings-saved")
-		if app.send(get("/api/settings").as(admin)).json()["link_check_enabled"] != false {
+		if enabled, _ := app.storedSettings("root"); enabled {
 			t.Error("unticked box did not turn the setting off")
 		}
 	})
@@ -209,7 +210,7 @@ func TestBulkActions(t *testing.T) {
 	bulk := func(body string) reply { return app.send(formPost("/bookmarks/bulk", body).as(token)) }
 
 	t.Run("page field parsing", func(t *testing.T) {
-		id := idOf(app.createBookmark(token, "one"))
+		id := app.createBookmark(token, "one").ID
 		selected := fmt.Sprintf("id-%d=1&action=add_tags&tags=t", id)
 		tests := []struct{ name, body, wantLocation string }{
 			{"bad page falls back to one", selected + "&page=x", "/?notice=bulk-done"},
@@ -224,7 +225,7 @@ func TestBulkActions(t *testing.T) {
 		}
 	})
 	t.Run("tags are added then removed", func(t *testing.T) {
-		id := idOf(app.createBookmark(token, "two"))
+		id := app.createBookmark(token, "two").ID
 		body := func(action string) string {
 			return fmt.Sprintf("id-%d=1&action=%s&tags=fresh&%s", id, action, bulkContext)
 		}
@@ -235,7 +236,7 @@ func TestBulkActions(t *testing.T) {
 		mustContain(t, r, "None of the selected bookmarks has that tag.")
 	})
 	t.Run("a confirmed delete removes the rows", func(t *testing.T) {
-		id := idOf(app.createBookmark(token, "three"))
+		id := app.createBookmark(token, "three").ID
 		selected := fmt.Sprintf("id-%d=1&", id)
 		mustRedirect(t, bulk(selected+"action=delete&confirm=yes&"+bulkContext), "/?notice=bulk-done")
 		stale := bulk(selected + "action=add_tags&tags=t&" + bulkContext)
@@ -254,6 +255,26 @@ func TestAdminPages(t *testing.T) {
 		assertStatus(t, r, http.StatusOK)
 		mustContain(t, r, "root", "mei", `action="/users"`)
 		assertStatus(t, app.send(get("/users").as(plain)), http.StatusForbidden)
+	})
+	t.Run("a plain user cannot change accounts", func(t *testing.T) {
+		user := fmt.Sprintf("/users/%d", member)
+		forms := []sent{
+			formPost("/users", "username=eve&password="+url.QueryEscape(testPassword)),
+			formPost(user+"/role", "is_admin=true"),
+			formPost(user+"/disabled", "disabled=true"),
+			formPost(user+"/password", "password="+url.QueryEscape(testPassword)),
+			formPost(user+"/delete", "confirm=yes"),
+		}
+		for _, form := range forms {
+			assertStatus(t, app.send(form.as(plain)), http.StatusForbidden)
+		}
+		if app.userFlag(member, "is_admin") || app.userFlag(member, "disabled_at IS NOT NULL") {
+			t.Error("a plain user changed an account")
+		}
+		var accounts int
+		if err := app.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&accounts); err != nil || accounts != 2 {
+			t.Errorf("accounts = %d, error %v; want 2", accounts, err)
+		}
 	})
 	t.Run("forms refuse malformed values", func(t *testing.T) {
 		role := fmt.Sprintf("/users/%d/role", member)

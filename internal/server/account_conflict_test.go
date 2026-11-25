@@ -20,14 +20,13 @@ func TestPasswordChangeLosingARaceIsRefusedWithoutANewSession(t *testing.T) {
 	token := app.signIn("alice", false)
 	app.skipChanges("users", "UPDATE")
 
-	r := app.send(put("/api/account/password",
-		map[string]any{"current": testPassword, "new": "a brand new secret"}).as(token))
+	r := app.send(formPost("/account/password", passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")).as(token))
 
 	assertStatus(t, r, http.StatusConflict)
 	if cookie := r.headers.Get("Set-Cookie"); cookie != "" {
 		t.Errorf("a refused change set a cookie: %q", cookie)
 	}
-	assertStatus(t, app.login("alice", testPassword), http.StatusOK)
+	assertStatus(t, app.login("alice", testPassword), http.StatusSeeOther)
 }
 
 func TestPasswordChangeThatCannotStartASessionAsksToSignInAgain(t *testing.T) {
@@ -35,8 +34,7 @@ func TestPasswordChangeThatCannotStartASessionAsksToSignInAgain(t *testing.T) {
 	token := app.signIn("alice", false)
 	app.skipChanges("sessions", "INSERT")
 
-	r := app.send(put("/api/account/password",
-		map[string]any{"current": testPassword, "new": "a brand new secret"}).as(token))
+	r := app.send(formPost("/account/password", passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")).as(token))
 
 	assertStatus(t, r, http.StatusConflict)
 	if !strings.Contains(r.text, "sign in again") {
@@ -61,7 +59,7 @@ func TestSetupThatLosesTheRaceForTheFirstAdminIsRefused(t *testing.T) {
 	app := awaitingSetupApp(t)
 	app.skipChanges("users", "INSERT")
 
-	r := app.send(post("/api/setup", setupBody(app, app.setupDisplay, "henry", testPassword)))
+	r := app.send(formPost("/setup", "token="+app.setupDisplay+"&username=henry&password=correct+horse+battery"))
 
 	assertStatus(t, r, http.StatusConflict)
 	if !strings.Contains(r.text, "setup is already complete") {
@@ -69,25 +67,10 @@ func TestSetupThatLosesTheRaceForTheFirstAdminIsRefused(t *testing.T) {
 	}
 }
 
-func TestASingleSignOnUserCannotConfirmOrChangeAPassword(t *testing.T) {
-	app := newTestApp(t, forwardAuthConfig(t))
-	confirm := viaProxy(post("/api/account/confirm", map[string]any{"password": testPassword}), "alice")
-	change := viaProxy(put("/api/account/password",
-		map[string]any{"current": testPassword, "new": "a brand new secret"}), "alice")
-
-	for _, request := range []sent{confirm, change} {
-		r := app.send(request)
-		assertStatus(t, r, http.StatusForbidden)
-		if !strings.Contains(r.text, "single sign-on") {
-			t.Errorf("%s: body = %q", request.uri, r.text)
-		}
-	}
-}
-
 func TestConfirmAndPasswordChangeShareTheLoginRateLimit(t *testing.T) {
 	app := runningApp(t)
 	token := app.signIn("alice", false)
-	wrong := post("/api/account/confirm", map[string]any{"password": "not the password"}).as(token)
+	wrong := formPost("/confirm", "password=not+the+password").as(token)
 
 	var last reply
 	for range 12 {
@@ -98,17 +81,14 @@ func TestConfirmAndPasswordChangeShareTheLoginRateLimit(t *testing.T) {
 	}
 
 	assertStatus(t, last, http.StatusTooManyRequests)
-	change := put("/api/account/password", map[string]any{"current": testPassword, "new": "a brand new secret"}).as(token)
-	assertStatus(t, app.send(change), http.StatusTooManyRequests)
+	assertStatus(t, app.send(formPost("/account/password", passwordChangeFields(testPassword, "a brand new secret", "a brand new secret")).as(token)), http.StatusTooManyRequests)
 }
 
 func TestSignInAndSetupAnswer500WhenTheUserTableFails(t *testing.T) {
 	app := awaitingSetupApp(t)
 	app.breakTable("users")
 	expectEvery500(t, app, "", []sent{
-		post("/api/login", map[string]any{"username": "alice", "password": testPassword}),
 		formPost("/login", "username=alice&password=correct+horse+battery"),
-		post("/api/setup", setupBody(app, app.setupDisplay, "henry", testPassword)),
 		formPost("/setup", "token="+app.setupDisplay+"&username=henry&password=correct+horse+battery"),
 	})
 }
@@ -116,7 +96,6 @@ func TestSignInAndSetupAnswer500WhenTheUserTableFails(t *testing.T) {
 func TestLoggingOutWithoutASessionIsAQuietSuccess(t *testing.T) {
 	app := runningApp(t)
 
-	assertStatus(t, app.send(post("/api/logout", nil)), http.StatusNoContent)
 	assertStatus(t, app.send(formPost("/logout", "")), http.StatusSeeOther)
 }
 

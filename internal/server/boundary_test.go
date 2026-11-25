@@ -87,8 +87,9 @@ func TestAnAppWithoutAHasherOrLoggerStillWorks(t *testing.T) {
 		DB:          dbtest.Open(t),
 		LinkChecker: linkcheck.New(linkcheck.Config{}),
 	})
-	request := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"username":"nobody","password":"x"}`))
-	request.Header.Set("Content-Type", "application/json")
+	request := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader("username=nobody&password=x"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Origin", "http://"+request.Host)
 	recorder := httptest.NewRecorder()
 
 	app.Handler().ServeHTTP(recorder, request)

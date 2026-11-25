@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -32,37 +33,35 @@ func (a *testApp) sessionFor(username string) string {
 	return token
 }
 
-func (a *testApp) createToken(session, name string) map[string]any {
+// createToken makes a token through the settings page and returns its secret.
+func (a *testApp) createToken(session, name string) string {
 	a.t.Helper()
-	r := a.send(post("/api/account/tokens", map[string]any{"name": name}).as(session))
-	assertStatus(a.t, r, http.StatusCreated)
-	return r.json()
+	r := a.send(formPost("/settings/tokens", "name="+url.QueryEscape(name)).as(session))
+	assertStatus(a.t, r, http.StatusOK)
+	return secretIn(a.t, r)
 }
 
-func TestTokenIsCreatedListedAndEndedThroughTheAPI(t *testing.T) {
+func (a *testApp) tokenCount(username string) int {
+	a.t.Helper()
+	var count int
+	query := "SELECT count(*) FROM api_tokens WHERE user_id = (SELECT id FROM users WHERE username = ?1)"
+	if err := a.db.QueryRow(query, username).Scan(&count); err != nil {
+		a.t.Fatal(err)
+	}
+	return count
+}
+
+func TestATokenNameIsTrimmedAndStored(t *testing.T) {
 	app := runningApp(t)
 	session := app.sessionFor("henry")
-	created := app.createToken(session, "  extension ")
-	secret, _ := created["token"].(string)
-	if len(secret) != 64 || created["name"] != "extension" || created["last_used_at"] != nil {
-		t.Fatalf("created = %v", created)
+	secret := app.createToken(session, "  extension ")
+	sum := sha256.Sum256([]byte(secret))
+	var name string
+	if err := app.db.QueryRow("SELECT name FROM api_tokens WHERE token_hash = ?1", hex.EncodeToString(sum[:])).Scan(&name); err != nil {
+		t.Fatal(err)
 	}
-
-	list := app.send(get("/api/account/tokens").as(session))
-	assertStatus(t, list, http.StatusOK)
-	if strings.Contains(list.text, secret) {
-		t.Fatal("the list shows the secret")
-	}
-	items := list.jsonList()
-	if len(items) != 1 || items[0].(map[string]any)["id"] != created["id"] {
-		t.Fatalf("list = %s", list.text)
-	}
-
-	id, _ := created["id"].(string)
-	assertStatus(t, app.send(del("/api/account/tokens/"+id).as(session)), http.StatusNoContent)
-	assertStatus(t, app.send(del("/api/account/tokens/"+id).as(session)), http.StatusNotFound)
-	if left := app.send(get("/api/account/tokens").as(session)).jsonList(); len(left) != 0 {
-		t.Fatalf("tokens left: %v", left)
+	if name != "extension" {
+		t.Fatalf("name = %q", name)
 	}
 }
 
@@ -75,7 +74,7 @@ func TestNoTokenIsMadeWhenTheSessionEndedAfterTheRequestWasAccepted(t *testing.T
 	if err := app.db.QueryRow("SELECT id FROM users WHERE username = 'henry'").Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodPost, "/api/account/tokens", nil)
+	request := httptest.NewRequest(http.MethodPost, "/settings/tokens", nil)
 	request.Header.Set("Cookie", app.app.cookieName()+"="+session)
 	user := auth.SessionUser{UserID: id, Username: "henry"}
 	if _, fault := app.app.createAPIToken(request, user, "ok"); fault != nil {
@@ -88,19 +87,15 @@ func TestNoTokenIsMadeWhenTheSessionEndedAfterTheRequestWasAccepted(t *testing.T
 	if fault == nil || fault.status != http.StatusUnauthorized {
 		t.Fatalf("after the session ended: %v", fault)
 	}
-	if got := app.send(get("/api/account/tokens").as(app.sessionFor("other"))).jsonList(); len(got) != 0 {
-		t.Fatalf("another user sees %v", got)
-	}
-	var held int
-	if err := app.db.QueryRow("SELECT count(*) FROM api_tokens WHERE user_id = ?1", id).Scan(&held); err != nil || held != 1 {
-		t.Fatalf("tokens = %d, %v", held, err)
+	if got := app.tokenCount("henry"); got != 1 {
+		t.Fatalf("tokens = %d", got)
 	}
 }
 
 func TestACookieUserWithoutACookieCannotMakeATokenInTheService(t *testing.T) {
 	app := runningApp(t)
 	app.sessionFor("henry")
-	request := httptest.NewRequest(http.MethodPost, "/api/account/tokens", nil)
+	request := httptest.NewRequest(http.MethodPost, "/settings/tokens", nil)
 	_, fault := app.app.createAPIToken(request, auth.SessionUser{UserID: 1, Username: "henry"}, "x")
 	if fault == nil || fault.status != http.StatusUnauthorized {
 		t.Fatalf("fault = %v", fault)
@@ -108,74 +103,50 @@ func TestACookieUserWithoutACookieCannotMakeATokenInTheService(t *testing.T) {
 }
 
 // The secret must not be kept by a browser or a cache.
-func TestTheAnswersThatCarryASecretAreNotCached(t *testing.T) {
+func TestTheAnswerThatCarriesASecretIsNotCached(t *testing.T) {
 	app := runningApp(t)
 	session := app.sessionFor("henry")
-	api := app.send(post("/api/account/tokens", map[string]any{"name": "a"}).as(session))
 	page := app.send(formPost("/settings/tokens", "name=b").as(session))
-	for name, r := range map[string]reply{"api": api, "page": page} {
-		if got := r.headers.Get("Cache-Control"); got != "no-store" {
-			t.Errorf("%s: Cache-Control = %q", name, got)
-		}
+	if got := page.headers.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q", got)
 	}
 }
 
-func TestListOfNoTokensIsAnEmptyArray(t *testing.T) {
-	app := runningApp(t)
-	session := app.sessionFor("henry")
-	if r := app.send(get("/api/account/tokens").as(session)); strings.TrimSpace(r.text) != "[]" {
-		t.Fatalf("body = %q", r.text)
-	}
-}
-
-func TestTokenRoutesNeedASession(t *testing.T) {
+func TestTokenFormsNeedASession(t *testing.T) {
 	app := runningApp(t)
 	for _, request := range []sent{
-		get("/api/account/tokens"),
-		post("/api/account/tokens", map[string]any{"name": "a"}),
-		del("/api/account/tokens/0123456789abcdef"),
+		formPost("/settings/tokens", "name=a"),
+		formPost("/settings/tokens/0123456789abcdef/revoke", ""),
 	} {
-		assertStatus(t, app.send(request), http.StatusUnauthorized)
+		mustRedirect(t, app.send(request), "/login")
+	}
+}
+
+func TestAcceptedTokenNamesAtTheLimit(t *testing.T) {
+	app := runningApp(t)
+	session := app.sessionFor("henry")
+	for _, name := range []string{strings.Repeat("a", maxTokenNameChars), strings.Repeat("語", maxTokenNameChars)} {
+		app.createToken(session, name)
 	}
 }
 
 func TestRefusedTokenNamesAreExplained(t *testing.T) {
 	app := runningApp(t)
 	session := app.sessionFor("henry")
-	cases := []struct {
-		body   map[string]any
-		status int
-		error  string
-	}{
-		{map[string]any{}, http.StatusUnprocessableEntity, ""},
-		{map[string]any{"name": ""}, http.StatusBadRequest, "name is required"},
-		{map[string]any{"name": " \t "}, http.StatusBadRequest, "name is required"},
-		{map[string]any{"name": strings.Repeat("a", maxTokenNameChars+1)}, http.StatusBadRequest, "name is too long"},
-		{map[string]any{"name": strings.Repeat("語", maxTokenNameChars+1)}, http.StatusBadRequest, "name is too long"},
-		{map[string]any{"name": "line\nbreak"}, http.StatusBadRequest, "name contains a control character"},
+	cases := []struct{ name, error string }{
+		{"", "name is required"},
+		{" \t ", "name is required"},
+		{strings.Repeat("a", maxTokenNameChars+1), "name is too long"},
+		{strings.Repeat("語", maxTokenNameChars+1), "name is too long"},
+		{"line\nbreak", "name contains a control character"},
 	}
 	for _, c := range cases {
-		r := app.send(post("/api/account/tokens", c.body).as(session))
-		assertStatus(t, r, c.status)
-		if c.error != "" && r.json()["error"] != c.error {
-			t.Errorf("%v: error = %v, want %q", c.body, r.json()["error"], c.error)
-		}
+		r := app.send(formPost("/settings/tokens", "name="+url.QueryEscape(c.name)).as(session))
+		assertStatus(t, r, http.StatusBadRequest)
+		mustContain(t, r, c.error)
 	}
-	for _, name := range []string{strings.Repeat("a", maxTokenNameChars), strings.Repeat("語", maxTokenNameChars)} {
-		app.createToken(session, name)
-	}
-}
-
-func TestOnlyTheMaximumNumberOfTokensCanBeMade(t *testing.T) {
-	app := runningApp(t)
-	session := app.sessionFor("henry")
-	for range auth.MaxAPITokensPerUser {
-		app.createToken(session, "a")
-	}
-	r := app.send(post("/api/account/tokens", map[string]any{"name": "one too many"}).as(session))
-	assertStatus(t, r, http.StatusConflict)
-	if r.json()["error"] != "at most 20 API tokens are allowed" {
-		t.Fatalf("error = %v", r.json()["error"])
+	if got := app.tokenCount("henry"); got != 0 {
+		t.Fatalf("a refused name made %d tokens", got)
 	}
 }
 
@@ -183,29 +154,23 @@ func TestAnotherUsersTokenCannotBeEnded(t *testing.T) {
 	app := runningApp(t)
 	mine := app.sessionFor("henry")
 	theirs := app.sessionFor("mei")
-	id, _ := app.createToken(mine, "a")["id"].(string)
-	assertStatus(t, app.send(del("/api/account/tokens/"+id).as(theirs)), http.StatusNotFound)
-	if got := app.send(get("/api/account/tokens").as(mine)).jsonList(); len(got) != 1 {
-		t.Fatalf("the owner's tokens = %v", got)
+	app.createToken(mine, "a")
+	var id string
+	if err := app.db.QueryRow("SELECT substr(token_hash, 1, 16) FROM api_tokens").Scan(&id); err != nil {
+		t.Fatal(err)
 	}
-	if got := app.send(get("/api/account/tokens").as(theirs)).jsonList(); len(got) != 0 {
-		t.Fatalf("the stranger sees %v", got)
+	assertStatus(t, app.send(formPost("/settings/tokens/"+id+"/revoke", "").as(theirs)), http.StatusNotFound)
+	if got := app.tokenCount("henry"); got != 1 {
+		t.Fatalf("the owner's tokens = %d", got)
 	}
-}
-
-func TestStrangerPostOriginIsRefusedOnTokenRoutes(t *testing.T) {
-	app := runningApp(t)
-	session := app.sessionFor("henry")
-	r := app.send(post("/api/account/tokens", map[string]any{"name": "a"}).as(session).originated("https://evil.example"))
-	assertStatus(t, r, http.StatusForbidden)
 }
 
 func TestUserTheProxySignedInMayHaveTokens(t *testing.T) {
 	app := newTestApp(t, forwardAuthConfig(t))
-	r := app.send(viaProxy(post("/api/account/tokens", map[string]any{"name": "script"}), "alice"))
-	assertStatus(t, r, http.StatusCreated)
-	if got := app.send(viaProxy(get("/api/account/tokens"), "alice")).jsonList(); len(got) != 1 {
-		t.Fatalf("tokens = %v", got)
+	r := app.send(viaProxy(formPost("/settings/tokens", "name=script"), "alice"))
+	assertStatus(t, r, http.StatusOK)
+	if got := app.tokenCount("alice"); got != 1 {
+		t.Fatalf("tokens = %d", got)
 	}
 }
 
@@ -319,9 +284,6 @@ func TestTokenPagesAnswer500WhenTheTokenTableFails(t *testing.T) {
 		get("/settings"),
 		formPost("/settings/tokens", "name=a"),
 		formPost("/settings/tokens/0123456789abcdef/revoke", ""),
-		get("/api/account/tokens"),
-		post("/api/account/tokens", map[string]any{"name": "a"}),
-		del("/api/account/tokens/0123456789abcdef"),
 	}
 	for _, c := range cases {
 		r := app.send(c.as(session))

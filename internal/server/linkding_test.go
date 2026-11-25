@@ -656,12 +656,10 @@ func TestLinkdingTokenStopsWorkingWhenItIsRevoked(t *testing.T) {
 	assertStatus(t, app.send(withToken(get("/api/tags/"), token)), http.StatusUnauthorized)
 }
 
-func TestTheOtherAPIRoutesStillAnswerTheCookieSession(t *testing.T) {
+func TestTheRemainingSessionRoutesAnswerTheCookieSession(t *testing.T) {
 	app := runningApp(t)
 	session := app.sessionFor("henry")
-	assertStatus(t, app.send(get("/api/bookmarks").as(session)), http.StatusOK)
-	assertStatus(t, app.send(get("/api/tags").as(session)), http.StatusOK)
-	assertStatus(t, app.send(get("/api/bookmarks/random").as(session)), http.StatusNotFound)
+	assertStatus(t, app.send(get("/api/export?format=json").as(session)), http.StatusOK)
 	assertStatus(t, app.send(post("/api/bookmarks/check", map[string]any{"ids": []int{}}).as(session)), http.StatusBadRequest)
 }
 

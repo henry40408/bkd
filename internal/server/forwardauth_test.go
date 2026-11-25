@@ -32,36 +32,26 @@ func viaProxy(request sent, user string) sent {
 func TestForwardedUserIsSignedInWithoutACookie(t *testing.T) {
 	app := newTestApp(t, forwardAuthConfig(t))
 
-	state := app.send(viaProxy(get("/api/state"), "alice")).json()
+	page := app.send(viaProxy(get("/users"), "alice"))
 
-	user, _ := state["user"].(map[string]any)
-	if user["username"] != "alice" || user["is_admin"] != true || user["forwarded"] != true {
-		t.Fatalf("state = %v", state)
-	}
+	assertStatus(t, page, http.StatusOK)
+	mustContain(t, page, "alice")
 }
 
 func TestForwardedHeaderFromAnUntrustedPeerIsIgnored(t *testing.T) {
 	app := newTestApp(t, forwardAuthConfig(t))
-	request := viaProxy(get("/api/state"), "alice")
+	request := viaProxy(get("/users"), "alice")
 	request.ip = "192.0.2.9"
 
-	state := app.send(request).json()
-
-	if state["user"] != nil {
-		t.Fatalf("an untrusted peer signed in: %v", state)
-	}
+	mustRedirect(t, app.send(request), "/login?next=%2Fusers")
 }
 
 func TestForwardedInvalidUserNameSignsNobodyIn(t *testing.T) {
 	app := newTestApp(t, forwardAuthConfig(t))
 	token := app.signIn("bob", false)
-	request := viaProxy(get("/api/state"), "not a valid name!").as(token)
+	request := viaProxy(get("/settings"), "not a valid name!").as(token)
 
-	state := app.send(request).json()
-
-	if state["user"] != nil {
-		t.Fatalf("the cookie filled the gap: %v", state)
-	}
+	assertStatus(t, app.send(request), http.StatusSeeOther)
 }
 
 func TestForwardedFirstUserClosesSetup(t *testing.T) {
@@ -70,37 +60,20 @@ func TestForwardedFirstUserClosesSetup(t *testing.T) {
 	config.SetupToken = token
 	app := newTestApp(t, config)
 
-	if state := app.send(get("/api/state")).json(); state["setup_required"] != true {
-		t.Fatalf("setup should be open before the proxy user: %v", state)
-	}
-	state := app.send(viaProxy(get("/api/state"), "alice")).json()
+	assertStatus(t, app.send(get("/setup")), http.StatusOK)
+	assertStatus(t, app.send(viaProxy(get("/users"), "alice")), http.StatusOK)
 
-	if state["setup_required"] != false {
-		t.Fatalf("setup stayed open after the first account: %v", state)
-	}
+	mustRedirect(t, app.send(get("/setup")), "/login")
 	if app.app.currentSetupToken() != nil {
 		t.Fatal("the setup token was not cleared")
 	}
 }
 
-func TestForwardedUserCannotChangeAPasswordItDoesNotHave(t *testing.T) {
-	app := newTestApp(t, forwardAuthConfig(t))
-	change := put("/api/account/password", map[string]any{"current": "x", "new": testPassword})
-
-	reply := app.send(viaProxy(change, "alice"))
-
-	if reply.status != http.StatusForbidden {
-		t.Fatalf("status = %d %s", reply.status, reply.text)
-	}
-}
-
 func TestForwardedAdminNeedsNoPasswordConfirmation(t *testing.T) {
 	app := newTestApp(t, forwardAuthConfig(t))
-	app.send(viaProxy(get("/api/state"), "alice"))
+	app.send(viaProxy(get("/users"), "alice"))
 
-	reply := app.send(viaProxy(put("/api/users/1/role", map[string]any{"is_admin": true}), "alice"))
+	reply := app.send(viaProxy(formPost("/users/1/role", "is_admin=true"), "alice"))
 
-	if reply.status == http.StatusUnauthorized || reply.status == http.StatusForbidden {
-		t.Fatalf("a proxy admin was asked to confirm: %d %s", reply.status, reply.text)
-	}
+	mustRedirect(t, reply, "/users?notice=user-changed")
 }

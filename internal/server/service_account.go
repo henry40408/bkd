@@ -11,8 +11,8 @@ import (
 	"github.com/henry40408/bkd/internal/users"
 )
 
-// The business rules of the account routes. The JSON handlers and the pages both
-// call these, so each rule lives in one place and a fault maps to one status.
+// The business rules of the account routes. The pages call these, so each
+// rule lives in one place and a fault maps to one status.
 
 // caller says who is asking, as far as the session list and the rate limits care.
 type caller struct {

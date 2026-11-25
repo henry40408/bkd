@@ -263,7 +263,7 @@ func freeAddress() (string, error) {
 // waitUntilAnswering fails at once if our child has exited, so a port clash
 // cannot pass by reaching another scenario's server.
 func (s *Server) waitUntilAnswering() error {
-	url := s.BaseURL + "/api/state"
+	url := s.BaseURL + "/healthz"
 	deadline := time.Now().Add(startupTimeout)
 	for time.Now().Before(deadline) {
 		select {
