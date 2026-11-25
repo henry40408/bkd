@@ -8,9 +8,11 @@ import (
 	"os"
 	"time"
 
+	"github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 )
 
@@ -121,6 +123,44 @@ func (b *Browser) SetViewport(viewport Viewport) error {
 		Height:            viewport.Height,
 		DeviceScaleFactor: 1,
 	})
+}
+
+// AllowClipboard lets the pages of origin read and write the clipboard, so a
+// step can check what a Copy button put there.
+func (b *Browser) AllowClipboard(origin string) error {
+	for _, name := range []string{"clipboard-read", "clipboard-write"} {
+		err := send(b, browser.SetPermission, browser.SetPermissionParams{
+			Permission: &browser.PermissionDescriptor{Name: name},
+			Setting:    browser.PermissionSettingGranted,
+			Origin:     origin,
+		})
+		if err != nil {
+			return fmt.Errorf("could not allow %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// RefuseClipboardWrites makes navigator.clipboard.writeText reject, as it does when
+// the browser denies it, so the page has to copy another way. The test server is on
+// 127.0.0.1, a secure origin, so the page would otherwise never need to.
+//
+// It applies to the open page and to every page the browser loads from now on: bkd's
+// script swaps pages in without loading one, so the open page keeps what it is given.
+func (b *Browser) RefuseClipboardWrites() error {
+	const refuse = `navigator.clipboard.writeText = () => Promise.reject(new DOMException('refused', 'NotAllowedError'));`
+	_, err := chromedp.Call(b.ctx, page.AddScriptToEvaluateOnNewDocument,
+		page.AddScriptToEvaluateOnNewDocumentParams{Source: refuse})
+	if err != nil {
+		return err
+	}
+	_, err = Exec[any](b, refuse)
+	return err
+}
+
+// ClipboardText is the text on the clipboard.
+func (b *Browser) ClipboardText() (string, error) {
+	return chromedp.Run(b.ctx, chromedp.Evaluate[string]("navigator.clipboard.readText()", chromedp.EvalAwaitPromise))
 }
 
 // PreferScheme emulates the prefers-color-scheme media feature, "light" or

@@ -28,6 +28,7 @@ const (
 	iconKey        iconName = "key"
 	iconUserAdd    iconName = "userAdd"
 	iconBan        iconName = "ban"
+	iconCopy       iconName = "copy"
 )
 
 // iconPaths is the stroke path of each icon, drawn on a 16x16 grid.
@@ -55,6 +56,7 @@ var iconPaths = map[iconName]string{
 	iconKey:        "M5.5 13a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM7.3 8.7L13 3M11 5l1.5 1.5M9.3 6.7l1.2 1.2",
 	iconUserAdd:    "M6.5 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM2 13.5C2 11.3 4 10 6.5 10s4.5 1.3 4.5 3.5M12.5 4.5v4M10.5 6.5h4",
 	iconBan:        "M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM4.1 4.1l7.8 7.8",
+	iconCopy:       "M5.5 5.5h7.5v8H5.5zM3 10.5V2.5h7.5",
 }
 
 func icon(name iconName) node {

@@ -88,13 +88,24 @@ func tokensSection(view SettingsView) node {
 	)
 }
 
+const newTokenFieldID = "new-api-token"
+
 // newTokenNotice shows a secret that was just made. It is the only time the page can.
+// The Copy button needs the script, so the server hides it; the box stays selectable
+// for a reader without the script.
 func newTokenNotice(secret string) node {
 	return maybe(secret != "", func() node {
-		return el("div", []attr{a("role", "status")},
-			el("p", nil, text("Copy this token now. It is shown only once.")),
-			void("input", a("type", "text"), a("aria-label", "New API token"), a("value", secret),
-				a("autocomplete", "off"), a("spellcheck", "false"), flag("readonly")),
+		return el("div", nil,
+			el("p", []attr{a("role", "status")}, text("Copy this token now. It is shown only once.")),
+			el("div", []attr{classes("copy-row")},
+				void("input", a("id", newTokenFieldID), a("type", "text"), a("aria-label", "New API token"),
+					a("value", secret), a("autocomplete", "off"), a("spellcheck", "false"), flag("readonly")),
+				el("button", []attr{classes("btn"), a("type", "button"), a("data-copy-from", newTokenFieldID),
+					flag("data-script-only"), flag("hidden")}, iconLabel(iconCopy, "Copy")),
+				// Apart from the button: a live region is read whole, so a label inside one
+				// would be read with everything around it at each change.
+				el("span", []attr{classes("sr-only"), a("role", "status"), flag("data-copy-status")}),
+			),
 		)
 	})
 }

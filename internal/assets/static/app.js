@@ -1011,6 +1011,60 @@
     );
   });
 
+  // ---- Copy buttons: a button with `data-copy-from` copies the value of the field whose id it names ----
+  const COPY_FEEDBACK_MS = 2000;
+  const copyFeedbackTimers = new WeakMap();
+
+  // The Clipboard API exists only on a secure origin, and bkd is often served over plain
+  // http on a home network, so selecting the text and copying it is the fallback.
+  async function copyFieldValue({ field, button }) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(field.value);
+        return true;
+      } catch {
+        // Refused (no permission or focus): try the older way.
+      }
+    }
+    field.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      // Not supported: the text stays selected for the person to copy.
+    }
+    // select() moved the focus into the field. After a good copy it goes back to the button
+    // that was pressed; after a refused one it stays, so Ctrl+C or Cmd+C still works.
+    if (copied) button.focus();
+    return copied;
+  }
+
+  // The status span is the one thing read out; clearing it later is not announced.
+  function showCopyResult(button, result) {
+    const label = button.querySelector(".lbl");
+    if (!label) return;
+    const status = button.parentElement.querySelector("[data-copy-status]");
+    if (!button.dataset.copyLabel) button.dataset.copyLabel = label.textContent;
+    label.textContent = result;
+    if (status) status.textContent = result;
+    clearTimeout(copyFeedbackTimers.get(button));
+    copyFeedbackTimers.set(
+      button,
+      setTimeout(() => {
+        label.textContent = button.dataset.copyLabel;
+        if (status) status.textContent = "";
+      }, COPY_FEEDBACK_MS),
+    );
+  }
+
+  document.addEventListener("click", async (event) => {
+    const button = event.target instanceof Element ? event.target.closest("button[data-copy-from]") : null;
+    const field = button ? document.getElementById(button.dataset.copyFrom) : null;
+    if (!(field instanceof HTMLInputElement)) return;
+    const copied = await copyFieldValue({ field, button });
+    showCopyResult(button, copied ? "Copied" : "Copy failed");
+  });
+
   // Dropping a file on the import box fills its file field, as choosing it would.
   const dropBoxOf = (event) => (event.target instanceof Element ? event.target.closest(".drop") : null);
   document.addEventListener("dragover", (event) => {

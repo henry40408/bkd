@@ -184,7 +184,7 @@ func TestIconsAllHaveAPathAndRender(t *testing.T) {
 	}
 	for _, name := range []iconName{iconOK, iconBroken, iconRedirected, iconUnknown, iconEdit, iconTrash, iconPlus,
 		iconShuffle, iconSelect, iconAll, iconTagAdd, iconTagRemove, iconLink, iconSearch, iconMenu,
-		iconUpload, iconDownload, iconSignOut, iconSignIn, iconKey, iconUserAdd, iconBan} {
+		iconUpload, iconDownload, iconSignOut, iconSignIn, iconKey, iconUserAdd, iconBan, iconCopy} {
 		if _, ok := iconPaths[name]; !ok {
 			t.Errorf("icon %q is not drawn", name)
 		}
@@ -562,7 +562,7 @@ func TestTheTokenFormHasANameFieldThatKeepsAndEscapesWhatWasTyped(t *testing.T) 
 
 func TestTheTokenFormShowsNoErrorAndNoSecretByDefault(t *testing.T) {
 	page := SettingsPage(SettingsView{Shell: alice(SectionSettings), MaxTokenNameLength: 100})
-	requireAbsent(t, page, `role="alert"`, "Copy this token now", "New API token")
+	requireAbsent(t, page, `role="alert"`, "Copy this token now", "New API token", "data-copy-from")
 }
 
 // The secret is on the page for this one answer only, so it must be readable
@@ -572,6 +572,17 @@ func TestANewTokenIsShownInAReadOnlyFieldOnce(t *testing.T) {
 	requireContains(t, page,
 		"Copy this token now. It is shown only once.",
 		`aria-label="New API token" value="ab12" autocomplete="off" spellcheck="false" readonly>`,
+	)
+}
+
+// The button needs the script, so the server hides it; it names the field to copy by id.
+func TestTheNewTokenHasACopyButtonOnlyTheScriptShows(t *testing.T) {
+	page := SettingsPage(SettingsView{Shell: alice(SectionSettings), NewToken: "ab12", MaxTokenNameLength: 100})
+	requireContains(t, page,
+		`<div class="copy-row"><input id="new-api-token" type="text" aria-label="New API token" value="ab12"`,
+		`<button class="btn" type="button" data-copy-from="new-api-token" data-script-only hidden>`,
+		`<span class="lbl">Copy</span>`,
+		`<span class="sr-only" role="status" data-copy-status></span>`,
 	)
 }
 

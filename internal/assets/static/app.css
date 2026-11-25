@@ -185,6 +185,12 @@ form.stack { display: grid; gap: var(--sp-3); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .pick .note { max-width: none; }
 
+/* A read-only value with its Copy button beside it. */
+.copy-row { display: flex; gap: var(--sp-2); align-items: center; }
+.copy-row input[type="text"] { flex: 1 1 var(--field-min); width: auto; min-width: 0; }
+/* "Copy failed" is wider than "Copy"; a fixed width keeps the field from moving. */
+.copy-row .btn { min-width: 9rem; justify-content: center; }
+
 /* ---- Bulk bar ---- */
 .bulk-form { margin: 0; }
 .bulk { position: sticky; bottom: var(--sp-3); margin-top: var(--sp-4); background: var(--ink); color: var(--paper); border-radius: var(--radius); padding: var(--sp-3); display: grid; gap: var(--sp-3); z-index: 3; }

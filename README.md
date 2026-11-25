@@ -154,7 +154,7 @@ To read the pages of bookmarks that have none (after an import, for example), go
 
 ## API tokens
 
-A program that cannot sign in through the browser, such as a browser extension or a script, uses an API token instead of a password. Under "Settings", "API tokens", type a name (for example the program's) and press "Create token". The token is shown once, right there: copy it then, because bkd keeps only a hash and cannot show it again. The program sends it as `Authorization: Token <token>`.
+A program that cannot sign in through the browser, such as a browser extension or a script, uses an API token instead of a password. Under "Settings", "API tokens", type a name (for example the program's) and press "Create token". The token is shown once, right there, with a "Copy" button beside it: copy it then, because bkd keeps only a hash and cannot show it again. The program sends it as `Authorization: Token <token>`.
 
 - A token acts as you, with no expiry, until you end it with "Revoke". Name one token per program, so you can end one without breaking the others. The list shows when each was made and last used (the last-use time moves at most once an hour).
 - You can hold at most 20 tokens.
