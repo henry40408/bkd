@@ -57,6 +57,10 @@ type UpdateRequest struct {
 	ID       int64
 	Bookmark Valid
 	Now      int64
+	// ReplaceSite stores Bookmark.Site even when it is empty. Without it an empty
+	// Site keeps what is stored, so only a caller that means to clear the page's
+	// details (the linkding API, which can send an empty description) sets it.
+	ReplaceSite bool
 }
 
 // Store reads and writes bookmarks.
@@ -151,7 +155,7 @@ func updateRow(ctx context.Context, tx *sql.Tx, req UpdateRequest) (bool, error)
 	// some (it read the page again); both columns go together, because a title
 	// and a description from two readings do not describe one page. In SET,
 	// `url` is still the old value.
-	siteSent := req.Bookmark.Site != (Site{})
+	siteSent := req.ReplaceSite || req.Bookmark.Site != (Site{})
 	result, err := tx.ExecContext(ctx, `UPDATE bookmarks SET
              link_status      = CASE WHEN url = ?1 THEN link_status      END,
              link_checked_at  = CASE WHEN url = ?1 THEN link_checked_at  END,

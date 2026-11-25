@@ -15,6 +15,9 @@ type apiError struct {
 	message string
 	// code lets the front end tell failures with one status apart.
 	code string
+	// field names the request field a 400 is about. Only the linkding-compatible
+	// routes use it: they answer {"<field>": ["<message>"]}, as linkding does.
+	field string
 	// retryAfter is set for 429.
 	retryAfter time.Duration
 	// cause is logged for 500 and never shown.

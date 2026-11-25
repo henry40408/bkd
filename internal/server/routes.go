@@ -17,6 +17,7 @@ type methodHandler struct {
 func onGet(handler http.Handler) methodHandler    { return methodHandler{http.MethodGet, handler} }
 func onPost(handler http.Handler) methodHandler   { return methodHandler{http.MethodPost, handler} }
 func onPut(handler http.Handler) methodHandler    { return methodHandler{http.MethodPut, handler} }
+func onPatch(handler http.Handler) methodHandler  { return methodHandler{http.MethodPatch, handler} }
 func onDelete(handler http.Handler) methodHandler { return methodHandler{http.MethodDelete, handler} }
 
 // byMethod dispatches on the request method itself instead of ServeMux patterns,

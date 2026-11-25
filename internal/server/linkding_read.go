@@ -3,7 +3,6 @@ package server
 import (
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,11 +18,15 @@ func (a *App) mountLinkding(mux *http.ServeMux) {
 		mux.Handle(path, limitBody(maxBodyBytes, a.bodyTimeout, apiHeaders(byMethod(handlers...))))
 	}
 	token := a.tokenGuarded
-	route("/api/bookmarks/{$}", onGet(token(a.linkdingListBookmarks)))
+	route("/api/bookmarks/{$}", onGet(token(a.linkdingListBookmarks)), onPost(token(a.linkdingCreateBookmark)))
 	route("/api/bookmarks/check/{$}", onGet(token(a.linkdingCheckBookmark)))
 	route("/api/bookmarks/archived/{$}", onGet(token(a.linkdingListNothing)))
 	route("/api/bookmarks/shared/{$}", onGet(token(a.linkdingListNothing)))
-	route("/api/bookmarks/{id}/{$}", onGet(token(a.linkdingGetBookmark)))
+	route("/api/bookmarks/{id}/{$}",
+		onGet(token(a.linkdingGetBookmark)),
+		onPut(token(a.linkdingChangeBookmark(true))),
+		onPatch(token(a.linkdingChangeBookmark(false))),
+		onDelete(token(a.linkdingDeleteBookmark)))
 	route("/api/tags/{$}", onGet(token(a.linkdingListTags)))
 }
 
@@ -109,9 +112,9 @@ func linkdingTimeParameter(r *http.Request, name string) (*int64, *apiError) {
 }
 
 func (a *App) linkdingGetBookmark(w http.ResponseWriter, r *http.Request, user auth.SessionUser) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		a.writeDetailError(w, detailNotFound())
+	id, fault := linkdingIDOf(r)
+	if fault != nil {
+		a.writeDetailError(w, fault)
 		return
 	}
 	bookmark, found, err := a.bookmarks.Get(r.Context(), user.UserID, id)

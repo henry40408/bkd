@@ -163,6 +163,12 @@ func Fitted(url, title, note string, tags []string) Input {
 	}
 }
 
+// TitleFromURL is the title of a bookmark saved without one: its address, cut to
+// the length of a title.
+func TitleFromURL(url string) string {
+	return truncate.Runes(strings.TrimSpace(url), maxTitleChars)
+}
+
 func validateURL(raw string) (string, error) {
 	url := strings.TrimSpace(raw)
 	if utf8.RuneCountInString(url) > maxURLChars {

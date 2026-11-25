@@ -84,6 +84,7 @@ func get(uri string) sent               { return sent{method: "GET", uri: uri} }
 func del(uri string) sent               { return sent{method: "DELETE", uri: uri} }
 func post(uri string, body any) sent    { return sent{method: "POST", uri: uri, body: body} }
 func put(uri string, body any) sent     { return sent{method: "PUT", uri: uri, body: body} }
+func patch(uri string, body any) sent   { return sent{method: "PATCH", uri: uri, body: body} }
 func (s sent) as(token string) sent     { s.cookie = "bkd_session=" + token; return s }
 func (s sent) from(ip string) sent      { s.ip = ip; return s }
 func (s sent) originated(o string) sent { s.origin = o; return s }

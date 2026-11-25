@@ -79,13 +79,18 @@ type detailBody struct {
 	Detail string `json:"detail"`
 }
 
-// writeDetailError answers in linkding's error shape and logs internal faults.
+// writeDetailError answers in linkding's error shapes and logs internal faults:
+// {"detail": "..."}, or {"<field>": ["..."]} for a field that was refused.
 func (a *App) writeDetailError(w http.ResponseWriter, e *apiError) {
 	if e.cause != nil {
 		a.logger.Error("internal error", slog.Any("error", e.cause))
 	}
 	if e.status == http.StatusUnauthorized {
 		w.Header().Set("WWW-Authenticate", "Token")
+	}
+	if e.field != "" {
+		writeJSON(w, e.status, map[string][]string{e.field: {e.message}})
+		return
 	}
 	writeJSON(w, e.status, detailBody{Detail: e.message})
 }
