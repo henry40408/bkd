@@ -165,6 +165,27 @@ A program that cannot sign in through the browser, such as a browser extension o
 - A proxy user's token does not end when the identity provider removes the person or the proxy signs them out. Disable their account in bkd. If an admin group is set, their `is_admin` flag follows `Remote-Groups` only on requests that come through the proxy's sign-in, not on token requests.
 - Over the API (as a signed-in user): `GET /api/account/tokens` lists them (never the secret), `POST /api/account/tokens` with `{"name": "..."}` makes one and answers 201 with the secret in `token`, and `DELETE /api/account/tokens/{id}` ends one.
 
+## linkding-compatible API
+
+Programs written for [linkding](https://linkding.link/api/) can read your bookmarks with an API token (see above): send `Authorization: Token <token>`. Only reading is supported for now.
+
+| Request | Answers |
+| --- | --- |
+| `GET /api/bookmarks/` | your bookmarks, newest first, as `{count, next, previous, results}`. Parameters: `q`, `limit` (default 100, at most 1000), `offset`, `added_since`, `modified_since` |
+| `GET /api/bookmarks/{id}/` | one bookmark |
+| `GET /api/bookmarks/check/?url=` | `{bookmark, metadata, auto_tags}`: whether you saved that exact address |
+| `GET /api/tags/` | your tags, by name |
+
+How bkd's fields map to linkding's, and what differs:
+
+- linkding's `description` is bkd's *site description* (what the page says about itself) and `notes` is bkd's note. `title` is your title. `website_title` and `website_description` are the site's, `null` when bkd read none.
+- bkd has no archive, unread, sharing, favicon or preview image: `is_archived`, `unread` and `shared` are always `false`, the two image fields `null`.
+- `q` uses bkd's search syntax (see "Search"), not linkding's. `added_since` and `modified_since` accept an RFC 3339 time, one without a zone (taken as UTC) or a date, and compare whole seconds.
+- Tag ids are made up from the tag's place in the list and change when you add or remove tags; use the name.
+- `check` does not fetch the page: `metadata` is what bkd stored for a bookmark you already have, and `null` for any other address; `auto_tags` is empty.
+- Errors are `{"detail": "..."}` as in linkding. These routes accept the token only, never a cookie.
+- A link to the next page is built from the `Host` the request came with, and is `https` with `--secure-cookies`. Behind a reverse proxy, pass `Host` through.
+
 ## Import and export
 
 Under "Import and export" in the sidebar, choose the bookmarks file your browser exported (Chrome, Firefox, Safari, Pocket and Raindrop all write the same `.html` format). Folders become tags, the date saved is kept when the file has one (Safari's does not), and a link you already have is skipped, so importing the same file twice is safe. Links that are not web links (`javascript:`, `place:`) are skipped and listed in the result. The same screen downloads your bookmarks as HTML (for a browser or another service) or JSON (a backup).

@@ -51,7 +51,7 @@ func goMigrations(t *testing.T, pool *sql.DB) []rustMigration {
 // goOnlyMigrations is how many migrations come after the last one the Rust
 // server knew. rustMigrations and rustSchema stay as Rust wrote them, so add one
 // here, and its schema change to withGoOnlyChanges, with each new migration.
-const goOnlyMigrations = 3
+const goOnlyMigrations = 4
 
 func TestNewDatabaseRecordsTheRustMigrationsThenTheGoOnlyOnes(t *testing.T) {
 	got := goMigrations(t, openTemp(t))
@@ -81,6 +81,7 @@ func withGoOnlyChanges(rust map[string]string) map[string]string {
     last_used_at INTEGER
 ) STRICT`
 	changed["api_tokens_user_id"] = `CREATE INDEX api_tokens_user_id ON api_tokens (user_id)`
+	changed["bookmarks_user_url"] = `CREATE INDEX bookmarks_user_url ON bookmarks (user_id, url)`
 	return changed
 }
 

@@ -52,6 +52,7 @@ func byMethod(handlers ...methodHandler) http.Handler {
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
 	a.mountAPI(mux)
+	a.mountLinkding(mux)
 	for _, route := range assets.Routes {
 		mux.Handle(route.Path, byMethod(onGet(assets.Handler(route))))
 	}
