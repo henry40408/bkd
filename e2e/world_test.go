@@ -26,6 +26,8 @@ type world struct {
 	// apiToken is the last API token a step made through Settings. The page shows
 	// it once, so a later step on another page reads it from here.
 	apiToken string
+	// scrolledTo is how far down the page was when a step noted it.
+	scrolledTo float64
 }
 
 // initializeScenario runs once per scenario, so every scenario gets its own
@@ -39,6 +41,7 @@ func initializeScenario(scenario *godog.ScenarioContext, binary string) {
 	registerBulkSteps(scenario, w)
 	registerKeyboardSteps(scenario, w)
 	registerLayoutSteps(scenario, w)
+	registerPlaceSteps(scenario, w)
 	registerRedesignSteps(scenario, w)
 	registerLinkSteps(scenario, w)
 	registerSiteSteps(scenario, w)

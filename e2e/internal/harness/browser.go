@@ -125,6 +125,11 @@ func (b *Browser) SetViewport(viewport Viewport) error {
 	})
 }
 
+// Touch makes the browser report a touch screen: a coarse pointer and no hover.
+func (b *Browser) Touch() error {
+	return send(b, emulation.SetTouchEmulationEnabled, emulation.SetTouchEmulationEnabledParams{Enabled: true})
+}
+
 // AllowClipboard lets the pages of origin read and write the clipboard, so a
 // step can check what a Copy button put there.
 func (b *Browser) AllowClipboard(origin string) error {
@@ -217,6 +222,14 @@ func (b *Browser) Reload() error {
 // Back goes one step back in the history and waits for the page to load.
 func (b *Browser) Back() error {
 	if err := chromedp.Do(b.ctx, chromedp.NavigateBack()); err != nil {
+		return err
+	}
+	return b.WaitForLoad()
+}
+
+// Forward goes one step forward in the history and waits for the page to load.
+func (b *Browser) Forward() error {
+	if err := chromedp.Do(b.ctx, chromedp.NavigateForward()); err != nil {
 		return err
 	}
 	return b.WaitForLoad()
