@@ -114,7 +114,7 @@ Thin binary (`cmd/bkd`) over internal packages, so tests build the handler direc
 
 The version is never stored in a manifest: `internal/version.Version()` returns the `-ldflags "-X github.com/henry40408/bkd/internal/version.version=$GIT_VERSION"` value when set (not empty, not `dev`), else the module version Go stamps from VCS, else `unknown`. Docker builds pass `GIT_VERSION` as a build arg because `.dockerignore` excludes `.git`. Release with `gh release create --generate-notes`; its tag makes `.github/workflows/docker.yml` publish the versioned image (multi-arch to GHCR), and every push to `main` publishes `main`. Never hand-edit versions or `git tag`.
 
-The image is `gcr.io/distroless/static-debian12:nonroot` (uid 65532; existing volumes depend on it), keeps the database in the `/data` volume and sets `BKD_DB` and `BKD_ADDR`.
+The image is `gcr.io/distroless/static-debian12` (runs as root, so a bind-mounted `/data` stays writable under Docker's default capabilities), keeps the database in the `/data` volume and sets `BKD_DB` and `BKD_ADDR`. Volumes created by images up to 0.6.0 belong to uid 65532, newer ones to root; a change of the runtime user affects both.
 
 ## Conventions
 

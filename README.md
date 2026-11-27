@@ -24,7 +24,7 @@ A search on a monitor, and the bookmark list on a phone:
 
 ### Docker
 
-Images for `linux/amd64` and `linux/arm64` are published to GitHub Container Registry. A release publishes the version tags (`1.2.3`, `1.2`) and `latest`; every merge to `main` publishes `main`, the newest unreleased build. The image runs as a non-root user (uid 65532) and keeps the database in the `/data` volume.
+Images for `linux/amd64` and `linux/arm64` are published to GitHub Container Registry. A release publishes the version tags (`1.2.3`, `1.2`) and `latest`; every merge to `main` publishes `main`, the newest unreleased build. The image runs as root and keeps the database in the `/data` volume.
 
 ```sh
 docker run -d \
@@ -34,7 +34,13 @@ docker run -d \
   ghcr.io/henry40408/bkd:latest
 ```
 
-The image sets `BKD_DB=/data/bkd.sqlite3` and `BKD_ADDR=0.0.0.0:8080`. Override them, set `BKD_SECURE_COOKIES=true` when a proxy serves the site over HTTPS, or set `BKD_LOG_LEVEL=debug` for more log lines, with `-e`. A bind mount must be writable by uid 65532.
+The image sets `BKD_DB=/data/bkd.sqlite3` and `BKD_ADDR=0.0.0.0:8080`. Override them, set `BKD_SECURE_COOKIES=true` when a proxy serves the site over HTTPS, or set `BKD_LOG_LEVEL=debug` for more log lines, with `-e`.
+
+Images up to 0.6.0 ran as uid 65532, so the volumes they created belong to that user:
+
+- With Docker's default capabilities, a newer image reads and writes such a volume as it is.
+- A container that drops all capabilities (`--cap-drop ALL`) cannot. Run it with `--user 65532:65532`, or give the files in `/data` to root.
+- To go back to 0.6.0 or earlier with a volume that a newer image created, first run `chown -R 65532:65532` on its files.
 
 On the first start, with an empty database, bkd logs the one-time setup token. Read it with `docker logs bkd`.
 
