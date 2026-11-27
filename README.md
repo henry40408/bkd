@@ -93,7 +93,17 @@ bkd can let a reverse proxy that already signs people in (Authelia, Authentik, o
 - Delete does not remove a proxy user for good: the next request creates the account again. Disable the account instead.
 - The rate limit and the session list see the proxy's address, not the end user's.
 
-SQLite runs in WAL mode, so `bkd.sqlite3-wal` and `bkd.sqlite3-shm` appear next to the database while it is open. Back up with SQLite's backup API (`sqlite3 bkd.sqlite3 ".backup copy.sqlite3"`), or copy all three files together while bkd is stopped.
+## Database and upgrades
+
+SQLite runs in WAL mode, so `bkd.sqlite3-wal` and `bkd.sqlite3-shm` appear next to the database while it is open. Back up with SQLite's backup API (`sqlite3 bkd.sqlite3 ".backup copy.sqlite3"`), or copy all three files together while bkd is stopped. A SQL dump (`.dump`) leaves out the schema version: read it from the original (`sqlite3 bkd.sqlite3 "PRAGMA user_version"`) and set the same number on the restored database (for example `sqlite3 restored.sqlite3 "PRAGMA user_version = 9"`), or bkd may refuse it.
+
+### Upgrading from 0.5 or earlier
+
+Releases after 0.5 record the schema version differently. To upgrade:
+
+1. Stop bkd and back up the database. Going back to the old version needs this copy: after the next steps it refuses to start, saying that a migration `was previously applied but is missing in the resolved migrations`.
+2. If the database is from bkd 0.4 or earlier, or from the Rust server, start bkd 0.5 on it once, then stop it. Newer releases refuse such a database and leave it unchanged.
+3. Start the new release.
 
 ## Search
 

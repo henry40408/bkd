@@ -1,6 +1,5 @@
-// Package db opens the SQLite database and applies its migrations. The schema
-// and the migration bookkeeping match what the Rust version (sqlx) wrote, so a
-// database created by either version opens in the other.
+// Package db opens the SQLite database and applies its migrations: the SQL files
+// in migrations/, with the schema version kept in `PRAGMA user_version`.
 package db
 
 import (

@@ -1,10 +1,8 @@
 package db
 
 import (
-	"bytes"
 	"cmp"
 	"context"
-	"crypto/sha512"
 	"database/sql"
 	"embed"
 	"errors"
@@ -13,35 +11,23 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
-	"strings"
-	"time"
 )
 
 //go:embed migrations/*.sql
 var embeddedMigrations embed.FS
 
-// createMigrationsTable is byte for byte the statement sqlx runs. SQLite keeps
-// the statement text in sqlite_master, so the layout is part of compatibility.
-const createMigrationsTable = `
-CREATE TABLE IF NOT EXISTS _sqlx_migrations (
-    version BIGINT PRIMARY KEY,
-    description TEXT NOT NULL,
-    installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    success BOOLEAN NOT NULL,
-    checksum BLOB NOT NULL,
-    execution_time BIGINT NOT NULL
-);
-`
+// migrationFileName is `<version>_<description>.sql`.
+var migrationFileName = regexp.MustCompile(`^(\d+)_.+\.sql$`)
 
-// migrationFileName is `<version>_<description>.sql`, the sqlx convention.
-var migrationFileName = regexp.MustCompile(`^(\d+)_(.+)\.sql$`)
+// baselineRecord is the description releases up to 0.5 gave the baseline's
+// version in _sqlx_migrations. The number alone would also match another
+// program that uses sqlx.
+const baselineRecord = "bookmark url index"
 
+// migration brings the schema to version, which `PRAGMA user_version` records.
 type migration struct {
-	version     int64
-	description string
-	sql         string
-	// checksum is the SHA-384 of the file, the digest sqlx stores.
-	checksum []byte
+	version int64
+	sql     string
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -57,10 +43,14 @@ func migrate(ctx context.Context, db *sql.DB) error {
 }
 
 // loadMigrations reads every `.sql` file in the root of fsys, ordered by version.
+// The first one is the baseline: it creates the whole schema of its version.
 func loadMigrations(fsys fs.FS) ([]migration, error) {
 	names, err := fs.Glob(fsys, "*.sql")
 	if err != nil {
 		return nil, err
+	}
+	if len(names) == 0 {
+		return nil, errors.New("no migration files")
 	}
 	migrations := make([]migration, 0, len(names))
 	for _, name := range names {
@@ -86,129 +76,124 @@ func readMigration(fsys fs.FS, name string) (migration, error) {
 	if parts == nil {
 		return migration{}, fmt.Errorf("migration file %q is not named <version>_<description>.sql", name)
 	}
-	version, err := strconv.ParseInt(parts[1], 10, 64)
+	// user_version is a signed 32-bit integer, and 0 means no migration yet.
+	version, err := strconv.ParseInt(parts[1], 10, 32)
 	if err != nil {
 		return migration{}, fmt.Errorf("migration file %q: %w", name, err)
+	}
+	if version == 0 {
+		return migration{}, fmt.Errorf("migration file %q: versions start at 1", name)
 	}
 	contents, err := fs.ReadFile(fsys, name)
 	if err != nil {
 		return migration{}, err
 	}
-	checksum := sha512.Sum384(contents)
-	return migration{
-		version:     version,
-		description: strings.ReplaceAll(parts[2], "_", " "),
-		sql:         string(contents),
-		checksum:    checksum[:],
-	}, nil
+	return migration{version: version, sql: string(contents)}, nil
 }
 
-// applyMigrations refuses to touch a database whose history disagrees with
-// migrations, then applies what is missing, one transaction per migration.
-func applyMigrations(ctx context.Context, db *sql.DB, migrations []migration) error {
-	if _, err := db.ExecContext(ctx, createMigrationsTable); err != nil {
-		return fmt.Errorf("create migrations table: %w", err)
+// versionRange holds the first and the latest schema version this build has.
+type versionRange struct {
+	baseline, latest int64
+}
+
+func (r versionRange) refuseNewer(current int64) error {
+	if current > r.latest {
+		return fmt.Errorf("database schema version %d is newer than %d, the latest this bkd knows; run a newer bkd",
+			current, r.latest)
 	}
-	applied, err := appliedChecksums(ctx, db)
+	return nil
+}
+
+// applyMigrations applies the migrations newer than the database, one transaction
+// each. migrations is ordered and starts with the baseline.
+func applyMigrations(ctx context.Context, db *sql.DB, migrations []migration) error {
+	known := versionRange{baseline: migrations[0].version, latest: migrations[len(migrations)-1].version}
+	current, err := userVersion(ctx, db)
 	if err != nil {
 		return err
 	}
-	if err := checkHistory(applied, migrations); err != nil {
+	if err := known.refuseNewer(current); err != nil {
 		return err
 	}
 	for _, m := range migrations {
-		if _, done := applied[m.version]; done {
+		if m.version <= current {
 			continue
 		}
-		if err := applyMigration(ctx, db, m); err != nil {
+		if err := applyMigration(ctx, db, m, known); err != nil {
+			return fmt.Errorf("apply migration %d: %w", m.version, err)
+		}
+	}
+	return nil
+}
+
+// applyMigration runs the script and moves user_version in one transaction, so a
+// failure leaves neither half behind.
+func applyMigration(ctx context.Context, db *sql.DB, m migration, known versionRange) error {
+	return WithImmediateTx(ctx, db, func(conn *sql.Conn) error {
+		// Read again under the write lock: another process, maybe a newer bkd,
+		// may have got here first.
+		current, err := userVersion(ctx, conn)
+		if err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-// appliedChecksums maps each recorded version to its checksum. A row whose
-// success flag is false means a migration died halfway: sqlx stops there too.
-func appliedChecksums(ctx context.Context, db *sql.DB) (map[int64][]byte, error) {
-	var dirty int64
-	err := db.QueryRowContext(ctx,
-		"SELECT version FROM _sqlx_migrations WHERE success = false ORDER BY version LIMIT 1").Scan(&dirty)
-	if err == nil {
-		return nil, fmt.Errorf("migration %d was partially applied; fix the database by hand", dirty)
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("check for a partial migration: %w", err)
-	}
-
-	rows, err := db.QueryContext(ctx, "SELECT version, checksum FROM _sqlx_migrations ORDER BY version")
-	if err != nil {
-		return nil, fmt.Errorf("list applied migrations: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	applied := make(map[int64][]byte)
-	for rows.Next() {
-		var version int64
-		var checksum []byte
-		if err := rows.Scan(&version, &checksum); err != nil {
-			return nil, fmt.Errorf("list applied migrations: %w", err)
+		if err := known.refuseNewer(current); err != nil {
+			return err
 		}
-		applied[version] = checksum
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list applied migrations: %w", err)
-	}
-	return applied, nil
-}
-
-func checkHistory(applied map[int64][]byte, migrations []migration) error {
-	known := make(map[int64]migration, len(migrations))
-	for _, m := range migrations {
-		known[m.version] = m
-	}
-	for _, version := range sortedVersions(applied) {
-		m, ok := known[version]
-		if !ok {
-			return fmt.Errorf("migration %d was previously applied but is missing in the resolved migrations", version)
+		if current >= m.version {
+			return nil
 		}
-		if !bytes.Equal(applied[version], m.checksum) {
-			return fmt.Errorf("migration %d was previously applied but has been modified", version)
+		if current < known.baseline {
+			if err := checkBaselineApplies(ctx, conn, known.baseline); err != nil {
+				return err
+			}
 		}
-	}
-	return nil
-}
-
-func sortedVersions(applied map[int64][]byte) []int64 {
-	versions := make([]int64, 0, len(applied))
-	for version := range applied {
-		versions = append(versions, version)
-	}
-	slices.Sort(versions)
-	return versions
-}
-
-// applyMigration runs the script and records it in one transaction, so a
-// failure leaves neither half behind. Like sqlx, it records the run time in a
-// second statement, because the transaction has to finish first.
-func applyMigration(ctx context.Context, db *sql.DB, m migration) error {
-	start := time.Now()
-	err := WithImmediateTx(ctx, db, func(conn *sql.Conn) error {
 		if _, err := conn.ExecContext(ctx, m.sql); err != nil {
 			return err
 		}
-		_, err := conn.ExecContext(ctx,
-			`INSERT INTO _sqlx_migrations ( version, description, success, checksum, execution_time )
-			 VALUES ( ?1, ?2, TRUE, ?3, -1 )`,
-			m.version, m.description, m.checksum)
+		// A PRAGMA takes no bound parameters.
+		_, err = conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", m.version))
 		return err
 	})
-	if err != nil {
-		return fmt.Errorf("apply migration %d: %w", m.version, err)
+}
+
+type rowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func userVersion(ctx context.Context, q rowQuerier) (int64, error) {
+	var version int64
+	if err := q.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return 0, fmt.Errorf("read schema version: %w", err)
 	}
-	_, err = db.ExecContext(ctx,
-		"UPDATE _sqlx_migrations SET execution_time = ?1 WHERE version = ?2",
-		time.Since(start).Nanoseconds(), m.version)
+	return version, nil
+}
+
+// checkBaselineApplies accepts an empty database, or one that the migrations of
+// an older release brought all the way to the baseline. The baseline only creates
+// what is missing, so on an older schema it would leave old tables as they are.
+func checkBaselineApplies(ctx context.Context, q rowQuerier, baseline int64) error {
+	var objects, records int
+	err := q.QueryRowContext(ctx, `SELECT count(*), count(*) FILTER (WHERE name = '_sqlx_migrations')
+		FROM sqlite_master WHERE name NOT LIKE 'sqlite\_%' ESCAPE '\'`).Scan(&objects, &records)
 	if err != nil {
-		return fmt.Errorf("record run time of migration %d: %w", m.version, err)
+		return fmt.Errorf("inspect database: %w", err)
+	}
+	if objects == 0 {
+		return nil
+	}
+	reached := false
+	if records > 0 {
+		err := q.QueryRowContext(ctx, `SELECT
+			EXISTS (SELECT 1 FROM _sqlx_migrations WHERE version = ?1 AND description = ?2)
+			AND NOT EXISTS (SELECT 1 FROM _sqlx_migrations WHERE success = FALSE)`,
+			baseline, baselineRecord).Scan(&reached)
+		if err != nil {
+			return fmt.Errorf("read old migration records: %w", err)
+		}
+	}
+	if !reached {
+		return fmt.Errorf("the database is not empty and has no complete record of schema version %d; "+
+			"if it is from an older bkd, open it with bkd 0.5 once, then upgrade", baseline)
 	}
 	return nil
 }
