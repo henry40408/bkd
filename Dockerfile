@@ -30,16 +30,14 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
       -ldflags "-s -w -X github.com/henry40408/bkd/internal/version.version=${GIT_VERSION}" \
       -o /out/bkd ./cmd/bkd
 
-# The runtime image has no shell, so create the data directory here. A new named
-# volume copies its owner from this directory.
-RUN mkdir /out-data
-
-# ---- runtime: static distroless, no shell, non-root -------------------------
-# uid 65532 is what existing volumes are owned by; do not change it.
-FROM gcr.io/distroless/static-debian12:nonroot
+# ---- runtime: static distroless, no shell -----------------------------------
+# distroless/static (not :nonroot) keeps the root runtime user, so a
+# bind-mounted /data stays writable without a permissions change, as long as the
+# container keeps Docker's default capabilities. Without them root cannot write
+# another user's files; see the Docker section of the README.
+FROM gcr.io/distroless/static-debian12
 
 COPY --from=build /out/bkd /bkd
-COPY --from=build --chown=65532:65532 /out-data /data
 
 VOLUME /data
 
