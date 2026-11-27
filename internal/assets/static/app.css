@@ -93,6 +93,8 @@ form:has(label) > .btns { margin-top: var(--sp-2); }
 .me p { overflow-wrap: anywhere; }
 .me strong { color: var(--ink); }
 .me .btn { min-height: 0; }
+/* Tapping the menu button focuses its checkbox; left in the flow at the top of the page, it would scroll the page back there. */
+#menu-toggle { position: fixed; top: 0; left: 0; }
 
 main { padding: var(--sp-5) var(--sp-6) var(--sp-7); max-width: var(--page-w); min-width: 0; }
 main:focus { outline: none; }
@@ -142,6 +144,8 @@ form.stack { display: grid; gap: var(--sp-3); }
 .item.confirming > .inline-form .inline-title, .pick.confirming > .inline-form .inline-title, .bulk > .inline-form .inline-title { font: var(--strong) var(--fs-2)/var(--lh) var(--sans); }
 .item.confirming > .inline-form .summary, .pick.confirming > .inline-form .summary, .bulk > .inline-form .summary { font-size: var(--fs-2); }
 .pick > .inline-form { margin: 0; }
+/* Scrolled into view, a panel or its refusal keeps some air around it. */
+.inline-form, .inline-form .err { scroll-margin-block: var(--sp-3); }
 
 /* ---- The index ---- */
 .list { border-top: 2px solid var(--ink); }
@@ -272,5 +276,6 @@ main.auth { max-width: none; min-height: 100vh; min-height: 100dvh; display: gri
   .bulk .btn.quiet.ico { border-color: var(--soft); }
   .selecting .actions { display: none; }
   .bulk input[type="text"] { flex-basis: 100%; }
+  .inline-form, .inline-form .err { scroll-margin-top: calc(var(--sp-7) + var(--sp-5)); } /* clears the sticky top bar, about 65px tall */
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

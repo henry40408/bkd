@@ -256,7 +256,7 @@ func (e *Element) ChooseFile(path string) error {
 // Hover moves the pointer over the element, as a person reaching for its
 // hidden actions would.
 func (e *Element) Hover() error {
-	point, err := e.scrollToCentre()
+	point, err := e.point(centred)
 	if err != nil {
 		return err
 	}
@@ -278,16 +278,30 @@ type Placement struct {
 	OffsetY float64
 	// Modifiers is a bit field, for example chromedp.ModifierShift.
 	Modifiers chromedp.Modifier
+	// AsShown clicks the element where it is, for a step that is about where
+	// the page is scrolled. Otherwise the element is scrolled to the centre.
+	AsShown bool
 }
 
-// Click is a native click: the element is scrolled into view, then a real
-// mouse press and release go to the point the placement names. Whatever
-// covers that point receives them.
+// Where an element is scrolled to before the pointer goes to it, as a
+// scrollIntoView block.
+const (
+	centred = "center"
+	asShown = ""
+)
+
+// Click is a native click: the element is scrolled into view, unless the
+// placement keeps it where it is, then a real mouse press and release go to the
+// point the placement names. Whatever covers that point receives them.
 func (e *Element) Click(placement Placement) error {
 	if err := e.browser.WaitForLoad(); err != nil {
 		return err
 	}
-	point, err := e.scrollToCentre()
+	block := centred
+	if placement.AsShown {
+		block = asShown
+	}
+	point, err := e.point(block)
 	if err != nil {
 		return err
 	}
@@ -298,15 +312,17 @@ func (e *Element) Click(placement Placement) error {
 	)
 }
 
-func (e *Element) scrollToCentre() (clickPoint, error) {
-	point, err := Call[clickPoint](e, `function() {
+// point is the centre of the element, after scrolling it to block unless that
+// is asShown.
+func (e *Element) point(block string) (clickPoint, error) {
+	point, err := Call[clickPoint](e, `function(block) {
 		if (!this.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
 			return { visible: false, x: 0, y: 0 };
 		}
-		this.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+		if (block) this.scrollIntoView({ block, inline: 'nearest', behavior: 'instant' });
 		const r = this.getBoundingClientRect();
 		return { visible: true, x: r.left + r.width / 2, y: r.top + r.height / 2 };
-	}`)
+	}`, block)
 	if err != nil {
 		return clickPoint{}, err
 	}

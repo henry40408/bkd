@@ -8,7 +8,8 @@
   let inFlight = null;
   // The link check or page read that is running, if any: { stream, controller, done, ... }.
   let checkRun = null;
-  // The inline form that is open, if any: { node, opener }.
+  // The inline form that is open, if any: { node, opener, restore }. `restore` puts the
+  // page back where it was when a row or the pick opened it; the bulk question has none.
   let inlinePanel = null;
 
   const sameOrigin = (url) => url.origin === location.origin;
@@ -94,12 +95,99 @@
     run.controller.abort();
   }
 
+  // ---- The reader's place ----
+
+  // The rows that begin on screen, below the sticky top bar of a narrow screen. The
+  // ticked ones come first: they are what the reader is working on.
+  function rowsInView() {
+    const topEdge = document.querySelector(".topbar")?.getBoundingClientRect().bottom || 0;
+    const shown = Array.from(document.querySelectorAll(".item")).filter((row) => {
+      const { top } = row.getBoundingClientRect();
+      return top >= topEdge && top < window.innerHeight;
+    });
+    return [...shown.filter((row) => row.querySelector(".pick-box input:checked")), ...shown];
+  }
+
+  // Swaps and panels move the content about. Answers a function that puts the first of
+  // `rows` that is still in the page back where it is on screen now. With none left, or at
+  // the top of the page, the scroll position is put back instead.
+  function holdPlace(rows = rowsInView()) {
+    const scrolled = window.scrollY;
+    const marks = rows.filter((row) => row?.id).map((row) => ({ id: row.id, top: row.getBoundingClientRect().top }));
+    return () => {
+      const mark = scrolled > 0 && marks.find(({ id }) => document.getElementById(id));
+      const by = mark
+        ? document.getElementById(mark.id).getBoundingClientRect().top - mark.top
+        : scrolled - window.scrollY;
+      // Scrolling by nothing would still stop a swipe that is under way.
+      if (Math.abs(by) >= 1) window.scrollBy(0, by);
+    };
+  }
+
+  // Makes a change to the page without moving what the reader is looking at.
+  function keepingPlace(change) {
+    const restore = holdPlace();
+    change();
+    restore();
+  }
+
+  // ---- The reader's place in the history ----
+
+  // The browser would scroll on back and forward before the page is fetched, cut short by
+  // whatever page is still on screen. So the script scrolls instead, also when an entry is
+  // loaded afresh (a reload, or two steps back past another page): each entry gets a name,
+  // and the script remembers where the reader was when leaving it.
+  const PLACES_KEY = "bkd-places";
+
+  // Kept over a reload. Without storage, only what is left from now on is remembered.
+  function storedPlaces() {
+    try {
+      return new Map(JSON.parse(sessionStorage.getItem(PLACES_KEY)));
+    } catch {
+      return new Map();
+    }
+  }
+
+  const places = storedPlaces();
+
+  // The name of the current history entry, which gets one if it has none.
+  function currentEntry() {
+    if (!window.history.state?.entry) {
+      window.history.replaceState({ entry: Math.random().toString(36).slice(2) }, "");
+    }
+    return window.history.state.entry;
+  }
+
+  window.history.scrollRestoration = "manual";
+  // The entry whose page is on screen: while back or forward is loading, not the current one.
+  let shownEntry = currentEntry();
+
+  const rememberPlace = () => places.set(shownEntry, window.scrollY);
+  const scrollToPlace = () => window.scrollTo(0, places.get(shownEntry) ?? 0);
+
+  function savePlaces() {
+    rememberPlace();
+    try {
+      sessionStorage.setItem(PLACES_KEY, JSON.stringify([...places]));
+    } catch {
+      // No storage, or no room in it: a reload starts at the top.
+    }
+  }
+
+  // A phone may drop a hidden page without another event.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") savePlaces();
+  });
+  window.addEventListener("pagehide", savePlaces);
+
   // `history`: "push" for a new page, "replace" for the same page made longer (the scroll
   // position and the focus stay), "none" for back/forward.
   // Answers whether the page was swapped in (false when a newer load took over).
   // `keepInline(doc)` gets an answer that is not a redirect and answers true when it
   // showed that answer itself, so the page is not swapped.
-  async function load(url, init, history, keepInline) {
+  // `hold()` is called just before the swap; what it answers puts the reader's place back.
+  // Without it a new page starts at the top.
+  async function load(url, init, history, { keepInline, hold } = {}) {
     abortCheck();
     if (inFlight) inFlight.abort();
     const controller = new AbortController();
@@ -112,14 +200,20 @@
     inFlight = null;
     if (keepInline && !response.redirected && keepInline(doc)) return true;
     const finalUrl = new URL(response.url);
-    if (history === "replace") window.history.replaceState(null, "", finalUrl);
+    if (history === "replace") window.history.replaceState(window.history.state, "", finalUrl);
     if (history === "push") {
       // A POST answered without a redirect has no address of its own to come back to.
       const isNewAddress = !init || init.method !== "POST" || response.redirected;
-      if (isNewAddress) window.history.pushState(null, "", finalUrl);
+      if (isNewAddress) {
+        rememberPlace();
+        window.history.pushState(null, "", finalUrl);
+      }
     }
+    const restore = hold?.();
     swapIn(doc, history !== "replace");
+    shownEntry = currentEntry();
     if (history === "push") window.scrollTo(0, 0);
+    restore?.();
     return true;
   }
 
@@ -232,8 +326,8 @@
     if (!row || !LINK_LABELS[link.status]) return;
     const note = linkNote(link);
     const old = row.querySelector(".link-note");
-    if (old) return old.replaceWith(note);
-    row.querySelector(".body").append(note);
+    // Not every browser anchors the scroll position when a row above the reader grows.
+    keepingPlace(() => (old ? old.replaceWith(note) : row.querySelector(".body").append(note)));
   }
 
   function showCheckProgress(form, { label, total }, onStop) {
@@ -371,9 +465,10 @@
     notice.className = "notice";
     notice.setAttribute("role", "status");
     notice.textContent = text;
-    const old = main.querySelector(".notice");
-    if (old) old.remove();
-    main.prepend(notice);
+    keepingPlace(() => {
+      main.querySelector(".notice")?.remove();
+      main.prepend(notice);
+    });
   }
 
   function tickAgain(ids) {
@@ -387,7 +482,7 @@
   // Shows the server's own state of the page once the check ends, however it ended.
   async function showCheckEnd(ids, message) {
     const swapped = await enhance(
-      () => load(location.href, undefined, "none"),
+      () => load(location.href, undefined, "none", { hold: holdPlace }),
       () => location.reload(),
     );
     if (!swapped) return;
@@ -434,17 +529,24 @@
 
   function closeInlinePanel({ refocus }) {
     if (!inlinePanel) return;
-    const { node, opener } = inlinePanel;
+    const { node, opener, restore } = inlinePanel;
     inlinePanel = null;
     const host = node.closest(PANEL_HOST);
     if (host) host.classList.remove("editing", "confirming");
     node.remove();
-    if (refocus && opener.isConnected) opener.focus();
+    if (!refocus) return;
+    if (opener.isConnected) opener.focus({ preventScroll: true });
+    restore?.();
   }
 
+  // On a touch screen a focused field brings up the keyboard, which moves the page, so
+  // there the panel takes the focus instead of a field.
   function focusPanel(node) {
-    const target = node.querySelector("[autofocus]") || node.querySelector("input, textarea, button");
-    if (target) target.focus();
+    let target = node.querySelector("[autofocus]") || node.querySelector("input, textarea, button");
+    if (matchMedia("(pointer: coarse)").matches && isTextEntry(target)) target = node;
+    target?.focus({ preventScroll: true });
+    // Scrolls only as far as it takes to show the panel.
+    node.scrollIntoView({ block: "nearest" });
   }
 
   // The panel that holds the form of a full page: its heading, summary and form.
@@ -454,6 +556,7 @@
     if (!form) return null;
     const node = document.createElement("div");
     node.className = "inline-form";
+    node.tabIndex = -1;
     const title = document.createElement("p");
     title.className = "inline-title";
     title.textContent = doc.querySelector("main h1").textContent;
@@ -464,11 +567,12 @@
     return node;
   }
 
-  function showPanel(node, opener, place) {
+  function showPanel(panel, attach) {
     closeInlinePanel({ refocus: false });
-    place(node);
-    inlinePanel = { node, opener };
-    focusPanel(node);
+    attach(panel.node);
+    panel.restore?.();
+    inlinePanel = panel;
+    focusPanel(panel.node);
   }
 
   // Counts the row panels asked for, so only the newest answer is shown.
@@ -488,7 +592,11 @@
     const state = url.pathname.endsWith("/edit") ? "editing" : "confirming";
     // The row already says what is edited, and the question already names what is deleted.
     node.querySelector(state === "editing" ? ".inline-title" : ".summary").remove();
-    showPanel(node, link, (panel) => {
+    // The row stays where it is; once it is deleted, the one before it does, so the next
+    // row moves into its place. The pick is no row: it only keeps the scroll position.
+    const row = link.closest(".item");
+    const restore = holdPlace(row ? [row, row.previousElementSibling, ...rowsInView()] : []);
+    showPanel({ node, opener: link, restore }, (panel) => {
       host.classList.add(state);
       host.append(panel);
     });
@@ -501,23 +609,22 @@
       const node = panelFrom(doc);
       if (!node) return false;
       panel.replaceWith(node);
-      inlinePanel = { node, opener: inlinePanel ? inlinePanel.opener : node };
+      inlinePanel = inlinePanel ? { ...inlinePanel, node } : { node, opener: node };
       focusPanel(node);
+      node.querySelector(".err")?.scrollIntoView({ block: "nearest" });
       return true;
     };
   }
 
   function submitInline({ form, url, data }) {
     const panel = form.closest(".inline-form");
-    const scrolled = window.scrollY;
-    // The row the user worked on is likely far down the list, so the page stays where it is.
-    const loadKeepingScroll = async () => {
-      const swapped = await load(url, { method: "POST", body: new URLSearchParams(data) }, "push", keepRefusalInPanel(panel));
-      if (swapped) window.scrollTo(0, scrolled);
-      return swapped;
-    };
+    // The row the user worked on is likely far down the list, so the page stays where it
+    // was. The bulk question's bar sticks while the reader scrolls on, so it has no place
+    // of its own to go back to.
+    const opened = inlinePanel?.restore;
+    const options = { keepInline: keepRefusalInPanel(panel), hold: () => opened || holdPlace() };
     return enhance(
-      loadKeepingScroll,
+      () => load(url, { method: "POST", body: new URLSearchParams(data) }, "push", options),
       (error) => (error instanceof TypeError ? HTMLFormElement.prototype.submit.call(form) : location.reload()),
     );
   }
@@ -529,11 +636,12 @@
     const showQuestion = (doc) => {
       const node = panelFrom(doc);
       if (!node) return false;
-      showPanel(node, submitter, (panel) => form.querySelector(".bulk").append(panel));
+      showPanel({ node, opener: submitter }, (panel) => form.querySelector(".bulk").append(panel));
       return true;
     };
+    const options = { keepInline: showQuestion, hold: holdPlace };
     return enhance(
-      () => load(url, { method: "POST", body: new URLSearchParams(data) }, "push", showQuestion),
+      () => load(url, { method: "POST", body: new URLSearchParams(data) }, "push", options),
       () => submitNatively(form, submitter),
     );
   }
@@ -582,8 +690,10 @@
 
   function postForm({ form, submitter, url, data }) {
     const body = form.enctype === "multipart/form-data" ? data : new URLSearchParams(data);
+    // A bulk action leaves the reader on the same list.
+    const hold = form.classList.contains("bulk-form") ? holdPlace : undefined;
     return enhance(
-      () => load(url, { method: "POST", body }, "push"),
+      () => load(url, { method: "POST", body }, "push", { hold }),
       (error) => (error instanceof TypeError ? submitNatively(form, submitter) : location.reload()),
     );
   }
@@ -908,6 +1018,27 @@
     );
   });
 
+  const SELECTION_PARAMS = ["select", "all"];
+
+  // The parameters that say which bookmarks the list holds.
+  function listQuery(url) {
+    const kept = new URLSearchParams();
+    for (const [name, value] of url.searchParams) {
+      // The server's own links trim the search text.
+      const text = name === "q" ? value.trim() : value;
+      if (text !== "" && name !== "notice" && !SELECTION_PARAMS.includes(name)) kept.append(name, text);
+    }
+    kept.sort();
+    return kept.toString();
+  }
+
+  // Select, Done, Select all and Clear selection show the list the reader is already on.
+  function changesOnlySelection(to) {
+    const from = new URL(location.href);
+    if (from.pathname !== "/" || to.pathname !== "/" || listQuery(from) !== listQuery(to)) return false;
+    return SELECTION_PARAMS.some((name) => from.searchParams.has(name) !== to.searchParams.has(name));
+  }
+
   document.addEventListener("click", (event) => {
     if (wantsBrowserDefault(event)) return;
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
@@ -915,8 +1046,10 @@
     const url = new URL(link.href);
     if (!isPagePath(url)) return;
     event.preventDefault();
+    // Outside `main`, a link to the same list ("All bookmarks") asks for its top.
+    const hold = link.closest("main") && changesOnlySelection(url) ? holdPlace : undefined;
     enhance(
-      () => load(url, undefined, "push"),
+      () => load(url, undefined, "push", { hold }),
       () => location.assign(url),
     );
   });
@@ -928,7 +1061,7 @@
     return postForm({ form, submitter, url, data });
   }
 
-  document.addEventListener("submit", (event) => {
+  function takeSubmit(event) {
     if (event.defaultPrevented) return;
     const form = event.target;
     const submitter = event.submitter;
@@ -958,7 +1091,11 @@
     const ids = STREAMS.has(data.get("action")) ? tickedIds(data) : [];
     setBusy(form, submitter, true);
     finished(form, submitter, ids, url, data).finally(() => setBusy(form, submitter, false));
-  });
+  }
+
+  // Heard on the way down: the bulk delete question is a form inside the bulk form, and
+  // the browser stops such a submit event at the outer form on its way up.
+  document.addEventListener("submit", takeSubmit, true);
 
   // Escape in a text field belongs to the field (clearing a search, closing suggestions);
   // leaving select mode from there would throw the ticks away.
@@ -1004,11 +1141,14 @@
     if (done) done.click();
   });
 
+  async function showHistoryEntry() {
+    if (await load(location.href, undefined, "none")) scrollToPlace();
+  }
+
   window.addEventListener("popstate", () => {
-    enhance(
-      () => load(location.href, undefined, "none"),
-      () => location.reload(),
-    );
+    // The page has not moved yet: this is where the reader leaves the page on screen.
+    rememberPlace();
+    enhance(showHistoryEntry, () => location.reload());
   });
 
   // ---- Copy buttons: a button with `data-copy-from` copies the value of the field whose id it names ----
@@ -1087,4 +1227,6 @@
   showScriptOnly(document);
   addSearchHint();
   updateSelectionCount();
+  // Only an entry that was left before has a place; a new one keeps the browser's (a fragment).
+  if (places.has(shownEntry)) scrollToPlace();
 })();
