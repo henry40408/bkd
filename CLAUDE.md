@@ -49,7 +49,7 @@ A change to what the site renders (`internal/views/`, `internal/assets/static/`)
 
 - Unit and integration tests sit beside the code. `internal/dbtest.Open` gives a throwaway migrated database; `internal/server/harness_test.go` builds the app with `httptest`.
 - There are no `testdata/` directories: every expected value is written in the test that uses it. Values captured from the last Rust server are never regenerated from Go output; change one only on purpose and say why in the commit message:
-  - `internal/db/migrate_test.go`: `rustMigrations` (sqlx's five `_sqlx_migrations` rows with their SHA-384 checksums), `rustSchema` (what the Rust migrations left in `sqlite_master`, byte for byte) and `rustRows` (the migration records with sqlx's `installed_on` and `execution_time`, plus some data). `createRustDatabase` builds a Rust-era database from them; the store must open it unchanged.
+  - `internal/db/migrate_test.go`: `rustSchema` (what the Rust migrations left in `sqlite_master`, byte for byte) and `rustRows` (the migration records with sqlx's `installed_on` and `execution_time`, plus some data). `createRustDatabase` builds a Rust-era database from them, which the store refuses; `createRelease05Database` adds what bkd 0.5 added, and the baseline must adopt that one unchanged and build the same schema on an empty file.
   - `internal/auth/password_test.go`: `rustPasswordVectors`, password hashes from the Rust server that must verify.
   - `internal/search/search_test.go`: `TestParseAgreesWithTheRustParser`, the search syntax cases from the Rust parser.
 - `cmd/bkd/main_test.go` builds the binary once in `TestMain` and `exec`s it. Read the listening address from the log line `listening on http://<addr>`.
@@ -95,8 +95,9 @@ Thin binary (`cmd/bkd`) over internal packages, so tests build the handler direc
 
 ### Storage and migrations
 
-- `internal/db/migrations/*.sql` are embedded and run by `migrate.go`, which writes sqlx's `_sqlx_migrations` table, descriptions and SHA-384 checksums exactly, so an existing Rust-era database opens as is.
-- **Never edit a released migration file** (the checksum is verified). Add a new numbered file. A database that already has a migration newer than the Rust binary knows makes the Rust binary refuse to start, so a rollback to Rust is only possible while no new migration has been applied.
+- `internal/db/migrations/<version>_<description>.sql` are embedded and run by `migrate.go`; `PRAGMA user_version` records the version reached. Read "Migrations" in `ARCHITECTURE.md` before changing either.
+- **Never edit a released migration file** (nothing detects it, and databases that ran it do not run it again). Add a new numbered file.
+- `0009_baseline.sql` is the whole schema of version 9. An older database, a Rust one included, must reach 9 with bkd 0.5 first. The baseline's `_sqlx_migrations` row `99999999999999` makes bkd 0.5 and the Rust server refuse the database; never remove it. Going back to either needs a backup.
 - Writers use `BEGIN IMMEDIATE` (`db.WithImmediateTx`) so concurrent writers wait on the busy timeout.
 
 ## Configuration (`cmd/bkd`)
